@@ -7,3 +7,6 @@ edition = "2024"
 anyhow.workspace = true
 gpui-component.workspace = true
 gpui.workspace = true
+clack-host = {git = "https://github.com/prokopyl/clack.git", package="clack-host" }
+dirs = "6.0.0"
+walkdir = "2.5.0"

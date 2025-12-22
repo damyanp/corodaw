@@ -5,6 +5,8 @@ use gpui_component::{
     *,
 };
 
+mod plugins;
+
 struct Module {
     name: String,
     main_volume: Entity<SliderState>,
@@ -74,6 +76,25 @@ impl Render for Corodaw {
 
 fn main() {
     let app = Application::new();
+
+    println!("Scanning for plugins...");
+    let plugins = plugins::find_plugins();
+    println!("Found {} plugins", plugins.len());
+    for plugin in &plugins {
+        let name = plugin
+            .descriptor
+            .name()
+            .map(|n| n.to_str().ok())
+            .flatten()
+            .unwrap_or("<no name>");
+        println!("Plugin: {name}");
+        for feature in plugin.descriptor.features() {
+            println!(
+                "  - Feature: {}",
+                feature.to_str().ok().unwrap_or("<bad feature>")
+            )
+        }
+    }
 
     app.run(move |cx| {
         // This must be called before using any GPUI Component features.
