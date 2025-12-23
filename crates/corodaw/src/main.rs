@@ -1,11 +1,12 @@
 use gpui::*;
 use gpui_component::{
     button::*,
+    select::{SearchableVec, Select, SelectItem, SelectState},
     slider::{Slider, SliderState},
     *,
 };
 
-use crate::plugins::get_plugins;
+use crate::plugins::{FoundPlugin, get_plugins};
 
 mod plugins;
 
@@ -37,14 +38,33 @@ impl Render for Module {
     }
 }
 
+impl SelectItem for FoundPlugin {
+    type Value = SharedString;
+
+    fn title(&self) -> SharedString {
+        self.name.clone()
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.id
+    }
+}
+
 pub struct Corodaw {
+    plugins: SearchableVec<FoundPlugin>,
+    plugins_select: Entity<SelectState<SearchableVec<FoundPlugin>>>,
     modules: Vec<Entity<Module>>,
     counter: u32,
 }
 
 impl Corodaw {
-    fn new(cx: &mut Context<Self>) -> Self {
+    fn new(plugins: Vec<FoundPlugin>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let plugins = SearchableVec::new(plugins);
+        let plugins_select = cx.new(|cx| SelectState::new(plugins.clone(), None, window, cx));
+
         Self {
+            plugins: plugins,
+            plugins_select: plugins_select,
             modules: vec![cx.new(|cx| Module::new(cx, "Master".to_owned()))],
             counter: 0,
         }
@@ -67,10 +87,17 @@ impl Render for Corodaw {
             .justify_start()
             .p_10()
             .child(
-                Button::new("ok")
-                    .primary()
-                    .label("Add Module")
-                    .on_click(cx.listener(Self::on_click)),
+                div()
+                    .h_flex()
+                    .gap_2()
+                    .w_full()
+                    .child(
+                        Button::new("ok")
+                            .primary()
+                            .label("Add Module")
+                            .on_click(cx.listener(Self::on_click)),
+                    )
+                    .child(Select::new(&self.plugins_select)),
             )
             .children(self.modules.iter().map(|m| div().w_full().child(m.clone())))
     }
@@ -92,7 +119,7 @@ fn main() {
 
         cx.spawn(async move |cx| {
             cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(Corodaw::new);
+                let view = cx.new(|cx| Corodaw::new(plugins, window, cx));
                 // This first level on the window, should be a Root.
                 cx.new(|cx| Root::new(view, window, cx))
             })?;

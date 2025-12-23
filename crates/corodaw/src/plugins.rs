@@ -1,4 +1,5 @@
 use clack_host::{plugin::PluginDescriptor, prelude::*};
+use gpui::SharedString;
 use serde::{Deserialize, Serialize};
 use std::{
     io::Write,
@@ -6,10 +7,10 @@ use std::{
 };
 use walkdir::{DirEntry, WalkDir};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct FoundPlugin {
-    pub id: String,
-    pub name: String,
+    pub id: SharedString,
+    pub name: SharedString,
     pub path: PathBuf,
 
     #[serde(skip)]
@@ -22,15 +23,21 @@ impl FoundPlugin {
         path: PathBuf,
         bundle: PluginBundle,
     ) -> Option<Self> {
-        let id = descriptor.id().and_then(|id| id.to_str().ok());
-        let name = descriptor.name().and_then(|name| name.to_str().ok());
+        let id = descriptor
+            .id()
+            .and_then(|id| id.to_str().ok())
+            .map(|id| SharedString::new(id));
+        let name = descriptor
+            .name()
+            .and_then(|name| name.to_str().ok())
+            .map(|name| SharedString::new(name));
 
         if let Some(id) = id
             && let Some(name) = name
         {
             Some(Self {
-                id: id.to_owned(),
-                name: name.to_owned(),
+                id: id,
+                name: name,
                 path,
                 _bundle: Some(bundle),
             })
