@@ -26,18 +26,18 @@ impl FoundPlugin {
         let id = descriptor
             .id()
             .and_then(|id| id.to_str().ok())
-            .map(|id| SharedString::new(id));
+            .map(SharedString::new);
         let name = descriptor
             .name()
             .and_then(|name| name.to_str().ok())
-            .map(|name| SharedString::new(name));
+            .map(SharedString::new);
 
         if let Some(id) = id
             && let Some(name) = name
         {
             Some(Self {
-                id: id,
-                name: name,
+                id,
+                name,
                 path,
                 _bundle: Some(bundle),
             })

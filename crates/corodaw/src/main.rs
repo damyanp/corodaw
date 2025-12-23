@@ -39,41 +39,45 @@ impl Render for Module {
 }
 
 impl SelectItem for FoundPlugin {
-    type Value = SharedString;
+    type Value = Self;
 
     fn title(&self) -> SharedString {
         self.name.clone()
     }
 
     fn value(&self) -> &Self::Value {
-        &self.id
+        self
     }
 }
 
 pub struct Corodaw {
-    plugins: SearchableVec<FoundPlugin>,
-    plugins_select: Entity<SelectState<SearchableVec<FoundPlugin>>>,
+    plugins: Entity<SelectState<SearchableVec<FoundPlugin>>>,
     modules: Vec<Entity<Module>>,
     counter: u32,
 }
 
 impl Corodaw {
     fn new(plugins: Vec<FoundPlugin>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let plugins = SearchableVec::new(plugins);
-        let plugins_select = cx.new(|cx| SelectState::new(plugins.clone(), None, window, cx));
+        let plugins = cx.new(|cx| SelectState::new(SearchableVec::new(plugins), None, window, cx));
 
         Self {
-            plugins: plugins,
-            plugins_select: plugins_select,
+            plugins,
             modules: vec![cx.new(|cx| Module::new(cx, "Master".to_owned()))],
             counter: 0,
         }
     }
 
     fn on_click(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let plugin = self
+            .plugins
+            .read(cx)
+            .selected_value()
+            .expect("The Add button should only be enabled if a plugin is selected");
+        let name = plugin.name.clone();
+
         self.counter += 1;
         self.modules
-            .push(cx.new(|cx| Module::new(cx, format!("Module {}", self.counter))));
+            .push(cx.new(|cx| Module::new(cx, format!("Module {}: {}", self.counter, name))));
     }
 }
 
@@ -95,9 +99,13 @@ impl Render for Corodaw {
                         Button::new("ok")
                             .primary()
                             .label("Add Module")
-                            .on_click(cx.listener(Self::on_click)),
+                            .on_click(cx.listener(Self::on_click))
+                            .disabled(
+                                self.plugins
+                                    .read_with(cx, |p, _| p.selected_value().is_none()),
+                            ),
                     )
-                    .child(Select::new(&self.plugins_select)),
+                    .child(Select::new(&self.plugins)),
             )
             .children(self.modules.iter().map(|m| div().w_full().child(m.clone())))
     }
