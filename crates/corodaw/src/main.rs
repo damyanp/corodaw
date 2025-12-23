@@ -1,9 +1,13 @@
+use std::io::Write;
+
 use gpui::*;
 use gpui_component::{
     button::*,
     slider::{Slider, SliderState},
     *,
 };
+
+use crate::plugins::FoundPlugin;
 
 mod plugins;
 
@@ -77,23 +81,11 @@ impl Render for Corodaw {
 fn main() {
     let app = Application::new();
 
-    println!("Scanning for plugins...");
-    let plugins = plugins::find_plugins();
+    let plugins = get_plugins();
+
     println!("Found {} plugins", plugins.len());
     for plugin in &plugins {
-        let name = plugin
-            .descriptor
-            .name()
-            .map(|n| n.to_str().ok())
-            .flatten()
-            .unwrap_or("<no name>");
-        println!("Plugin: {name}");
-        for feature in plugin.descriptor.features() {
-            println!(
-                "  - Feature: {}",
-                feature.to_str().ok().unwrap_or("<bad feature>")
-            )
-        }
+        println!("{}: {} ({})", plugin.id, plugin.name, plugin.path.display());
     }
 
     app.run(move |cx| {
@@ -111,4 +103,38 @@ fn main() {
         })
         .detach();
     });
+}
+
+fn get_plugins() -> Vec<FoundPlugin> {
+    // First try loading from cache.
+    match std::fs::read_to_string(".plugins.json") {
+        Ok(contents) => match serde_json::from_str::<Vec<FoundPlugin>>(&contents) {
+            Ok(plugins) => {
+                println!("Loaded {} plugins from .plugins.json", plugins.len());
+                return plugins;
+            }
+            Err(err) => {
+                println!("Failed to parse .plugins.json ({err}); falling back to scanning...");
+            }
+        },
+        Err(err) => {
+            println!("No .plugins.json cache found ({err}); scanning for plugins...");
+        }
+    }
+
+    // Fallback: scan and then write cache.
+    println!("Scanning for plugins...");
+    let plugins = plugins::find_plugins();
+
+    let plugins_json = serde_json::to_string_pretty(&plugins)
+        .unwrap_or_else(|e| format!("{{\"error\":\"failed to serialize plugins: {e}\"}}"));
+
+    // Write JSON to ".plugins.json" next to the current working directory.
+    let mut f = std::fs::File::create(".plugins.json").expect("create .plugins.json");
+    f.write_all(plugins_json.as_bytes())
+        .and_then(|_| f.write_all(b"\n"))
+        .expect("write .plugins.json");
+
+    println!("Wrote .plugins.json");
+    plugins
 }

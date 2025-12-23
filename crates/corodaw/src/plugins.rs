@@ -1,21 +1,50 @@
-use std::path::PathBuf;
-
 use clack_host::{plugin::PluginDescriptor, prelude::*};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use walkdir::{DirEntry, WalkDir};
 
+#[derive(Serialize, Deserialize)]
 pub struct FoundPlugin {
-    pub descriptor: PluginDescriptor,
-    pub bundle: PluginBundle,
+    pub id: String,
+    pub name: String,
+    pub path: PathBuf,
+
+    #[serde(skip)]
+    _bundle: Option<PluginBundle>,
+}
+
+impl FoundPlugin {
+    fn try_from_descriptor(
+        descriptor: &PluginDescriptor,
+        path: PathBuf,
+        bundle: PluginBundle,
+    ) -> Option<Self> {
+        let id = descriptor.id().and_then(|id| id.to_str().ok());
+        let name = descriptor.name().and_then(|name| name.to_str().ok());
+
+        if let Some(id) = id
+            && let Some(name) = name
+        {
+            Some(Self {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                path,
+                _bundle: Some(bundle),
+            })
+        } else {
+            None
+        }
+    }
 }
 
 pub fn find_plugins() -> Vec<FoundPlugin> {
     find_bundles()
         .iter()
-        .flat_map(get_plugins_in_bundle)
+        .flat_map(|(p, b)| get_plugins_in_bundle(p, b))
         .collect()
 }
 
-fn find_bundles() -> Vec<PluginBundle> {
+fn find_bundles() -> Vec<(PathBuf, PluginBundle)> {
     standard_clap_paths()
         .iter()
         .flat_map(|path| {
@@ -25,21 +54,22 @@ fn find_bundles() -> Vec<PluginBundle> {
                 .filter_map(|e| e.ok())
                 .filter(is_clap_bundle)
                 .filter_map(|bundle_dir_entry| {
-                    unsafe { PluginBundle::load(bundle_dir_entry.path()) }.ok()
+                    unsafe { PluginBundle::load(bundle_dir_entry.path()) }
+                        .ok()
+                        .map(|bundle| (bundle_dir_entry.into_path(), bundle))
                 })
         })
         .collect()
 }
 
-fn get_plugins_in_bundle(bundle: &PluginBundle) -> Vec<FoundPlugin> {
+fn get_plugins_in_bundle(path: &PathBuf, bundle: &PluginBundle) -> Vec<FoundPlugin> {
     bundle
         .get_plugin_factory()
         .map(|factory| {
             factory
                 .plugin_descriptors()
-                .map(|descriptor| FoundPlugin {
-                    descriptor: descriptor.clone(),
-                    bundle: bundle.clone(),
+                .filter_map(|descriptor| {
+                    FoundPlugin::try_from_descriptor(descriptor, path.clone(), bundle.clone())
                 })
                 .collect()
         })
