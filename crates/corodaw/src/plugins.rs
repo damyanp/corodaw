@@ -2,8 +2,10 @@ use clack_host::{plugin::PluginDescriptor, prelude::*};
 use gpui::SharedString;
 use serde::{Deserialize, Serialize};
 use std::{
+    cell::RefCell,
     io::Write,
     path::{Path, PathBuf},
+    rc::Rc,
 };
 use walkdir::{DirEntry, WalkDir};
 
@@ -45,17 +47,30 @@ impl FoundPlugin {
             None
         }
     }
+
+    pub fn load_bundle(&mut self) -> PluginBundle {
+        if let Some(bundle) = &self._bundle {
+            bundle.clone()
+        } else {
+            println!("Loading bundle from {}", self.path.display());
+            let bundle = unsafe { PluginBundle::load(&self.path) }
+                .expect("Currently no error handling around loading bundles!");
+            self._bundle = Some(bundle.clone());
+            bundle
+        }
+    }
 }
 
-pub fn get_plugins() -> Vec<FoundPlugin> {
-    if let Some(value) = load_plugin_cache() {
-        return value;
-    }
-
-    let plugins = find_plugins();
-
-    save_plugin_cache(&plugins);
-    plugins
+pub fn get_plugins() -> Vec<RefCell<FoundPlugin>> {
+    load_plugin_cache()
+        .unwrap_or_else(|| {
+            let plugins = find_plugins();
+            save_plugin_cache(&plugins);
+            plugins
+        })
+        .into_iter()
+        .map(RefCell::new)
+        .collect()
 }
 
 fn save_plugin_cache(plugins: &Vec<FoundPlugin>) {

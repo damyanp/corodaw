@@ -1170,6 +1170,8 @@ dependencies = [
  "anyhow",
  "clack-host",
  "dirs 6.0.0",
+ "futures",
+ "futures-channel",
  "gpui",
  "gpui-component",
  "serde",

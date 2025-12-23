@@ -1,3 +1,6 @@
+#![allow(unused)]
+use std::{cell::RefCell, rc::Rc, sync::Arc};
+
 use gpui::*;
 use gpui_component::{
     button::*,
@@ -6,20 +9,33 @@ use gpui_component::{
     *,
 };
 
-use crate::plugins::{FoundPlugin, get_plugins};
+use crate::{
+    plugins::{FoundPlugin, get_plugins},
+    project::PluginInstance,
+};
 
 mod plugins;
+mod project;
 
 struct Module {
     name: String,
+    plugin: Rc<RefCell<PluginInstance>>,
     main_volume: Entity<SliderState>,
 }
 
 impl Module {
-    pub fn new(cx: &mut Context<Self>, name: String) -> Self {
+    pub fn new(name: String, mut plugin: RefCell<FoundPlugin>, cx: &mut App) -> Self {
         let main_volume = cx.new(|_| SliderState::new().min(0.0).max(1.0));
 
-        Self { name, main_volume }
+        let plugin = RefCell::get_mut(&mut plugin);
+
+        let plugin = PluginInstance::new(plugin, cx);
+
+        Self {
+            name,
+            plugin,
+            main_volume,
+        }
     }
 }
 
@@ -38,46 +54,73 @@ impl Render for Module {
     }
 }
 
-impl SelectItem for FoundPlugin {
-    type Value = Self;
+#[derive(Clone)]
+struct SelectablePlugin(RefCell<FoundPlugin>);
+
+impl SelectablePlugin {
+    fn new(p: &RefCell<FoundPlugin>) -> Self {
+        SelectablePlugin(p.clone())
+    }
+}
+
+impl SelectItem for SelectablePlugin {
+    type Value = RefCell<FoundPlugin>;
 
     fn title(&self) -> SharedString {
-        self.name.clone()
+        self.0.borrow().name.clone()
     }
 
     fn value(&self) -> &Self::Value {
-        self
+        &self.0
     }
 }
 
 pub struct Corodaw {
-    plugins: Entity<SelectState<SearchableVec<FoundPlugin>>>,
+    plugins: Vec<RefCell<FoundPlugin>>,
+    plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
     modules: Vec<Entity<Module>>,
     counter: u32,
 }
 
 impl Corodaw {
-    fn new(plugins: Vec<FoundPlugin>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let plugins = cx.new(|cx| SelectState::new(SearchableVec::new(plugins), None, window, cx));
+    fn new(
+        plugins: Vec<RefCell<FoundPlugin>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let searchable_plugins = SearchableVec::new(
+            plugins
+                .iter()
+                .map(SelectablePlugin::new)
+                .collect::<Vec<_>>(),
+        );
+
+        let plugin_selector = cx.new(|cx| SelectState::new(searchable_plugins, None, window, cx));
 
         Self {
             plugins,
-            modules: vec![cx.new(|cx| Module::new(cx, "Master".to_owned()))],
+            plugin_selector,
+            modules: Vec::default(), //vec![cx.new(|cx| Module::new(cx, "Master".to_owned()))],
             counter: 0,
         }
     }
 
     fn on_click(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let plugin = self
-            .plugins
+            .plugin_selector
             .read(cx)
             .selected_value()
-            .expect("The Add button should only be enabled if a plugin is selected");
-        let name = plugin.name.clone();
+            .expect("The Add button should only be enabled if a plugin is selected")
+            .clone();
 
+        let module = cx.new(|cx| {
+            let name = format!("Module {}: {}", self.counter, plugin.borrow().name);
+
+            Module::new(name, plugin, cx)
+        });
+
+        self.modules.push(module);
         self.counter += 1;
-        self.modules
-            .push(cx.new(|cx| Module::new(cx, format!("Module {}: {}", self.counter, name))));
     }
 }
 
@@ -100,12 +143,9 @@ impl Render for Corodaw {
                             .primary()
                             .label("Add Module")
                             .on_click(cx.listener(Self::on_click))
-                            .disabled(
-                                self.plugins
-                                    .read_with(cx, |p, _| p.selected_value().is_none()),
-                            ),
+                            .disabled(self.plugin_selector.read(cx).selected_value().is_none()),
                     )
-                    .child(Select::new(&self.plugins)),
+                    .child(Select::new(&self.plugin_selector)),
             )
             .children(self.modules.iter().map(|m| div().w_full().child(m.clone())))
     }
@@ -118,6 +158,7 @@ fn main() {
 
     println!("Found {} plugins", plugins.len());
     for plugin in &plugins {
+        let plugin = plugin.borrow();
         println!("{}: {} ({})", plugin.id, plugin.name, plugin.path.display());
     }
 
@@ -136,4 +177,6 @@ fn main() {
         })
         .detach();
     });
+
+    println!("[main] exit");
 }

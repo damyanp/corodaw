@@ -12,3 +12,5 @@ dirs = "6.0.0"
 walkdir = "2.5.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
+futures-channel = "0.3.31"
+futures = "0.3.31"
