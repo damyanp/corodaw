@@ -1,6 +1,9 @@
 use clack_host::{plugin::PluginDescriptor, prelude::*};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+};
 use walkdir::{DirEntry, WalkDir};
 
 #[derive(Serialize, Deserialize)]
@@ -37,6 +40,48 @@ impl FoundPlugin {
     }
 }
 
+pub fn get_plugins() -> Vec<FoundPlugin> {
+    if let Some(value) = load_plugin_cache() {
+        return value;
+    }
+
+    let plugins = find_plugins();
+
+    save_plugin_cache(&plugins);
+    plugins
+}
+
+fn save_plugin_cache(plugins: &Vec<FoundPlugin>) {
+    let plugins_json = serde_json::to_string_pretty(plugins)
+        .unwrap_or_else(|e| format!("{{\"error\":\"failed to serialize plugins: {e}\"}}"));
+
+    // Write JSON to ".plugins.json" next to the current working directory.
+    let mut f = std::fs::File::create(".plugins.json").expect("create .plugins.json");
+    f.write_all(plugins_json.as_bytes())
+        .and_then(|_| f.write_all(b"\n"))
+        .expect("write .plugins.json");
+
+    println!("Wrote .plugins.json");
+}
+
+fn load_plugin_cache() -> Option<Vec<FoundPlugin>> {
+    match std::fs::read_to_string(".plugins.json") {
+        Ok(contents) => match serde_json::from_str::<Vec<FoundPlugin>>(&contents) {
+            Ok(plugins) => {
+                println!("Loaded {} plugins from .plugins.json", plugins.len());
+                return Some(plugins);
+            }
+            Err(err) => {
+                println!("Failed to parse .plugins.json ({err})");
+            }
+        },
+        Err(err) => {
+            println!("No .plugins.json cache found ({err})");
+        }
+    }
+    None
+}
+
 pub fn find_plugins() -> Vec<FoundPlugin> {
     find_bundles()
         .iter()
@@ -62,18 +107,18 @@ fn find_bundles() -> Vec<(PathBuf, PluginBundle)> {
         .collect()
 }
 
-fn get_plugins_in_bundle(path: &PathBuf, bundle: &PluginBundle) -> Vec<FoundPlugin> {
+fn get_plugins_in_bundle(path: &Path, bundle: &PluginBundle) -> Vec<FoundPlugin> {
     bundle
         .get_plugin_factory()
         .map(|factory| {
             factory
                 .plugin_descriptors()
                 .filter_map(|descriptor| {
-                    FoundPlugin::try_from_descriptor(descriptor, path.clone(), bundle.clone())
+                    FoundPlugin::try_from_descriptor(descriptor, path.to_path_buf(), bundle.clone())
                 })
                 .collect()
         })
-        .unwrap_or(Vec::new())
+        .unwrap_or_default()
 }
 
 /// Returns a list of all the standard CLAP search paths, per the CLAP specification.

@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use gpui::*;
 use gpui_component::{
     button::*,
@@ -7,7 +5,7 @@ use gpui_component::{
     *,
 };
 
-use crate::plugins::FoundPlugin;
+use crate::plugins::get_plugins;
 
 mod plugins;
 
@@ -94,7 +92,7 @@ fn main() {
 
         cx.spawn(async move |cx| {
             cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|cx| Corodaw::new(cx));
+                let view = cx.new(Corodaw::new);
                 // This first level on the window, should be a Root.
                 cx.new(|cx| Root::new(view, window, cx))
             })?;
@@ -103,38 +101,4 @@ fn main() {
         })
         .detach();
     });
-}
-
-fn get_plugins() -> Vec<FoundPlugin> {
-    // First try loading from cache.
-    match std::fs::read_to_string(".plugins.json") {
-        Ok(contents) => match serde_json::from_str::<Vec<FoundPlugin>>(&contents) {
-            Ok(plugins) => {
-                println!("Loaded {} plugins from .plugins.json", plugins.len());
-                return plugins;
-            }
-            Err(err) => {
-                println!("Failed to parse .plugins.json ({err}); falling back to scanning...");
-            }
-        },
-        Err(err) => {
-            println!("No .plugins.json cache found ({err}); scanning for plugins...");
-        }
-    }
-
-    // Fallback: scan and then write cache.
-    println!("Scanning for plugins...");
-    let plugins = plugins::find_plugins();
-
-    let plugins_json = serde_json::to_string_pretty(&plugins)
-        .unwrap_or_else(|e| format!("{{\"error\":\"failed to serialize plugins: {e}\"}}"));
-
-    // Write JSON to ".plugins.json" next to the current working directory.
-    let mut f = std::fs::File::create(".plugins.json").expect("create .plugins.json");
-    f.write_all(plugins_json.as_bytes())
-        .and_then(|_| f.write_all(b"\n"))
-        .expect("write .plugins.json");
-
-    println!("Wrote .plugins.json");
-    plugins
 }
