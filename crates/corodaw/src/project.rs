@@ -5,13 +5,13 @@ use clack_extensions::{
 };
 use clack_host::{
     host::{self, HostHandlers, HostInfo},
-    plugin::{InitializedPluginHandle, PluginMainThreadHandle},
+    plugin::{InitializedPluginHandle, PluginInstance, PluginMainThreadHandle},
 };
 use futures::{SinkExt, StreamExt};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui::{
-    AnyWindowHandle, App, AppContext, AsyncApp, Render, SharedString, Size, Window, WindowBounds,
-    WindowOptions, div,
+    AnyWindowHandle, App, AppContext, AsyncApp, Context, IntoElement, Pixels, Render, SharedString,
+    Size, Window, WindowBounds, WindowOptions, div,
 };
 use raw_window_handle::RawWindowHandle;
 use std::{
@@ -23,21 +23,13 @@ use std::{
 
 use crate::plugins::FoundPlugin;
 
-struct Project {
-    channels: Vec<Channel>,
-}
-
-struct Channel {
-    generator: PluginInstance,
-}
-
-pub struct PluginInstance {
-    plugin: clack_host::plugin::PluginInstance<Self>,
+pub struct ClapPlugin {
+    plugin: Rc<RefCell<PluginInstance<Self>>>,
     window_handle: Option<AnyWindowHandle>,
 }
 
-impl PluginInstance {
-    pub fn new(plugin: &mut FoundPlugin, app: &App) -> Rc<RefCell<Self>> {
+impl ClapPlugin {
+    pub fn new(plugin: &mut FoundPlugin, app: &App) -> Self {
         let (sender, mut receiver) = unbounded();
 
         let bundle = plugin.load_bundle();
@@ -61,36 +53,35 @@ impl PluginInstance {
         )
         .unwrap();
 
-        let p = Rc::new(RefCell::new(Self {
-            plugin,
+        let clap_plugin = Self {
+            plugin: Rc::new(RefCell::new(plugin)),
             window_handle: None,
-        }));
+        };
 
-        let weak_p = Rc::downgrade(&p);
-
+        let weak_plugin = Rc::downgrade(&clap_plugin.plugin);
         app.spawn(async move |app| {
             println!("[{}] spawn message receiver", id);
-            PluginInstance::handle_messages(weak_p, receiver, app.clone()).await;
+            ClapPlugin::handle_messages(weak_plugin, receiver, app.clone()).await;
             println!("[{}] end message receiver", id);
         })
         .detach();
 
-        p
+        clap_plugin
     }
 
     async fn handle_messages(
-        mut this: Weak<RefCell<PluginInstance>>,
+        mut plugin: Weak<RefCell<PluginInstance<ClapPlugin>>>,
         mut receiver: UnboundedReceiver<Message>,
         app: AsyncApp,
     ) {
         while let Some(msg) = receiver.next().await
-            && let Some(p) = Weak::upgrade(&this)
+            && let Some(plugin) = Weak::upgrade(&plugin)
         {
             println!("Message: {:?}", msg);
 
             match msg {
                 Message::RunOnMainThread => {
-                    p.borrow_mut().plugin.call_on_main_thread_callback();
+                    plugin.borrow_mut().call_on_main_thread_callback();
                 }
                 Message::ResizeHintsChanged => {
                     println!("Handling changed resize hints not supported");
@@ -100,7 +91,9 @@ impl PluginInstance {
     }
 
     pub fn show_gui(&mut self, window: &mut Window, app: &mut App) {
-        let Some(mut gui) = self.plugin.access_handler(|h| h.gui) else {
+        let mut plugin = self.plugin.borrow_mut();
+
+        let Some(mut gui) = plugin.access_handler(|h| h.plugin_gui) else {
             println!("Plugin doesn't have a GUI!");
             return;
         };
@@ -111,7 +104,7 @@ impl PluginInstance {
             is_floating: false,
         };
 
-        let mut plugin_handle = self.plugin.plugin_handle();
+        let mut plugin_handle = plugin.plugin_handle();
 
         if !gui.is_api_supported(&mut plugin_handle, config) {
             println!("Plugin doesn't support API");
@@ -130,6 +123,8 @@ impl PluginInstance {
             app,
         );
 
+        let plugin_for_view = self.plugin.clone();
+
         let window_handle = app
             .open_window(
                 WindowOptions {
@@ -147,11 +142,11 @@ impl PluginInstance {
                 },
                 |window, cx| {
                     cx.new(|cx| {
-                        cx.observe_window_bounds(window, |_, window, _| {
-                            println!("Window bounds changed!");
-                        })
-                        .detach();
-                        gpui::Empty
+                        cx.observe_window_bounds(window, ClapPluginView::on_window_bounds)
+                            .detach();
+
+                        println!("build_root_view");
+                        ClapPluginView::new(plugin_for_view)
                     })
                 },
             )
@@ -180,13 +175,54 @@ impl PluginInstance {
     }
 }
 
+struct ClapPluginView {
+    plugin: Rc<RefCell<PluginInstance<ClapPlugin>>>,
+    last_size: Size<Pixels>,
+}
+
+impl ClapPluginView {
+    fn new(plugin: Rc<RefCell<PluginInstance<ClapPlugin>>>) -> Self {
+        Self {
+            plugin,
+            last_size: Size::default(),
+        }
+    }
+    fn on_window_bounds(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let new_size = window.window_bounds().get_bounds().size;
+        if new_size != self.last_size {
+            self.last_size = new_size;
+
+            let mut plugin_instance = self.plugin.borrow_mut();
+
+            let plugin_gui = plugin_instance.access_handler(|m| m.plugin_gui.clone());
+
+            let new_size = new_size.scale(window.scale_factor());
+
+            let new_size = GuiSize {
+                width: new_size.width.into(),
+                height: new_size.height.into(),
+            };
+
+            if let Some(plugin_gui) = plugin_gui {
+                plugin_gui.set_size(&mut plugin_instance.plugin_handle(), new_size);
+            }
+        }
+    }
+}
+
+impl Render for ClapPluginView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
+
 #[derive(Debug)]
 enum Message {
     RunOnMainThread,
     ResizeHintsChanged,
 }
 
-impl HostHandlers for PluginInstance {
+impl HostHandlers for ClapPlugin {
     type Shared<'a> = SharedHandler;
     type MainThread<'a> = MainThreadHandler<'a>;
     type AudioProcessor<'a> = AudioProcessorHandler;
@@ -250,7 +286,7 @@ impl<'a> host::SharedHandler<'a> for SharedHandler {
 pub struct MainThreadHandler<'a> {
     shared: &'a SharedHandler,
     plugin: Option<InitializedPluginHandle<'a>>,
-    gui: Option<PluginGui>,
+    plugin_gui: Option<PluginGui>,
 }
 
 impl<'a> MainThreadHandler<'a> {
@@ -258,7 +294,7 @@ impl<'a> MainThreadHandler<'a> {
         Self {
             shared,
             plugin: None,
-            gui: None,
+            plugin_gui: None,
         }
     }
 }
@@ -266,7 +302,7 @@ impl<'a> MainThreadHandler<'a> {
 impl<'a> host::MainThreadHandler<'a> for MainThreadHandler<'a> {
     fn initialized(&mut self, instance: InitializedPluginHandle<'a>) {
         println!("Initialized!");
-        self.gui = instance.get_extension();
+        self.plugin_gui = instance.get_extension();
         self.plugin = Some(instance);
     }
 }

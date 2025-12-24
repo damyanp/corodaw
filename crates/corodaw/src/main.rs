@@ -11,7 +11,7 @@ use gpui_component::{
 
 use crate::{
     plugins::{FoundPlugin, get_plugins},
-    project::PluginInstance,
+    project::ClapPlugin,
 };
 
 mod plugins;
@@ -19,7 +19,7 @@ mod project;
 
 struct Module {
     name: String,
-    plugin: Rc<RefCell<PluginInstance>>,
+    plugin: ClapPlugin,
     main_volume: Entity<SliderState>,
 }
 
@@ -29,7 +29,7 @@ impl Module {
 
         let plugin = RefCell::get_mut(&mut plugin);
 
-        let plugin = PluginInstance::new(plugin, cx);
+        let plugin = ClapPlugin::new(plugin, cx);
 
         Self {
             name,
@@ -39,13 +39,13 @@ impl Module {
     }
 
     fn on_show(&mut self, e: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.plugin.borrow_mut().show_gui(window, cx);
+        self.plugin.show_gui(window, cx);
     }
 }
 
 impl Render for Module {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let show_disabled = self.plugin.borrow().has_gui();
+        let show_disabled = self.plugin.has_gui();
 
         div()
             .border_1()
