@@ -10,7 +10,7 @@ use clack_host::{
 use futures::{SinkExt, StreamExt};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui::{
-    AnyWindowHandle, App, AppContext, AsyncApp, SharedString, Size, Window, WindowBounds,
+    AnyWindowHandle, App, AppContext, AsyncApp, Render, SharedString, Size, Window, WindowBounds,
     WindowOptions, div,
 };
 use raw_window_handle::RawWindowHandle;
@@ -145,7 +145,15 @@ impl PluginInstance {
                     is_resizable: true, // gui.can_resize(&mut plugin_handle),
                     ..Default::default()
                 },
-                |window, cx| cx.new(|_| gpui::Empty),
+                |window, cx| {
+                    cx.new(|cx| {
+                        cx.observe_window_bounds(window, |_, window, _| {
+                            println!("Window bounds changed!");
+                        })
+                        .detach();
+                        gpui::Empty
+                    })
+                },
             )
             .expect("open_window succeeded");
 
