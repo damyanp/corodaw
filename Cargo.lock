@@ -853,6 +853,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "clack-extensions"
+version = "0.1.0"
+source = "git+https://github.com/prokopyl/clack.git#5c28e2b7332e133688ca18ee6c374f55edaa77a4"
+dependencies = [
+ "bitflags 2.10.0",
+ "clack-common",
+ "clack-host",
+ "clap-sys",
+ "raw-window-handle",
+]
+
+[[package]]
 name = "clack-host"
 version = "0.1.0"
 source = "git+https://github.com/prokopyl/clack.git#5c28e2b7332e133688ca18ee6c374f55edaa77a4"
@@ -1168,12 +1180,14 @@ name = "corodraw"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clack-extensions",
  "clack-host",
  "dirs 6.0.0",
  "futures",
  "futures-channel",
  "gpui",
  "gpui-component",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "walkdir",

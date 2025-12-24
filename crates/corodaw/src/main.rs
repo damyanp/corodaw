@@ -37,10 +37,16 @@ impl Module {
             main_volume,
         }
     }
+
+    fn on_show(&mut self, e: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.plugin.borrow_mut().show_gui(window, cx);
+    }
 }
 
 impl Render for Module {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let show_disabled = self.plugin.borrow().has_gui();
+
         div()
             .border_1()
             .border_color(cx.theme().border)
@@ -49,7 +55,13 @@ impl Render for Module {
                 h_flex()
                     .gap_2()
                     .child(self.name.clone())
-                    .child(Slider::new(&self.main_volume).min_w_128()),
+                    .child(Slider::new(&self.main_volume).min_w_128())
+                    .child(
+                        Button::new("show")
+                            .label("Show")
+                            .disabled(show_disabled)
+                            .on_click(cx.listener(Self::on_show)),
+                    ),
             )
     }
 }
