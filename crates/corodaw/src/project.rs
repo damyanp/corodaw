@@ -1,11 +1,16 @@
 #![allow(unused)]
 use clack_extensions::{
+    audio_ports::PluginAudioPorts,
     gui::{GuiApiType, GuiConfiguration, GuiSize, HostGui, HostGuiImpl, PluginGui},
     log::{HostLog, HostLogImpl},
+    params::{HostParams, HostParamsImplMainThread, HostParamsImplShared},
+    timer::{HostTimer, HostTimerImpl, PluginTimer},
 };
 use clack_host::{
     host::{self, HostHandlers, HostInfo},
-    plugin::{InitializedPluginHandle, PluginInstance, PluginMainThreadHandle},
+    plugin::{
+        InitializedPluginHandle, InitializingPluginHandle, PluginInstance, PluginMainThreadHandle,
+    },
 };
 use futures::{SinkExt, StreamExt};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -21,7 +26,9 @@ use std::{
     time::Duration,
 };
 
-use crate::plugins::FoundPlugin;
+use crate::{plugins::FoundPlugin, project::timers::Timers};
+
+mod timers;
 
 pub struct ClapPlugin {
     plugin: Rc<RefCell<PluginInstance<Self>>>,
@@ -231,7 +238,11 @@ impl HostHandlers for ClapPlugin {
         builder: &mut clack_host::prelude::HostExtensions<Self>,
         shared: &Self::Shared<'_>,
     ) {
-        builder.register::<HostLog>().register::<HostGui>();
+        builder
+            .register::<HostLog>()
+            .register::<HostGui>()
+            .register::<HostTimer>()
+            .register::<HostParams>();
     }
 }
 
@@ -267,9 +278,33 @@ impl HostGuiImpl for SharedHandler {
     }
 }
 
+impl<'a> HostParamsImplMainThread for MainThreadHandler<'a> {
+    fn rescan(&mut self, flags: clack_extensions::params::ParamRescanFlags) {
+        todo!()
+    }
+
+    fn clear(
+        &mut self,
+        param_id: clack_host::prelude::ClapId,
+        flags: clack_extensions::params::ParamClearFlags,
+    ) {
+        todo!()
+    }
+}
+
+impl HostParamsImplShared for SharedHandler {
+    fn request_flush(&self) {
+        todo!()
+    }
+}
+
 unsafe impl Send for SharedHandler {}
 
 impl<'a> host::SharedHandler<'a> for SharedHandler {
+    fn initializing(&self, instance: InitializingPluginHandle<'a>) {
+        let _ = instance.get_extension::<PluginAudioPorts>();
+    }
+
     fn request_restart(&self) {
         todo!()
     }
@@ -286,6 +321,8 @@ impl<'a> host::SharedHandler<'a> for SharedHandler {
 pub struct MainThreadHandler<'a> {
     shared: &'a SharedHandler,
     plugin: Option<InitializedPluginHandle<'a>>,
+    timer_support: Option<PluginTimer>,
+    timers: Rc<Timers>,
     plugin_gui: Option<PluginGui>,
 }
 
@@ -295,6 +332,8 @@ impl<'a> MainThreadHandler<'a> {
             shared,
             plugin: None,
             plugin_gui: None,
+            timer_support: None,
+            timers: Rc::new(Timers::new()),
         }
     }
 }
@@ -303,6 +342,7 @@ impl<'a> host::MainThreadHandler<'a> for MainThreadHandler<'a> {
     fn initialized(&mut self, instance: InitializedPluginHandle<'a>) {
         println!("Initialized!");
         self.plugin_gui = instance.get_extension();
+        self.timer_support = instance.get_extension();
         self.plugin = Some(instance);
     }
 }
