@@ -7,7 +7,7 @@ use clack_extensions::{
     timer::{HostTimer, HostTimerImpl, PluginTimer},
 };
 use clack_host::{
-    host::{self, HostHandlers, HostInfo},
+    host::{self, HostError, HostHandlers, HostInfo},
     plugin::{
         InitializedPluginHandle, InitializingPluginHandle, PluginInstance, PluginMainThreadHandle,
     },
@@ -32,7 +32,6 @@ mod timers;
 
 pub struct ClapPlugin {
     plugin: Rc<RefCell<PluginInstance<Self>>>,
-    window_handle: Option<AnyWindowHandle>,
 }
 
 impl ClapPlugin {
@@ -62,7 +61,6 @@ impl ClapPlugin {
 
         let clap_plugin = Self {
             plugin: Rc::new(RefCell::new(plugin)),
-            window_handle: None,
         };
 
         let weak_plugin = Rc::downgrade(&clap_plugin.plugin);
@@ -79,19 +77,31 @@ impl ClapPlugin {
     async fn handle_messages(
         mut plugin: Weak<RefCell<PluginInstance<ClapPlugin>>>,
         mut receiver: UnboundedReceiver<Message>,
-        app: AsyncApp,
+        mut app: AsyncApp,
     ) {
         while let Some(msg) = receiver.next().await
             && let Some(plugin) = Weak::upgrade(&plugin)
         {
-            println!("Message: {:?}", msg);
-
             match msg {
                 Message::RunOnMainThread => {
                     plugin.borrow_mut().call_on_main_thread_callback();
                 }
                 Message::ResizeHintsChanged => {
                     println!("Handling changed resize hints not supported");
+                }
+                Message::RequestResize(new_size) => {
+                    let window_handle = plugin.borrow().access_handler(|m| m.window_handle);
+                    if let Some(window_handle) = window_handle {
+                        app.update_window(window_handle, |v, w, a| {
+                            let scale = 1.0 / w.scale_factor();
+                            let new_size: Size<Pixels> =
+                                Size::new(new_size.width.into(), new_size.height.into());
+                            let new_size =
+                                Size::new(new_size.width * scale, new_size.height * scale);
+
+                            w.resize(new_size);
+                        });
+                    }
                 }
             }
         }
@@ -144,7 +154,7 @@ impl ClapPlugin {
                     // Cardinal always reports that it isn't resizable, and then
                     // changes its resize hints. When we figure out how to
                     // handle that we can update this.
-                    is_resizable: true, // gui.can_resize(&mut plugin_handle),
+                    is_resizable: gui.can_resize(&mut plugin_handle),
                     ..Default::default()
                 },
                 |window, cx| {
@@ -152,7 +162,6 @@ impl ClapPlugin {
                         cx.observe_window_bounds(window, ClapPluginView::on_window_bounds)
                             .detach();
 
-                        println!("build_root_view");
                         ClapPluginView::new(plugin_for_view)
                     })
                 },
@@ -174,11 +183,13 @@ impl ClapPlugin {
             println!("Error: {:?}", err);
         }
 
-        self.window_handle = Some(window_handle.into());
+        plugin.access_handler_mut(|m| m.window_handle = Some(window_handle.into()));
     }
 
     pub fn has_gui(&self) -> bool {
-        self.window_handle.is_some()
+        self.plugin
+            .borrow()
+            .access_handler(|m| m.window_handle.is_some())
     }
 }
 
@@ -194,6 +205,7 @@ impl ClapPluginView {
             last_size: Size::default(),
         }
     }
+
     fn on_window_bounds(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let new_size = window.window_bounds().get_bounds().size;
         if new_size != self.last_size {
@@ -202,6 +214,15 @@ impl ClapPluginView {
             let mut plugin_instance = self.plugin.borrow_mut();
 
             let plugin_gui = plugin_instance.access_handler(|m| m.plugin_gui.clone());
+            let Some(plugin_gui) = plugin_gui else {
+                return;
+            };
+
+            let mut handle = plugin_instance.plugin_handle();
+
+            if !plugin_gui.can_resize(&mut handle) {
+                return;
+            }
 
             let new_size = new_size.scale(window.scale_factor());
 
@@ -210,9 +231,7 @@ impl ClapPluginView {
                 height: new_size.height.into(),
             };
 
-            if let Some(plugin_gui) = plugin_gui {
-                plugin_gui.set_size(&mut plugin_instance.plugin_handle(), new_size);
-            }
+            plugin_gui.set_size(&mut handle, new_size);
         }
     }
 }
@@ -227,6 +246,7 @@ impl Render for ClapPluginView {
 enum Message {
     RunOnMainThread,
     ResizeHintsChanged,
+    RequestResize(GuiSize),
 }
 
 impl HostHandlers for ClapPlugin {
@@ -262,7 +282,9 @@ impl HostGuiImpl for SharedHandler {
     }
 
     fn request_resize(&self, new_size: GuiSize) -> Result<(), clack_host::prelude::HostError> {
-        todo!()
+        Ok(self
+            .channel
+            .unbounded_send(Message::RequestResize(new_size))?)
     }
 
     fn request_show(&self) -> Result<(), clack_host::prelude::HostError> {
@@ -324,6 +346,7 @@ pub struct MainThreadHandler<'a> {
     timer_support: Option<PluginTimer>,
     timers: Rc<Timers>,
     plugin_gui: Option<PluginGui>,
+    window_handle: Option<AnyWindowHandle>,
 }
 
 impl<'a> MainThreadHandler<'a> {
@@ -334,6 +357,7 @@ impl<'a> MainThreadHandler<'a> {
             plugin_gui: None,
             timer_support: None,
             timers: Rc::new(Timers::new()),
+            window_handle: None,
         }
     }
 }
