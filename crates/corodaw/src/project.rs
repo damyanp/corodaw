@@ -16,7 +16,7 @@ use futures::{SinkExt, StreamExt};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui::{
     AnyWindowHandle, App, AppContext, AsyncApp, Context, IntoElement, Pixels, Render, SharedString,
-    Size, Window, WindowBounds, WindowOptions, div,
+    Size, Subscription, Window, WindowBounds, WindowOptions, div,
 };
 use raw_window_handle::RawWindowHandle;
 use std::{
@@ -162,9 +162,10 @@ impl ClapPlugin {
                 },
             )
             .expect("open_window succeeded");
+        let window_handle = window_handle.into();
 
         let window = app
-            .update_window(window_handle.into(), |_, window, _| {
+            .update_window(window_handle, |_, window, _| {
                 clack_extensions::gui::Window::from_window(window).unwrap()
             })
             .unwrap();
@@ -178,7 +179,36 @@ impl ClapPlugin {
             println!("Error: {:?}", err);
         }
 
-        plugin.access_handler_mut(|m| m.window_handle = Some(window_handle.into()));
+        plugin.access_handler_mut(|m| {
+            m.window_handle = Some(window_handle);
+
+            let plugin_rc = self.plugin.clone();
+            let subscription = app.on_window_closed(move |cx| {
+                // gpui doesn't seem to have a way to get a notification when a
+                // specific window is closed, so instead we have to look at the
+                // windows that haven't been closed to determine figure out if it is
+                // still there or not!
+                if cx
+                    .windows()
+                    .into_iter()
+                    .find(|w| *w == window_handle)
+                    .is_none()
+                {
+                    let mut plugin = plugin_rc.borrow_mut();
+                    let gui = plugin.access_handler_mut(|m| {
+                        m.window_handle = None;
+                        m.window_closed_subscription = None;
+                        m.plugin_gui
+                    });
+
+                    if let Some(gui) = gui {
+                        gui.destroy(&mut plugin.plugin_handle());
+                    }
+                }
+            });
+
+            m.window_closed_subscription = Some(subscription);
+        });
     }
 
     pub fn has_gui(&self) -> bool {
@@ -335,6 +365,7 @@ pub struct MainThreadHandler<'a> {
     timers: Rc<Timers>,
     plugin_gui: Option<PluginGui>,
     window_handle: Option<AnyWindowHandle>,
+    window_closed_subscription: Option<Subscription>,
 }
 
 impl<'a> MainThreadHandler<'a> {
@@ -346,6 +377,7 @@ impl<'a> MainThreadHandler<'a> {
             timer_support: None,
             timers: Rc::new(Timers::new()),
             window_handle: None,
+            window_closed_subscription: None,
         }
     }
 }
