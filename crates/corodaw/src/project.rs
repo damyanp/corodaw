@@ -214,7 +214,7 @@ impl ClapPluginView {
 
             let mut plugin_instance = self.plugin.borrow_mut();
 
-            let plugin_gui = plugin_instance.access_handler(|m| m.plugin_gui.clone());
+            let plugin_gui = plugin_instance.access_handler(|m| m.plugin_gui);
             let Some(plugin_gui) = plugin_gui else {
                 return;
             };
