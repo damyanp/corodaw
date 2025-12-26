@@ -92,14 +92,8 @@ impl ClapPlugin {
                 Message::RequestResize(new_size) => {
                     let window_handle = plugin.borrow().access_handler(|m| m.window_handle);
                     if let Some(window_handle) = window_handle {
-                        app.update_window(window_handle, |v, w, a| {
-                            let scale = 1.0 / w.scale_factor();
-                            let new_size: Size<Pixels> =
-                                Size::new(new_size.width.into(), new_size.height.into());
-                            let new_size =
-                                Size::new(new_size.width * scale, new_size.height * scale);
-
-                            w.resize(new_size);
+                        app.update_window(window_handle, |_, window, _| {
+                            window.resize(new_size.to_size(window));
                         });
                     }
                 }
@@ -131,15 +125,15 @@ impl ClapPlugin {
         gui.create(&mut plugin_handle, config)
             .expect("create succeeds");
 
-        let initial_size = gui.get_size(&mut plugin_handle).unwrap_or(GuiSize {
-            width: 800,
-            height: 600,
-        });
-        let scale = 1.0 / window.scale_factor();
-        let size: Size<Pixels> = Size::new(initial_size.width.into(), initial_size.height.into());
-        let size = Size::new(size.width * scale, size.height * scale);
+        let initial_size = gui
+            .get_size(&mut plugin_handle)
+            .unwrap_or(GuiSize {
+                width: 800,
+                height: 600,
+            })
+            .to_size(window);
 
-        let bounds = WindowBounds::centered(size, app);
+        let bounds = WindowBounds::centered(initial_size, app);
 
         let plugin_for_view = self.plugin.clone();
 
@@ -225,14 +219,7 @@ impl ClapPluginView {
                 return;
             }
 
-            let new_size = new_size.scale(window.scale_factor());
-
-            let new_size = GuiSize {
-                width: new_size.width.into(),
-                height: new_size.height.into(),
-            };
-
-            plugin_gui.set_size(&mut handle, new_size);
+            plugin_gui.set_size(&mut handle, new_size.to_gui_size(window));
         }
     }
 }
@@ -374,3 +361,29 @@ impl<'a> host::MainThreadHandler<'a> for MainThreadHandler<'a> {
 
 pub struct AudioProcessorHandler;
 impl<'a> host::AudioProcessorHandler<'a> for AudioProcessorHandler {}
+
+trait ToSize {
+    fn to_size(&self, window: &Window) -> Size<Pixels>;
+}
+
+impl ToSize for GuiSize {
+    fn to_size(&self, window: &Window) -> Size<Pixels> {
+        let scale = 1.0 / window.scale_factor();
+        let s = Size::<Pixels>::new(self.width.into(), self.height.into());
+        s.map(|d| d * scale)
+    }
+}
+
+trait ToGuiSize {
+    fn to_gui_size(&self, window: &Window) -> GuiSize;
+}
+
+impl ToGuiSize for Size<Pixels> {
+    fn to_gui_size(&self, window: &Window) -> GuiSize {
+        let s = self.scale(window.scale_factor());
+        GuiSize {
+            width: s.width.into(),
+            height: s.height.into(),
+        }
+    }
+}
