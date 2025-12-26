@@ -135,10 +135,11 @@ impl ClapPlugin {
             width: 800,
             height: 600,
         });
-        let bounds = WindowBounds::centered(
-            Size::new(initial_size.width.into(), initial_size.height.into()),
-            app,
-        );
+        let scale = 1.0 / window.scale_factor();
+        let size: Size<Pixels> = Size::new(initial_size.width.into(), initial_size.height.into());
+        let size = Size::new(size.width * scale, size.height * scale);
+
+        let bounds = WindowBounds::centered(size, app);
 
         let plugin_for_view = self.plugin.clone();
 
