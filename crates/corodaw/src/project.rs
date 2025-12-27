@@ -31,11 +31,29 @@ use crate::{plugins::FoundPlugin, project::timers::Timers};
 mod timers;
 
 pub struct ClapPlugin {
-    plugin: Rc<RefCell<PluginInstance<Self>>>,
+    plugin: RefCell<PluginInstance<Self>>,
+    gui: RefCell<Gui>,
+}
+
+#[derive(Default)]
+struct Gui {
+    plugin_gui: Option<PluginGui>,
+    window_handle: Option<AnyWindowHandle>,
+    window_closed_subscription: Option<Subscription>,
+}
+
+impl Gui {
+    fn request_resize(&mut self, new_size: GuiSize, app: &mut AsyncApp) {
+        if let Some(window_handle) = self.window_handle {
+            app.update_window(window_handle, |_, window, _| {
+                window.resize(new_size.to_size(window));
+            });
+        }
+    }
 }
 
 impl ClapPlugin {
-    pub fn new(plugin: &mut FoundPlugin, app: &App) -> Self {
+    pub fn new(plugin: &mut FoundPlugin, app: &App) -> Rc<Self> {
         let (sender, mut receiver) = unbounded();
 
         let bundle = plugin.load_bundle();
@@ -59,11 +77,12 @@ impl ClapPlugin {
         )
         .unwrap();
 
-        let clap_plugin = Self {
-            plugin: Rc::new(RefCell::new(plugin)),
-        };
+        let clap_plugin = Rc::new(Self {
+            plugin: RefCell::new(plugin),
+            gui: RefCell::new(Gui::default()),
+        });
 
-        let weak_plugin = Rc::downgrade(&clap_plugin.plugin);
+        let weak_plugin = Rc::downgrade(&clap_plugin);
         app.spawn(async move |app| {
             println!("[{}] spawn message receiver", id);
             ClapPlugin::handle_messages(weak_plugin, receiver, app.clone()).await;
@@ -75,36 +94,40 @@ impl ClapPlugin {
     }
 
     async fn handle_messages(
-        mut plugin: Weak<RefCell<PluginInstance<ClapPlugin>>>,
+        clap_plugin: Weak<ClapPlugin>,
         mut receiver: UnboundedReceiver<Message>,
         mut app: AsyncApp,
     ) {
         while let Some(msg) = receiver.next().await
-            && let Some(plugin) = Weak::upgrade(&plugin)
+            && let Some(clap_plugin) = Weak::upgrade(&clap_plugin)
         {
             match msg {
+                Message::Initialized { plugin_gui } => {
+                    clap_plugin.gui.borrow_mut().plugin_gui = plugin_gui;
+                }
                 Message::RunOnMainThread => {
-                    plugin.borrow_mut().call_on_main_thread_callback();
+                    clap_plugin
+                        .plugin
+                        .borrow_mut()
+                        .call_on_main_thread_callback();
                 }
                 Message::ResizeHintsChanged => {
                     println!("Handling changed resize hints not supported");
                 }
                 Message::RequestResize(new_size) => {
-                    let window_handle = plugin.borrow().access_handler(|m| m.window_handle);
-                    if let Some(window_handle) = window_handle {
-                        app.update_window(window_handle, |_, window, _| {
-                            window.resize(new_size.to_size(window));
-                        });
-                    }
+                    clap_plugin
+                        .gui
+                        .borrow_mut()
+                        .request_resize(new_size, &mut app);
                 }
             }
         }
     }
 
-    pub fn show_gui(&mut self, window: &mut Window, app: &mut App) {
-        let mut plugin = self.plugin.borrow_mut();
+    pub fn show_gui(self: &Rc<Self>, window: &mut Window, app: &mut App) {
+        let mut gui = self.gui.borrow_mut();
 
-        let Some(mut gui) = plugin.access_handler(|h| h.plugin_gui) else {
+        let Some(mut plugin_gui) = gui.plugin_gui else {
             println!("Plugin doesn't have a GUI!");
             return;
         };
@@ -115,17 +138,19 @@ impl ClapPlugin {
             is_floating: false,
         };
 
+        let mut plugin = self.plugin.borrow_mut();
         let mut plugin_handle = plugin.plugin_handle();
 
-        if !gui.is_api_supported(&mut plugin_handle, config) {
+        if !plugin_gui.is_api_supported(&mut plugin_handle, config) {
             println!("Plugin doesn't support API");
             return;
         }
 
-        gui.create(&mut plugin_handle, config)
+        plugin_gui
+            .create(&mut plugin_handle, config)
             .expect("create succeeds");
 
-        let initial_size = gui
+        let initial_size = plugin_gui
             .get_size(&mut plugin_handle)
             .unwrap_or(GuiSize {
                 width: 800,
@@ -135,7 +160,7 @@ impl ClapPlugin {
 
         let bounds = WindowBounds::centered(initial_size, app);
 
-        let plugin_for_view = self.plugin.clone();
+        let clap_plugin_for_view = self.clone();
 
         let window_handle = app
             .open_window(
@@ -145,11 +170,7 @@ impl ClapPlugin {
                         ..Default::default()
                     }),
                     window_bounds: Some(bounds),
-
-                    // Cardinal always reports that it isn't resizable, and then
-                    // changes its resize hints. When we figure out how to
-                    // handle that we can update this.
-                    is_resizable: gui.can_resize(&mut plugin_handle),
+                    is_resizable: plugin_gui.can_resize(&mut plugin_handle),
                     ..Default::default()
                 },
                 |window, cx| {
@@ -157,7 +178,7 @@ impl ClapPlugin {
                         cx.observe_window_bounds(window, ClapPluginView::on_window_bounds)
                             .detach();
 
-                        ClapPluginView::new(plugin_for_view)
+                        ClapPluginView::new(clap_plugin_for_view)
                     })
                 },
             )
@@ -171,62 +192,52 @@ impl ClapPlugin {
             .unwrap();
 
         unsafe {
-            gui.set_parent(&mut plugin_handle, window)
+            plugin_gui
+                .set_parent(&mut plugin_handle, window)
                 .expect("set_parent succeeds");
         }
 
-        if let Err(err) = gui.show(&mut plugin_handle) {
+        if let Err(err) = plugin_gui.show(&mut plugin_handle) {
             println!("Error: {:?}", err);
         }
 
-        plugin.access_handler_mut(|m| {
-            m.window_handle = Some(window_handle);
+        gui.window_handle = Some(window_handle);
 
-            let plugin_rc = self.plugin.clone();
-            let subscription = app.on_window_closed(move |cx| {
-                // gpui doesn't seem to have a way to get a notification when a
-                // specific window is closed, so instead we have to look at the
-                // windows that haven't been closed to determine figure out if it is
-                // still there or not!
-                if cx
-                    .windows()
-                    .into_iter()
-                    .find(|w| *w == window_handle)
-                    .is_none()
-                {
-                    let mut plugin = plugin_rc.borrow_mut();
-                    let gui = plugin.access_handler_mut(|m| {
-                        m.window_handle = None;
-                        m.window_closed_subscription = None;
-                        m.plugin_gui
-                    });
+        let plugin_rc = self.clone();
+        let subscription = app.on_window_closed(move |cx| {
+            // gpui doesn't seem to have a way to get a notification when a
+            // specific window is closed, so instead we have to look at the
+            // windows that haven't been closed to determine figure out if it is
+            // still there or not!
+            if !cx.windows().into_iter().any(|w| w == window_handle) {
+                let mut gui = plugin_rc.gui.borrow_mut();
 
-                    if let Some(gui) = gui {
-                        gui.destroy(&mut plugin.plugin_handle());
-                    }
+                gui.window_handle = None;
+                gui.window_closed_subscription = None;
+
+                if let Some(plugin_gui) = gui.plugin_gui.as_ref() {
+                    plugin_gui.destroy(&mut plugin_rc.plugin.borrow_mut().plugin_handle());
                 }
-            });
-
-            m.window_closed_subscription = Some(subscription);
+            }
         });
+
+        gui.window_closed_subscription = Some(subscription);
     }
 
     pub fn has_gui(&self) -> bool {
-        self.plugin
-            .borrow()
-            .access_handler(|m| m.window_handle.is_some())
+        self.gui.borrow().window_handle.is_some()
     }
 }
 
 struct ClapPluginView {
-    plugin: Rc<RefCell<PluginInstance<ClapPlugin>>>,
+    clap_plugin: Rc<ClapPlugin>,
     last_size: Size<Pixels>,
 }
 
 impl ClapPluginView {
-    fn new(plugin: Rc<RefCell<PluginInstance<ClapPlugin>>>) -> Self {
+    fn new(clap_plugin: Rc<ClapPlugin>) -> Self {
         Self {
-            plugin,
+            clap_plugin,
             last_size: Size::default(),
         }
     }
@@ -236,10 +247,8 @@ impl ClapPluginView {
         if new_size != self.last_size {
             self.last_size = new_size;
 
-            let mut plugin_instance = self.plugin.borrow_mut();
-
-            let plugin_gui = plugin_instance.access_handler(|m| m.plugin_gui);
-            let Some(plugin_gui) = plugin_gui else {
+            let mut plugin_instance = self.clap_plugin.plugin.borrow_mut();
+            let Some(plugin_gui) = self.clap_plugin.gui.borrow().plugin_gui else {
                 return;
             };
 
@@ -260,8 +269,8 @@ impl Render for ClapPluginView {
     }
 }
 
-#[derive(Debug)]
 enum Message {
+    Initialized { plugin_gui: Option<PluginGui> },
     RunOnMainThread,
     ResizeHintsChanged,
     RequestResize(GuiSize),
@@ -363,9 +372,6 @@ pub struct MainThreadHandler<'a> {
     plugin: Option<InitializedPluginHandle<'a>>,
     timer_support: Option<PluginTimer>,
     timers: Rc<Timers>,
-    plugin_gui: Option<PluginGui>,
-    window_handle: Option<AnyWindowHandle>,
-    window_closed_subscription: Option<Subscription>,
 }
 
 impl<'a> MainThreadHandler<'a> {
@@ -373,11 +379,8 @@ impl<'a> MainThreadHandler<'a> {
         Self {
             shared,
             plugin: None,
-            plugin_gui: None,
             timer_support: None,
             timers: Rc::new(Timers::new()),
-            window_handle: None,
-            window_closed_subscription: None,
         }
     }
 }
@@ -385,8 +388,10 @@ impl<'a> MainThreadHandler<'a> {
 impl<'a> host::MainThreadHandler<'a> for MainThreadHandler<'a> {
     fn initialized(&mut self, instance: InitializedPluginHandle<'a>) {
         println!("Initialized!");
-        self.plugin_gui = instance.get_extension();
         self.timer_support = instance.get_extension();
+        self.shared.channel.unbounded_send(Message::Initialized {
+            plugin_gui: instance.get_extension(),
+        });
         self.plugin = Some(instance);
     }
 }

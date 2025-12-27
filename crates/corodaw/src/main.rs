@@ -19,7 +19,7 @@ mod project;
 
 struct Module {
     name: String,
-    plugin: ClapPlugin,
+    plugin: Rc<ClapPlugin>,
     main_volume: Entity<SliderState>,
 }
 
