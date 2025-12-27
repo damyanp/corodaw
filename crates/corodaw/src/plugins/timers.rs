@@ -7,7 +7,7 @@ use std::{
 use clack_extensions::timer::{HostTimerImpl, PluginTimer, TimerId};
 use clack_host::plugin::PluginMainThreadHandle;
 
-use crate::project::MainThreadHandler;
+use super::MainThreadHandler;
 
 impl<'a> HostTimerImpl for MainThreadHandler<'a> {
     fn register_timer(

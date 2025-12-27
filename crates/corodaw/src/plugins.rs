@@ -1,208 +1,250 @@
-use clack_host::{plugin::PluginDescriptor, prelude::*};
-use gpui::SharedString;
-use serde::{Deserialize, Serialize};
+#![allow(unused)]
+use clack_extensions::{
+    audio_ports::PluginAudioPorts,
+    gui::{GuiApiType, GuiConfiguration, GuiSize, HostGui, HostGuiImpl, PluginGui},
+    log::{HostLog, HostLogImpl},
+    params::{HostParams, HostParamsImplMainThread, HostParamsImplShared},
+    timer::{HostTimer, HostTimerImpl, PluginTimer},
+};
+use clack_host::{
+    host::{self, HostError, HostHandlers, HostInfo},
+    plugin::{
+        InitializedPluginHandle, InitializingPluginHandle, PluginInstance, PluginMainThreadHandle,
+    },
+};
+use futures::{SinkExt, StreamExt};
+use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+use gpui::{
+    AnyWindowHandle, App, AppContext, AsyncApp, Context, IntoElement, Pixels, Render, SharedString,
+    Size, Subscription, Window, WindowBounds, WindowOptions, div,
+};
+use raw_window_handle::RawWindowHandle;
 use std::{
     cell::RefCell,
-    io::Write,
-    path::{Path, PathBuf},
-    rc::Rc,
+    ffi::{CStr, CString},
+    rc::{Rc, Weak},
+    time::Duration,
 };
-use walkdir::{DirEntry, WalkDir};
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct FoundPlugin {
-    pub id: SharedString,
-    pub name: SharedString,
-    pub path: PathBuf,
+use crate::plugins::{discovery::FoundPlugin, gui::Gui, timers::Timers};
 
-    #[serde(skip)]
-    _bundle: Option<PluginBundle>,
+pub mod discovery;
+mod gui;
+mod timers;
+
+pub struct ClapPlugin {
+    plugin: RefCell<PluginInstance<Self>>,
+    gui: RefCell<Gui>,
 }
 
-impl FoundPlugin {
-    fn try_from_descriptor(
-        descriptor: &PluginDescriptor,
-        path: PathBuf,
-        bundle: PluginBundle,
-    ) -> Option<Self> {
-        let id = descriptor
-            .id()
-            .and_then(|id| id.to_str().ok())
-            .map(SharedString::new);
-        let name = descriptor
-            .name()
-            .and_then(|name| name.to_str().ok())
-            .map(SharedString::new);
+impl ClapPlugin {
+    pub fn new(plugin: &mut FoundPlugin, app: &App) -> Rc<Self> {
+        let (sender, mut receiver) = unbounded();
 
-        if let Some(id) = id
-            && let Some(name) = name
+        let bundle = plugin.load_bundle();
+        bundle
+            .get_plugin_factory()
+            .expect("Only bundles with plugin factories supported");
+
+        let id = plugin.id.clone();
+
+        let shared = SharedHandler { channel: sender };
+        let plugin_id = CString::new(id.as_str()).unwrap();
+        let host =
+            HostInfo::new("corodaw", "damyanp", "https://github.com/damyanp", "0.0.1").unwrap();
+
+        let plugin = clack_host::plugin::PluginInstance::new(
+            move |_| shared,
+            move |shared| MainThreadHandler::new(shared),
+            &bundle,
+            plugin_id.as_c_str(),
+            &host,
+        )
+        .unwrap();
+
+        let clap_plugin = Rc::new(Self {
+            plugin: RefCell::new(plugin),
+            gui: RefCell::new(Gui::default()),
+        });
+
+        let weak_plugin = Rc::downgrade(&clap_plugin);
+        app.spawn(async move |app| {
+            println!("[{}] spawn message receiver", id);
+            ClapPlugin::handle_messages(weak_plugin, receiver, app.clone()).await;
+            println!("[{}] end message receiver", id);
+        })
+        .detach();
+
+        clap_plugin
+    }
+
+    async fn handle_messages(
+        clap_plugin: Weak<ClapPlugin>,
+        mut receiver: UnboundedReceiver<Message>,
+        mut app: AsyncApp,
+    ) {
+        while let Some(msg) = receiver.next().await
+            && let Some(clap_plugin) = Weak::upgrade(&clap_plugin)
         {
-            Some(Self {
-                id,
-                name,
-                path,
-                _bundle: Some(bundle),
-            })
-        } else {
-            None
-        }
-    }
-
-    pub fn load_bundle(&mut self) -> PluginBundle {
-        if let Some(bundle) = &self._bundle {
-            bundle.clone()
-        } else {
-            println!("Loading bundle from {}", self.path.display());
-            let bundle = unsafe { PluginBundle::load(&self.path) }
-                .expect("Currently no error handling around loading bundles!");
-            self._bundle = Some(bundle.clone());
-            bundle
-        }
-    }
-}
-
-pub fn get_plugins() -> Vec<RefCell<FoundPlugin>> {
-    load_plugin_cache()
-        .unwrap_or_else(|| {
-            let plugins = find_plugins();
-            save_plugin_cache(&plugins);
-            plugins
-        })
-        .into_iter()
-        .map(RefCell::new)
-        .collect()
-}
-
-fn save_plugin_cache(plugins: &Vec<FoundPlugin>) {
-    let plugins_json = serde_json::to_string_pretty(plugins)
-        .unwrap_or_else(|e| format!("{{\"error\":\"failed to serialize plugins: {e}\"}}"));
-
-    // Write JSON to ".plugins.json" next to the current working directory.
-    let mut f = std::fs::File::create(".plugins.json").expect("create .plugins.json");
-    f.write_all(plugins_json.as_bytes())
-        .and_then(|_| f.write_all(b"\n"))
-        .expect("write .plugins.json");
-
-    println!("Wrote .plugins.json");
-}
-
-fn load_plugin_cache() -> Option<Vec<FoundPlugin>> {
-    match std::fs::read_to_string(".plugins.json") {
-        Ok(contents) => match serde_json::from_str::<Vec<FoundPlugin>>(&contents) {
-            Ok(plugins) => {
-                println!("Loaded {} plugins from .plugins.json", plugins.len());
-                return Some(plugins);
+            match msg {
+                Message::Initialized { plugin_gui } => {
+                    clap_plugin.gui.borrow_mut().plugin_gui = plugin_gui;
+                }
+                Message::RunOnMainThread => {
+                    clap_plugin
+                        .plugin
+                        .borrow_mut()
+                        .call_on_main_thread_callback();
+                }
+                Message::ResizeHintsChanged => {
+                    println!("Handling changed resize hints not supported");
+                }
+                Message::RequestResize(new_size) => {
+                    clap_plugin
+                        .gui
+                        .borrow_mut()
+                        .request_resize(new_size, &mut app);
+                }
             }
-            Err(err) => {
-                println!("Failed to parse .plugins.json ({err})");
-            }
-        },
-        Err(err) => {
-            println!("No .plugins.json cache found ({err})");
-        }
-    }
-    None
-}
-
-pub fn find_plugins() -> Vec<FoundPlugin> {
-    find_bundles()
-        .iter()
-        .flat_map(|(p, b)| get_plugins_in_bundle(p, b))
-        .collect()
-}
-
-fn find_bundles() -> Vec<(PathBuf, PluginBundle)> {
-    standard_clap_paths()
-        .iter()
-        .flat_map(|path| {
-            WalkDir::new(path)
-                .follow_links(true)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(is_clap_bundle)
-                .filter_map(|bundle_dir_entry| {
-                    unsafe { PluginBundle::load(bundle_dir_entry.path()) }
-                        .ok()
-                        .map(|bundle| (bundle_dir_entry.into_path(), bundle))
-                })
-        })
-        .collect()
-}
-
-fn get_plugins_in_bundle(path: &Path, bundle: &PluginBundle) -> Vec<FoundPlugin> {
-    bundle
-        .get_plugin_factory()
-        .map(|factory| {
-            factory
-                .plugin_descriptors()
-                .filter_map(|descriptor| {
-                    FoundPlugin::try_from_descriptor(descriptor, path.to_path_buf(), bundle.clone())
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Returns a list of all the standard CLAP search paths, per the CLAP specification.
-// From clack/host/examples/cpal/src/discovery.rs
-fn standard_clap_paths() -> Vec<PathBuf> {
-    let mut paths = vec![];
-
-    if let Some(home_dir) = dirs::home_dir() {
-        paths.push(home_dir.join(".clap"));
-
-        #[cfg(target_os = "macos")]
-        {
-            paths.push(home_dir.join("Library/Audio/Plug-Ins/CLAP"));
         }
     }
 
-    #[cfg(windows)]
-    {
-        if let Some(val) = std::env::var_os("CommonProgramFiles") {
-            paths.push(PathBuf::from(val).join("CLAP"))
+    pub fn show_gui(self: &Rc<Self>, window: &mut Window, app: &mut App) {
+        let mut gui = self.gui.borrow_mut();
+        gui.show(self.clone(), window, app);
+    }
+
+    pub fn has_gui(&self) -> bool {
+        self.gui.borrow().window_handle.is_some()
+    }
+}
+
+enum Message {
+    Initialized { plugin_gui: Option<PluginGui> },
+    RunOnMainThread,
+    ResizeHintsChanged,
+    RequestResize(GuiSize),
+}
+
+impl HostHandlers for ClapPlugin {
+    type Shared<'a> = SharedHandler;
+    type MainThread<'a> = MainThreadHandler<'a>;
+    type AudioProcessor<'a> = AudioProcessorHandler;
+
+    fn declare_extensions(
+        builder: &mut clack_host::prelude::HostExtensions<Self>,
+        shared: &Self::Shared<'_>,
+    ) {
+        builder
+            .register::<HostLog>()
+            .register::<HostGui>()
+            .register::<HostTimer>()
+            .register::<HostParams>();
+    }
+}
+
+pub struct SharedHandler {
+    channel: UnboundedSender<Message>,
+}
+
+impl HostLogImpl for SharedHandler {
+    fn log(&self, severity: clack_extensions::log::LogSeverity, message: &str) {
+        println!("[host log] {}: {}", severity, message);
+    }
+}
+
+impl HostGuiImpl for SharedHandler {
+    fn resize_hints_changed(&self) {
+        self.channel.unbounded_send(Message::ResizeHintsChanged);
+    }
+
+    fn request_resize(&self, new_size: GuiSize) -> Result<(), clack_host::prelude::HostError> {
+        Ok(self
+            .channel
+            .unbounded_send(Message::RequestResize(new_size))?)
+    }
+
+    fn request_show(&self) -> Result<(), clack_host::prelude::HostError> {
+        todo!()
+    }
+
+    fn request_hide(&self) -> Result<(), clack_host::prelude::HostError> {
+        todo!()
+    }
+
+    fn closed(&self, was_destroyed: bool) {
+        todo!()
+    }
+}
+
+impl<'a> HostParamsImplMainThread for MainThreadHandler<'a> {
+    fn rescan(&mut self, flags: clack_extensions::params::ParamRescanFlags) {
+        todo!()
+    }
+
+    fn clear(
+        &mut self,
+        param_id: clack_host::prelude::ClapId,
+        flags: clack_extensions::params::ParamClearFlags,
+    ) {
+        todo!()
+    }
+}
+
+impl HostParamsImplShared for SharedHandler {
+    fn request_flush(&self) {
+        todo!()
+    }
+}
+
+unsafe impl Send for SharedHandler {}
+
+impl<'a> host::SharedHandler<'a> for SharedHandler {
+    fn initializing(&self, instance: InitializingPluginHandle<'a>) {
+        let _ = instance.get_extension::<PluginAudioPorts>();
+    }
+
+    fn request_restart(&self) {
+        todo!()
+    }
+
+    fn request_process(&self) {
+        todo!()
+    }
+
+    fn request_callback(&self) {
+        self.channel.unbounded_send(Message::RunOnMainThread);
+    }
+}
+
+pub struct MainThreadHandler<'a> {
+    shared: &'a SharedHandler,
+    plugin: Option<InitializedPluginHandle<'a>>,
+    timer_support: Option<PluginTimer>,
+    timers: Rc<Timers>,
+}
+
+impl<'a> MainThreadHandler<'a> {
+    fn new(shared: &'a SharedHandler) -> Self {
+        Self {
+            shared,
+            plugin: None,
+            timer_support: None,
+            timers: Rc::new(Timers::new()),
         }
-
-        if let Some(dir) = dirs::config_local_dir() {
-            paths.push(dir.join("Programs\\Common\\CLAP"));
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        paths.push(PathBuf::from("/Library/Audio/Plug-Ins/CLAP"));
-    }
-
-    #[cfg(target_family = "unix")]
-    {
-        paths.push("/usr/lib/clap".into())
-    }
-
-    if let Some(env_var) = std::env::var_os("CLAP_PATH") {
-        paths.extend(std::env::split_paths(&env_var))
-    }
-
-    paths
-}
-
-/// Returns `true` if the given entry could refer to a CLAP bundle.
-///
-/// CLAP bundles are files that end with the `.clap` extension.
-fn is_clap_bundle(dir_entry: &DirEntry) -> bool {
-    is_bundle(dir_entry)
-        && dir_entry
-            .path()
-            .extension()
-            .is_some_and(|ext| ext == "clap")
-}
-
-/// Returns `true` if the given entry could refer to a bundle.
-///
-/// CLAP bundles are directories on MacOS and files everywhere else.
-fn is_bundle(dir_entry: &DirEntry) -> bool {
-    if cfg!(target_os = "macos") {
-        dir_entry.file_type().is_dir()
-    } else {
-        dir_entry.file_type().is_file()
     }
 }
+
+impl<'a> host::MainThreadHandler<'a> for MainThreadHandler<'a> {
+    fn initialized(&mut self, instance: InitializedPluginHandle<'a>) {
+        println!("Initialized!");
+        self.timer_support = instance.get_extension();
+        self.shared.channel.unbounded_send(Message::Initialized {
+            plugin_gui: instance.get_extension(),
+        });
+        self.plugin = Some(instance);
+    }
+}
+
+pub struct AudioProcessorHandler;
+impl<'a> host::AudioProcessorHandler<'a> for AudioProcessorHandler {}

@@ -10,12 +10,11 @@ use gpui_component::{
 };
 
 use crate::{
-    plugins::{FoundPlugin, get_plugins},
-    project::ClapPlugin,
+    plugins::ClapPlugin,
+    plugins::discovery::{FoundPlugin, get_plugins},
 };
 
 mod plugins;
-mod project;
 
 struct Module {
     name: String,
