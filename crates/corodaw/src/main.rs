@@ -1,5 +1,4 @@
-#![allow(unused)]
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc};
 
 use gpui::*;
 use gpui_component::{
@@ -37,7 +36,7 @@ impl Module {
         }
     }
 
-    fn on_show(&mut self, e: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_show(&mut self, _e: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.plugin.show_gui(window, cx);
     }
 }
@@ -87,7 +86,7 @@ impl SelectItem for SelectablePlugin {
 }
 
 pub struct Corodaw {
-    plugins: Vec<RefCell<FoundPlugin>>,
+    _plugins: Vec<RefCell<FoundPlugin>>,
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
     modules: Vec<Entity<Module>>,
     counter: u32,
@@ -109,7 +108,7 @@ impl Corodaw {
         let plugin_selector = cx.new(|cx| SelectState::new(searchable_plugins, None, window, cx));
 
         Self {
-            plugins,
+            _plugins: plugins,
             plugin_selector,
             modules: Vec::default(), //vec![cx.new(|cx| Module::new(cx, "Master".to_owned()))],
             counter: 0,

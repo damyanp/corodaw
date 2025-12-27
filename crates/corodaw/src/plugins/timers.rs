@@ -1,3 +1,4 @@
+#![allow(unused)]
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -12,14 +13,14 @@ use super::MainThreadHandler;
 impl<'a> HostTimerImpl for MainThreadHandler<'a> {
     fn register_timer(
         &mut self,
-        period_ms: u32,
+        _period_ms: u32,
     ) -> Result<clack_extensions::timer::TimerId, clack_host::prelude::HostError> {
         todo!()
     }
 
     fn unregister_timer(
         &mut self,
-        timer_id: clack_extensions::timer::TimerId,
+        _timer_id: clack_extensions::timer::TimerId,
     ) -> Result<(), clack_host::prelude::HostError> {
         todo!()
     }

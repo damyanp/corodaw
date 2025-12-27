@@ -1,33 +1,11 @@
-#![allow(unused)]
-use clack_extensions::{
-    audio_ports::PluginAudioPorts,
-    gui::{GuiApiType, GuiConfiguration, GuiSize, HostGui, HostGuiImpl, PluginGui},
-    log::{HostLog, HostLogImpl},
-    params::{HostParams, HostParamsImplMainThread, HostParamsImplShared},
-    timer::{HostTimer, HostTimerImpl, PluginTimer},
-};
-use clack_host::{
-    host::{self, HostError, HostHandlers, HostInfo},
-    plugin::{
-        InitializedPluginHandle, InitializingPluginHandle, PluginInstance, PluginMainThreadHandle,
-    },
-};
-use futures::{SinkExt, StreamExt};
-use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui};
 use gpui::{
     AnyWindowHandle, App, AppContext, AsyncApp, Context, IntoElement, Pixels, Render, SharedString,
-    Size, Subscription, Window, WindowBounds, WindowOptions, div,
+    Size, Subscription, Window, WindowBounds, WindowOptions,
 };
-use raw_window_handle::RawWindowHandle;
-use std::{
-    cell::RefCell,
-    ffi::{CStr, CString},
-    rc::{Rc, Weak},
-    time::Duration,
-};
+use std::rc::Rc;
 
 use super::ClapPlugin;
-use crate::{plugins::discovery::FoundPlugin, plugins::timers::Timers};
 
 #[derive(Default)]
 pub struct Gui {
@@ -47,7 +25,7 @@ impl Gui {
     }
 
     pub fn show(&mut self, clap_plugin: Rc<ClapPlugin>, window: &mut Window, app: &mut App) {
-        let Some(mut plugin_gui) = self.plugin_gui else {
+        let Some(plugin_gui) = self.plugin_gui else {
             println!("Plugin doesn't have a GUI!");
             return;
         };
@@ -147,7 +125,8 @@ impl Gui {
         if let Some(window_handle) = self.window_handle {
             app.update_window(window_handle, |_, window, _| {
                 window.resize(new_size.to_size(window));
-            });
+            })
+            .expect("update_window should succeed");
         }
     }
 }
@@ -165,7 +144,7 @@ impl ClapPluginView {
         }
     }
 
-    fn on_window_bounds(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_window_bounds(&mut self, window: &mut Window, _cx: &mut Context<Self>) {
         let new_size = window.window_bounds().get_bounds().size;
         if new_size != self.last_size {
             self.last_size = new_size;
@@ -181,13 +160,15 @@ impl ClapPluginView {
                 return;
             }
 
-            plugin_gui.set_size(&mut handle, new_size.to_gui_size(window));
+            if let Err(e) = plugin_gui.set_size(&mut handle, new_size.to_gui_size(window)) {
+                println!("WARNING: set_size failed: {:?}", e);
+            }
         }
     }
 }
 
 impl Render for ClapPluginView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         gpui::Empty
     }
 }

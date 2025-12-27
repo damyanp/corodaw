@@ -1,29 +1,21 @@
-#![allow(unused)]
 use clack_extensions::{
     audio_ports::PluginAudioPorts,
-    gui::{GuiApiType, GuiConfiguration, GuiSize, HostGui, HostGuiImpl, PluginGui},
+    gui::{GuiSize, HostGui, HostGuiImpl, PluginGui},
     log::{HostLog, HostLogImpl},
     params::{HostParams, HostParamsImplMainThread, HostParamsImplShared},
-    timer::{HostTimer, HostTimerImpl, PluginTimer},
+    timer::{HostTimer, PluginTimer},
 };
 use clack_host::{
-    host::{self, HostError, HostHandlers, HostInfo},
-    plugin::{
-        InitializedPluginHandle, InitializingPluginHandle, PluginInstance, PluginMainThreadHandle,
-    },
+    host::{self, HostHandlers, HostInfo},
+    plugin::{InitializedPluginHandle, InitializingPluginHandle, PluginInstance},
 };
-use futures::{SinkExt, StreamExt};
+use futures::StreamExt;
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
-use gpui::{
-    AnyWindowHandle, App, AppContext, AsyncApp, Context, IntoElement, Pixels, Render, SharedString,
-    Size, Subscription, Window, WindowBounds, WindowOptions, div,
-};
-use raw_window_handle::RawWindowHandle;
+use gpui::{App, AsyncApp, Window};
 use std::{
     cell::RefCell,
-    ffi::{CStr, CString},
+    ffi::CString,
     rc::{Rc, Weak},
-    time::Duration,
 };
 
 use crate::plugins::{discovery::FoundPlugin, gui::Gui, timers::Timers};
@@ -39,7 +31,7 @@ pub struct ClapPlugin {
 
 impl ClapPlugin {
     pub fn new(plugin: &mut FoundPlugin, app: &App) -> Rc<Self> {
-        let (sender, mut receiver) = unbounded();
+        let (sender, receiver) = unbounded();
 
         let bundle = plugin.load_bundle();
         bundle
@@ -133,7 +125,7 @@ impl HostHandlers for ClapPlugin {
 
     fn declare_extensions(
         builder: &mut clack_host::prelude::HostExtensions<Self>,
-        shared: &Self::Shared<'_>,
+        _shared: &Self::Shared<'_>,
     ) {
         builder
             .register::<HostLog>()
@@ -155,7 +147,9 @@ impl HostLogImpl for SharedHandler {
 
 impl HostGuiImpl for SharedHandler {
     fn resize_hints_changed(&self) {
-        self.channel.unbounded_send(Message::ResizeHintsChanged);
+        self.channel
+            .unbounded_send(Message::ResizeHintsChanged)
+            .expect("unbounded_send should always succeed");
     }
 
     fn request_resize(&self, new_size: GuiSize) -> Result<(), clack_host::prelude::HostError> {
@@ -172,20 +166,20 @@ impl HostGuiImpl for SharedHandler {
         todo!()
     }
 
-    fn closed(&self, was_destroyed: bool) {
+    fn closed(&self, _was_destroyed: bool) {
         todo!()
     }
 }
 
 impl<'a> HostParamsImplMainThread for MainThreadHandler<'a> {
-    fn rescan(&mut self, flags: clack_extensions::params::ParamRescanFlags) {
+    fn rescan(&mut self, _flags: clack_extensions::params::ParamRescanFlags) {
         todo!()
     }
 
     fn clear(
         &mut self,
-        param_id: clack_host::prelude::ClapId,
-        flags: clack_extensions::params::ParamClearFlags,
+        _param_id: clack_host::prelude::ClapId,
+        _flags: clack_extensions::params::ParamClearFlags,
     ) {
         todo!()
     }
@@ -213,7 +207,9 @@ impl<'a> host::SharedHandler<'a> for SharedHandler {
     }
 
     fn request_callback(&self) {
-        self.channel.unbounded_send(Message::RunOnMainThread);
+        self.channel
+            .unbounded_send(Message::RunOnMainThread)
+            .expect("Unbounded send should already succeed");
     }
 }
 
@@ -221,7 +217,7 @@ pub struct MainThreadHandler<'a> {
     shared: &'a SharedHandler,
     plugin: Option<InitializedPluginHandle<'a>>,
     timer_support: Option<PluginTimer>,
-    timers: Rc<Timers>,
+    _timers: Rc<Timers>,
 }
 
 impl<'a> MainThreadHandler<'a> {
@@ -230,7 +226,7 @@ impl<'a> MainThreadHandler<'a> {
             shared,
             plugin: None,
             timer_support: None,
-            timers: Rc::new(Timers::new()),
+            _timers: Rc::new(Timers::new()),
         }
     }
 }
@@ -239,9 +235,12 @@ impl<'a> host::MainThreadHandler<'a> for MainThreadHandler<'a> {
     fn initialized(&mut self, instance: InitializedPluginHandle<'a>) {
         println!("Initialized!");
         self.timer_support = instance.get_extension();
-        self.shared.channel.unbounded_send(Message::Initialized {
-            plugin_gui: instance.get_extension(),
-        });
+        self.shared
+            .channel
+            .unbounded_send(Message::Initialized {
+                plugin_gui: instance.get_extension(),
+            })
+            .expect("unbounded_send should always succeed");
         self.plugin = Some(instance);
     }
 }
