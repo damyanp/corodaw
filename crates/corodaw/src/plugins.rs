@@ -1,5 +1,5 @@
 use clack_extensions::{
-    audio_ports::PluginAudioPorts,
+    audio_ports::{AudioPortInfoBuffer, PluginAudioPorts},
     gui::{GuiSize, HostGui, HostGuiImpl, PluginGui},
     log::{HostLog, HostLogImpl},
     params::{HostParams, HostParamsImplMainThread, HostParamsImplShared},
@@ -27,6 +27,7 @@ mod timers;
 pub struct ClapPlugin {
     plugin: RefCell<PluginInstance<Self>>,
     gui: RefCell<Gui>,
+    plugin_audio_ports: RefCell<Option<PluginAudioPorts>>,
 }
 
 impl ClapPlugin {
@@ -57,6 +58,7 @@ impl ClapPlugin {
         let clap_plugin = Rc::new(Self {
             plugin: RefCell::new(plugin),
             gui: RefCell::new(Gui::default()),
+            plugin_audio_ports: RefCell::new(None),
         });
 
         let weak_plugin = Rc::downgrade(&clap_plugin);
@@ -79,8 +81,42 @@ impl ClapPlugin {
             && let Some(clap_plugin) = Weak::upgrade(&clap_plugin)
         {
             match msg {
-                Message::Initialized { plugin_gui } => {
+                Message::Initialized {
+                    plugin_gui,
+                    plugin_audio_ports,
+                } => {
                     clap_plugin.gui.borrow_mut().set_plugin_gui(plugin_gui);
+                    *clap_plugin.plugin_audio_ports.borrow_mut() = plugin_audio_ports;
+
+                    if let Some(p) = *clap_plugin.plugin_audio_ports.borrow_mut() {
+                        let mut plugin = clap_plugin.plugin.borrow_mut();
+                        let mut h = plugin.plugin_handle();
+                        let inputs = p.count(&mut h, true);
+                        let outputs = p.count(&mut h, false);
+                        println!("{} inputs, {} outputs", inputs, outputs);
+
+                        let mut dump = |count, is_input| {
+                            for i in 0..count {
+                                let mut buffer = AudioPortInfoBuffer::new();
+                                let info = p.get(&mut h, i, is_input, &mut buffer).unwrap();
+
+                                println!(
+                                    "{}: '{}' Channel Count={} Flags={:?} Type:{:?}",
+                                    i,
+                                    str::from_utf8(info.name).unwrap(),
+                                    info.channel_count,
+                                    info.flags,
+                                    info.port_type
+                                );
+                            }
+                        };
+
+                        println!("Inputs:");
+                        dump(inputs, true);
+
+                        println!("Outputs:");
+                        dump(outputs, false);
+                    }
                 }
                 Message::RunOnMainThread => {
                     clap_plugin
@@ -112,7 +148,10 @@ impl ClapPlugin {
 }
 
 enum Message {
-    Initialized { plugin_gui: Option<PluginGui> },
+    Initialized {
+        plugin_gui: Option<PluginGui>,
+        plugin_audio_ports: Option<PluginAudioPorts>,
+    },
     RunOnMainThread,
     ResizeHintsChanged,
     RequestResize(GuiSize),
@@ -195,6 +234,7 @@ unsafe impl Send for ClapPluginShared {}
 
 impl<'a> host::SharedHandler<'a> for ClapPluginShared {
     fn initializing(&self, instance: InitializingPluginHandle<'a>) {
+        println!("initializing");
         let _ = instance.get_extension::<PluginAudioPorts>();
     }
 
@@ -239,6 +279,7 @@ impl<'a> host::MainThreadHandler<'a> for ClapPluginMainThread<'a> {
             .channel
             .unbounded_send(Message::Initialized {
                 plugin_gui: instance.get_extension(),
+                plugin_audio_ports: instance.get_extension(),
             })
             .expect("unbounded_send should always succeed");
         self.plugin = Some(instance);
