@@ -40,14 +40,14 @@ impl ClapPlugin {
 
         let id = plugin.id.clone();
 
-        let shared = SharedHandler { channel: sender };
+        let shared = ClapPluginShared { channel: sender };
         let plugin_id = CString::new(id.as_str()).unwrap();
         let host =
             HostInfo::new("corodaw", "damyanp", "https://github.com/damyanp", "0.0.1").unwrap();
 
         let plugin = clack_host::plugin::PluginInstance::new(
             move |_| shared,
-            move |shared| MainThreadHandler::new(shared),
+            move |shared| ClapPluginMainThread::new(shared),
             &bundle,
             plugin_id.as_c_str(),
             &host,
@@ -119,8 +119,8 @@ enum Message {
 }
 
 impl HostHandlers for ClapPlugin {
-    type Shared<'a> = SharedHandler;
-    type MainThread<'a> = MainThreadHandler<'a>;
+    type Shared<'a> = ClapPluginShared;
+    type MainThread<'a> = ClapPluginMainThread<'a>;
     type AudioProcessor<'a> = AudioProcessorHandler;
 
     fn declare_extensions(
@@ -135,17 +135,17 @@ impl HostHandlers for ClapPlugin {
     }
 }
 
-pub struct SharedHandler {
+pub struct ClapPluginShared {
     channel: UnboundedSender<Message>,
 }
 
-impl HostLogImpl for SharedHandler {
+impl HostLogImpl for ClapPluginShared {
     fn log(&self, severity: clack_extensions::log::LogSeverity, message: &str) {
         println!("[host log] {}: {}", severity, message);
     }
 }
 
-impl HostGuiImpl for SharedHandler {
+impl HostGuiImpl for ClapPluginShared {
     fn resize_hints_changed(&self) {
         self.channel
             .unbounded_send(Message::ResizeHintsChanged)
@@ -171,7 +171,7 @@ impl HostGuiImpl for SharedHandler {
     }
 }
 
-impl<'a> HostParamsImplMainThread for MainThreadHandler<'a> {
+impl<'a> HostParamsImplMainThread for ClapPluginMainThread<'a> {
     fn rescan(&mut self, _flags: clack_extensions::params::ParamRescanFlags) {
         todo!()
     }
@@ -185,15 +185,15 @@ impl<'a> HostParamsImplMainThread for MainThreadHandler<'a> {
     }
 }
 
-impl HostParamsImplShared for SharedHandler {
+impl HostParamsImplShared for ClapPluginShared {
     fn request_flush(&self) {
         todo!()
     }
 }
 
-unsafe impl Send for SharedHandler {}
+unsafe impl Send for ClapPluginShared {}
 
-impl<'a> host::SharedHandler<'a> for SharedHandler {
+impl<'a> host::SharedHandler<'a> for ClapPluginShared {
     fn initializing(&self, instance: InitializingPluginHandle<'a>) {
         let _ = instance.get_extension::<PluginAudioPorts>();
     }
@@ -213,15 +213,15 @@ impl<'a> host::SharedHandler<'a> for SharedHandler {
     }
 }
 
-pub struct MainThreadHandler<'a> {
-    shared: &'a SharedHandler,
+pub struct ClapPluginMainThread<'a> {
+    shared: &'a ClapPluginShared,
     plugin: Option<InitializedPluginHandle<'a>>,
     timer_support: Option<PluginTimer>,
     _timers: Rc<Timers>,
 }
 
-impl<'a> MainThreadHandler<'a> {
-    fn new(shared: &'a SharedHandler) -> Self {
+impl<'a> ClapPluginMainThread<'a> {
+    fn new(shared: &'a ClapPluginShared) -> Self {
         Self {
             shared,
             plugin: None,
@@ -231,7 +231,7 @@ impl<'a> MainThreadHandler<'a> {
     }
 }
 
-impl<'a> host::MainThreadHandler<'a> for MainThreadHandler<'a> {
+impl<'a> host::MainThreadHandler<'a> for ClapPluginMainThread<'a> {
     fn initialized(&mut self, instance: InitializedPluginHandle<'a>) {
         println!("Initialized!");
         self.timer_support = instance.get_extension();

@@ -8,9 +8,9 @@ use std::{
 use clack_extensions::timer::{HostTimerImpl, PluginTimer, TimerId};
 use clack_host::plugin::PluginMainThreadHandle;
 
-use super::MainThreadHandler;
+use super::ClapPluginMainThread;
 
-impl<'a> HostTimerImpl for MainThreadHandler<'a> {
+impl<'a> HostTimerImpl for ClapPluginMainThread<'a> {
     fn register_timer(
         &mut self,
         _period_ms: u32,
