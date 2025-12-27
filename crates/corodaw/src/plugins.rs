@@ -88,7 +88,7 @@ impl ClapPlugin {
         {
             match msg {
                 Message::Initialized { plugin_gui } => {
-                    clap_plugin.gui.borrow_mut().plugin_gui = plugin_gui;
+                    clap_plugin.gui.borrow_mut().set_plugin_gui(plugin_gui);
                 }
                 Message::RunOnMainThread => {
                     clap_plugin
@@ -115,7 +115,7 @@ impl ClapPlugin {
     }
 
     pub fn has_gui(&self) -> bool {
-        self.gui.borrow().window_handle.is_some()
+        self.gui.borrow().has_gui()
     }
 }
 

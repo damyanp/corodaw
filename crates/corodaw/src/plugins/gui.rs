@@ -31,12 +31,21 @@ use crate::{plugins::discovery::FoundPlugin, plugins::timers::Timers};
 
 #[derive(Default)]
 pub struct Gui {
-    pub plugin_gui: Option<PluginGui>,
-    pub window_handle: Option<AnyWindowHandle>,
+    plugin_gui: Option<PluginGui>,
+    window_handle: Option<AnyWindowHandle>,
     window_closed_subscription: Option<Subscription>,
 }
 
 impl Gui {
+    pub fn set_plugin_gui(&mut self, plugin_gui: Option<PluginGui>) {
+        assert!(self.plugin_gui.is_none());
+        self.plugin_gui = plugin_gui;
+    }
+
+    pub fn has_gui(&self) -> bool {
+        self.window_handle.is_some()
+    }
+
     pub fn show(&mut self, clap_plugin: Rc<ClapPlugin>, window: &mut Window, app: &mut App) {
         let Some(mut plugin_gui) = self.plugin_gui else {
             println!("Plugin doesn't have a GUI!");
