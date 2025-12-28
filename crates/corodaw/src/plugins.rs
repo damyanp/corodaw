@@ -19,7 +19,10 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use crate::plugins::{discovery::FoundPlugin, gui::Gui, timers::Timers};
+use crate::{
+    audio_graph,
+    plugins::{discovery::FoundPlugin, gui::Gui, timers::Timers},
+};
 
 pub mod discovery;
 mod gui;
@@ -147,7 +150,43 @@ impl ClapPlugin {
         self.gui.borrow().has_gui()
     }
 
-    pub fn get_audio_processor(&self) -> PluginAudioProcessor<ClapPlugin> {
+    pub fn get_audio_graph_node_desc(&self, is_generator: bool) -> audio_graph::NodeDesc {
+        let processor = Box::new(self.get_audio_processor());
+
+        let audio_ports = self.plugin_audio_ports.borrow_mut();
+        let mut plugin = self.plugin.borrow_mut();
+        let mut handle = plugin.plugin_handle();
+
+        let mut collect_ports = |is_input| {
+            if let Some(audio_ports) = *audio_ports {
+                let count = audio_ports.count(&mut handle, is_input);
+                (0..count)
+                    .map(|index| {
+                        let mut buffer = AudioPortInfoBuffer::new();
+                        let info = audio_ports
+                            .get(&mut handle, index, is_input, &mut buffer)
+                            .unwrap();
+
+                        audio_graph::AudioPortDesc {
+                            _channel_count: info.channel_count,
+                            _sample_format: cpal::SampleFormat::F32,
+                        }
+                    })
+                    .collect()
+            } else {
+                Vec::default()
+            }
+        };
+
+        audio_graph::NodeDesc {
+            _is_generator: is_generator,
+            _processor: processor,
+            _audio_inputs: collect_ports(true),
+            _audio_outputs: collect_ports(false),
+        }
+    }
+
+    fn get_audio_processor(&self) -> PluginAudioProcessor<ClapPlugin> {
         let configuration = PluginAudioConfiguration {
             sample_rate: 48_000.0,
             min_frames_count: 1,

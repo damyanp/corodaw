@@ -40,12 +40,7 @@ impl Module {
         let plugin = RefCell::get_mut(&mut plugin);
 
         let plugin = ClapPlugin::new(plugin, cx);
-        let plugin_id = audio_graph.add_node(
-            true,
-            Box::new(plugin.get_audio_processor()),
-            Vec::new(),
-            Vec::new(),
-        );
+        let plugin_id = audio_graph.add_node(plugin.get_audio_graph_node_desc(true));
 
         Self {
             name,

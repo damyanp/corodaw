@@ -12,7 +12,7 @@ use crate::plugins::ClapPlugin;
 pub struct NodeId(usize);
 
 enum Message {
-    AddNode(NodeDesc),
+    AddNode { id: NodeId, desc: NodeDesc },
 }
 
 pub fn audio_graph() -> (AudioGraph, AudioGraphWorker) {
@@ -33,27 +33,15 @@ impl AudioGraph {
         }
     }
 
-    pub fn add_node(
-        &mut self,
-        is_generator: bool,
-        processor: Box<dyn Processor>,
-        audio_inputs: Vec<AudioPortDesc>,
-        audio_outputs: Vec<AudioPortDesc>,
-    ) -> NodeId {
-        let node_id = self.next_node_id;
+    pub fn add_node(&mut self, desc: NodeDesc) -> NodeId {
+        let id = self.next_node_id;
         self.next_node_id.0 += 1;
 
         self.sender
-            .send(Message::AddNode(NodeDesc {
-                id: node_id,
-                _is_generator: is_generator,
-                _processor: processor,
-                _audio_inputs: audio_inputs,
-                _audio_outputs: audio_outputs,
-            }))
+            .send(Message::AddNode { id, desc })
             .expect("send should not fail");
 
-        node_id
+        id
     }
 }
 
@@ -78,9 +66,18 @@ impl AudioGraphWorker {
     fn process_messages(&mut self) {
         while let Ok(message) = self.receiver.try_recv() {
             match message {
-                Message::AddNode(node_desc) => {
-                    println!("Added node {:?}", node_desc.id);
-                    let previous = self.nodes.insert(node_desc.id, node_desc);
+                Message::AddNode { id, desc } => {
+                    println!("Added node {:?}", id);
+                    println!("Node inputs: ");
+                    for i in desc._audio_inputs.iter().enumerate() {
+                        println!("{}: {} channels", i.0, i.1._channel_count)
+                    }
+                    println!("Node outputs: ");
+                    for i in desc._audio_outputs.iter().enumerate() {
+                        println!("{}: {} channels", i.0, i.1._channel_count)
+                    }
+
+                    let previous = self.nodes.insert(id, desc);
                     assert!(previous.is_none());
                 }
             }
@@ -88,19 +85,18 @@ impl AudioGraphWorker {
     }
 }
 
-struct NodeDesc {
-    id: NodeId,
-    _is_generator: bool,
-    _processor: Box<dyn Processor>,
-    _audio_inputs: Vec<AudioPortDesc>,
-    _audio_outputs: Vec<AudioPortDesc>,
+pub struct NodeDesc {
+    pub _is_generator: bool,
+    pub _processor: Box<dyn Processor>,
+    pub _audio_inputs: Vec<AudioPortDesc>,
+    pub _audio_outputs: Vec<AudioPortDesc>,
 }
 
 pub trait Processor: Send {}
 
 pub struct AudioPortDesc {
-    _channel_count: u32,
-    _sample_format: SampleFormat,
+    pub _channel_count: u32,
+    pub _sample_format: SampleFormat,
 }
 
 impl Processor for PluginAudioProcessor<ClapPlugin> {}
