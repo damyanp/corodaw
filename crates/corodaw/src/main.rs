@@ -13,6 +13,8 @@ use crate::{
     plugins::discovery::{FoundPlugin, get_plugins},
 };
 
+mod audio;
+mod audio_graph;
 mod plugins;
 
 struct Module {
@@ -162,6 +164,8 @@ impl Render for Corodaw {
 }
 
 fn main() {
+    audio::t();
+
     let app = Application::new();
 
     let plugins = get_plugins();
