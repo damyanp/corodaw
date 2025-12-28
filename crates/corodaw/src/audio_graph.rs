@@ -1,58 +1,103 @@
-use std::{rc::Rc, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::mpsc::{Receiver, Sender, channel},
+};
 
-use clack_extensions::audio_ports::PluginAudioPorts;
-use clack_host::process::{PluginAudioProcessor, StoppedPluginAudioProcessor};
+use clack_host::process::PluginAudioProcessor;
 use cpal::SampleFormat;
-use gpui::SharedString;
 
 use crate::plugins::ClapPlugin;
 
-#[derive(Default)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
+pub struct NodeId(usize);
+
+enum Message {
+    AddNode(NodeDesc),
+}
+
+pub fn audio_graph() -> (AudioGraph, AudioGraphWorker) {
+    let (sender, receiver) = channel();
+    (AudioGraph::new(sender), AudioGraphWorker::new(receiver))
+}
+
 pub struct AudioGraph {
-    pub nodes: Vec<Node>,
+    next_node_id: NodeId,
+    sender: Sender<Message>,
 }
 
-struct Node {
-    contents: Box<dyn NodeContents + Send>,
-    // audio_inputs: Vec<AudioPort>,
-    // audio_outputs: Vec<AudioPort>,
-}
-
-pub trait NodeContents {
-    fn get_audio_inputs(&self) -> Vec<AudioPortDesc>;
-    fn get_audio_outputs(&self) -> Vec<AudioPortDesc>;
-}
-
-impl NodeContents for PluginAudioProcessor<ClapPlugin> {
-    fn get_audio_inputs(&self) -> Vec<AudioPortDesc> {
-        todo!()
+impl AudioGraph {
+    fn new(sender: Sender<Message>) -> Self {
+        Self {
+            next_node_id: NodeId(1),
+            sender,
+        }
     }
 
-    fn get_audio_outputs(&self) -> Vec<AudioPortDesc> {
-        todo!()
+    pub fn add_node(
+        &mut self,
+        processor: Box<dyn Processor>,
+        audio_inputs: Vec<AudioPortDesc>,
+        audio_outputs: Vec<AudioPortDesc>,
+    ) -> NodeId {
+        let node_id = self.next_node_id;
+        self.next_node_id.0 += 1;
+
+        self.sender
+            .send(Message::AddNode(NodeDesc {
+                id: node_id,
+                _processor: processor,
+                _audio_inputs: audio_inputs,
+                _audio_outputs: audio_outputs,
+            }))
+            .expect("send should not fail");
+
+        node_id
     }
 }
 
-fn test(x: PluginAudioProcessor<ClapPlugin>) -> Node {
-    Node {
-        contents: Box::new(x),
+pub struct AudioGraphWorker {
+    receiver: Receiver<Message>,
+    nodes: HashMap<NodeId, NodeDesc>,
+}
+
+impl AudioGraphWorker {
+    fn new(receiver: Receiver<Message>) -> Self {
+        Self {
+            receiver,
+            nodes: HashMap::new(),
+        }
+    }
+
+    pub fn process(&mut self, data: &mut [f32]) {
+        self.process_messages();
+        data.fill(0.0);
+    }
+
+    fn process_messages(&mut self) {
+        while let Ok(message) = self.receiver.try_recv() {
+            match message {
+                Message::AddNode(node_desc) => {
+                    println!("Added node {:?}", node_desc.id);
+                    let previous = self.nodes.insert(node_desc.id, node_desc);
+                    assert!(previous.is_none());
+                }
+            }
+        }
     }
 }
+
+struct NodeDesc {
+    id: NodeId,
+    _processor: Box<dyn Processor>,
+    _audio_inputs: Vec<AudioPortDesc>,
+    _audio_outputs: Vec<AudioPortDesc>,
+}
+
+pub trait Processor: Send {}
 
 pub struct AudioPortDesc {
-    name: SharedString,
-    channel_count: u32,
-    sample_format: SampleFormat,
+    _channel_count: u32,
+    _sample_format: SampleFormat,
 }
 
-struct AudioPort {
-    node: Arc<Node>,
-    name: SharedString,
-    destination: Arc<AudioPort>,
-}
-
-struct Fader {
-    gain: f32,
-}
-
-struct Mixer;
+impl Processor for PluginAudioProcessor<ClapPlugin> {}

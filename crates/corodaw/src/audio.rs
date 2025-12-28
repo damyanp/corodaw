@@ -1,26 +1,16 @@
-use std::{
-    sync::mpsc::{Receiver, Sender, channel},
-    time::Duration,
-};
-
-use crate::audio_graph::AudioGraph;
+use crate::audio_graph::AudioGraphWorker;
 use anyhow::Error;
 use cpal::{
     BufferSize, OutputCallbackInfo, Stream, StreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 
-enum Message {
-    SetGraph(AudioGraph),
-}
-
 pub struct Audio {
     _stream: Stream,
-    sender: Sender<Message>,
 }
 
 impl Audio {
-    pub fn new() -> Result<Audio, Error> {
+    pub fn new(audio_graph_worker: AudioGraphWorker) -> Result<Audio, Error> {
         let cpal = cpal::default_host();
         let device = cpal.default_output_device().unwrap();
 
@@ -30,13 +20,10 @@ impl Audio {
             buffer_size: BufferSize::Fixed(1024),
         };
 
-        let (sender, receiver) = channel();
-
         let mut audio_thread = AudioThread {
-            receiver,
-            audio_graph: None,
-            channels: config.channels,
-            sample_rate: config.sample_rate,
+            audio_graph_worker,
+            _channels: config.channels,
+            _sample_rate: config.sample_rate,
         };
 
         let stream = device.build_output_stream(
@@ -50,55 +37,18 @@ impl Audio {
 
         stream.play()?;
 
-        Ok(Audio {
-            _stream: stream,
-            sender,
-        })
-    }
-
-    pub fn set_audio_graph(&self, audio_graph: AudioGraph) -> Result<(), Error> {
-        self.sender
-            .send(Message::SetGraph(audio_graph))
-            .expect("Send should only fail if the receiver was dropped");
-        Ok(())
+        Ok(Audio { _stream: stream })
     }
 }
 
 struct AudioThread {
-    receiver: Receiver<Message>,
-    audio_graph: Option<AudioGraph>,
-    channels: u16,
-    sample_rate: u32,
+    audio_graph_worker: AudioGraphWorker,
+    _channels: u16,
+    _sample_rate: u32,
 }
 
 impl AudioThread {
     fn data_callback(&mut self, data: &mut [f32], _info: &OutputCallbackInfo) {
-        self.handle_messages();
-
-        if let Some(_audio_graph) = &self.audio_graph {
-            // todo!
-            data.fill(0.0);
-        } else {
-            data.fill(0.0);
-        }
+        self.audio_graph_worker.process(data);
     }
-
-    fn handle_messages(&mut self) {
-        while let Some(message) = self.receiver.try_recv().ok() {
-            match message {
-                Message::SetGraph(new_graph) => self.audio_graph = Some(new_graph),
-            }
-        }
-    }
-}
-pub fn t() -> Result<(), Error> {
-    let a = Audio::new()?;
-
-    std::thread::sleep(Duration::from_millis(50));
-    a.set_audio_graph(AudioGraph::default())?;
-    std::thread::sleep(Duration::from_millis(50));
-
-    drop(a);
-
-    Ok(())
 }

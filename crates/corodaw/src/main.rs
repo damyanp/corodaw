@@ -9,8 +9,12 @@ use gpui_component::{
 };
 
 use crate::{
-    plugins::ClapPlugin,
-    plugins::discovery::{FoundPlugin, get_plugins},
+    audio::Audio,
+    audio_graph::{AudioGraph, NodeId, audio_graph},
+    plugins::{
+        ClapPlugin,
+        discovery::{FoundPlugin, get_plugins},
+    },
 };
 
 mod audio;
@@ -21,20 +25,32 @@ struct Module {
     name: String,
     plugin: Rc<ClapPlugin>,
     main_volume: Entity<SliderState>,
+    _plugin_id: NodeId,
 }
 
 impl Module {
-    pub fn new(name: String, mut plugin: RefCell<FoundPlugin>, cx: &mut App) -> Self {
+    pub fn new(
+        name: String,
+        mut plugin: RefCell<FoundPlugin>,
+        audio_graph: &mut AudioGraph,
+        cx: &mut App,
+    ) -> Self {
         let main_volume = cx.new(|_| SliderState::new().min(0.0).max(1.0));
 
         let plugin = RefCell::get_mut(&mut plugin);
 
         let plugin = ClapPlugin::new(plugin, cx);
+        let plugin_id = audio_graph.add_node(
+            Box::new(plugin.get_audio_processor()),
+            Vec::new(),
+            Vec::new(),
+        );
 
         Self {
             name,
             plugin,
             main_volume,
+            _plugin_id: plugin_id,
         }
     }
 
@@ -92,6 +108,8 @@ pub struct Corodaw {
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
     modules: Vec<Entity<Module>>,
     counter: u32,
+    audio_graph: AudioGraph,
+    _audio: Audio,
 }
 
 impl Corodaw {
@@ -100,6 +118,9 @@ impl Corodaw {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let (audio_graph, audio_graph_worker) = audio_graph();
+        let audio = Audio::new(audio_graph_worker).unwrap();
+
         let searchable_plugins = SearchableVec::new(
             plugins
                 .iter()
@@ -114,6 +135,8 @@ impl Corodaw {
             plugin_selector,
             modules: Vec::default(), //vec![cx.new(|cx| Module::new(cx, "Master".to_owned()))],
             counter: 0,
+            audio_graph,
+            _audio: audio,
         }
     }
 
@@ -128,7 +151,7 @@ impl Corodaw {
         let module = cx.new(|cx| {
             let name = format!("Module {}: {}", self.counter, plugin.borrow().name);
 
-            Module::new(name, plugin, cx)
+            Module::new(name, plugin, &mut self.audio_graph, cx)
         });
 
         self.modules.push(module);
@@ -164,8 +187,6 @@ impl Render for Corodaw {
 }
 
 fn main() {
-    audio::t();
-
     let app = Application::new();
 
     let plugins = get_plugins();

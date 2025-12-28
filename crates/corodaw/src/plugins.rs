@@ -8,6 +8,7 @@ use clack_extensions::{
 use clack_host::{
     host::{self, HostHandlers, HostInfo},
     plugin::{InitializedPluginHandle, InitializingPluginHandle, PluginInstance},
+    process::{PluginAudioConfiguration, PluginAudioProcessor},
 };
 use futures::StreamExt;
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -145,6 +146,22 @@ impl ClapPlugin {
     pub fn has_gui(&self) -> bool {
         self.gui.borrow().has_gui()
     }
+
+    pub fn get_audio_processor(&self) -> PluginAudioProcessor<ClapPlugin> {
+        let configuration = PluginAudioConfiguration {
+            sample_rate: 48_000.0,
+            min_frames_count: 1,
+            max_frames_count: 100_000,
+        };
+        PluginAudioProcessor::Started(
+            self.plugin
+                .borrow_mut()
+                .activate(|_, _| (), configuration)
+                .unwrap()
+                .start_processing()
+                .unwrap(),
+        )
+    }
 }
 
 enum Message {
@@ -160,7 +177,7 @@ enum Message {
 impl HostHandlers for ClapPlugin {
     type Shared<'a> = ClapPluginShared;
     type MainThread<'a> = ClapPluginMainThread<'a>;
-    type AudioProcessor<'a> = AudioProcessorHandler;
+    type AudioProcessor<'a> = ();
 
     fn declare_extensions(
         builder: &mut clack_host::prelude::HostExtensions<Self>,
@@ -285,6 +302,3 @@ impl<'a> host::MainThreadHandler<'a> for ClapPluginMainThread<'a> {
         self.plugin = Some(instance);
     }
 }
-
-pub struct AudioProcessorHandler;
-impl<'a> host::AudioProcessorHandler<'a> for AudioProcessorHandler {}
