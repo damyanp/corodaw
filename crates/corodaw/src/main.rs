@@ -41,6 +41,7 @@ impl Module {
 
         let plugin = ClapPlugin::new(plugin, cx);
         let plugin_id = audio_graph.add_node(
+            true,
             Box::new(plugin.get_audio_processor()),
             Vec::new(),
             Vec::new(),

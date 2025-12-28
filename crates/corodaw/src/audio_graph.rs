@@ -35,6 +35,7 @@ impl AudioGraph {
 
     pub fn add_node(
         &mut self,
+        is_generator: bool,
         processor: Box<dyn Processor>,
         audio_inputs: Vec<AudioPortDesc>,
         audio_outputs: Vec<AudioPortDesc>,
@@ -45,6 +46,7 @@ impl AudioGraph {
         self.sender
             .send(Message::AddNode(NodeDesc {
                 id: node_id,
+                _is_generator: is_generator,
                 _processor: processor,
                 _audio_inputs: audio_inputs,
                 _audio_outputs: audio_outputs,
@@ -88,6 +90,7 @@ impl AudioGraphWorker {
 
 struct NodeDesc {
     id: NodeId,
+    _is_generator: bool,
     _processor: Box<dyn Processor>,
     _audio_inputs: Vec<AudioPortDesc>,
     _audio_outputs: Vec<AudioPortDesc>,
