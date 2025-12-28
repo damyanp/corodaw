@@ -11,7 +11,10 @@ use clack_host::{
     process::{PluginAudioConfiguration, PluginAudioProcessor},
 };
 use futures::StreamExt;
-use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+use futures_channel::{
+    mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
+    oneshot,
+};
 use gpui::{App, AsyncApp, Window};
 use std::{
     cell::RefCell,
@@ -35,7 +38,7 @@ pub struct ClapPlugin {
 }
 
 impl ClapPlugin {
-    pub fn new(plugin: &mut FoundPlugin, app: &App) -> Rc<Self> {
+    pub async fn new(plugin: &mut FoundPlugin, app: &AsyncApp) -> Rc<Self> {
         let (sender, receiver) = unbounded();
 
         let bundle = plugin.load_bundle();
@@ -59,6 +62,8 @@ impl ClapPlugin {
         )
         .unwrap();
 
+        let (initialized_sender, initialized_receiver) = oneshot::channel();
+
         let clap_plugin = Rc::new(Self {
             plugin: RefCell::new(plugin),
             gui: RefCell::new(Gui::default()),
@@ -68,77 +73,23 @@ impl ClapPlugin {
         let weak_plugin = Rc::downgrade(&clap_plugin);
         app.spawn(async move |app| {
             println!("[{}] spawn message receiver", id);
-            ClapPlugin::handle_messages(weak_plugin, receiver, app.clone()).await;
+
+            let mut handler = ClapPluginMessageHandler {
+                weak_plugin,
+                receiver,
+                app: app.clone(),
+                initialized_sender: Some(initialized_sender),
+            };
+
+            handler.run().await;
+
             println!("[{}] end message receiver", id);
         })
         .detach();
 
+        initialized_receiver.await.unwrap();
+
         clap_plugin
-    }
-
-    async fn handle_messages(
-        clap_plugin: Weak<ClapPlugin>,
-        mut receiver: UnboundedReceiver<Message>,
-        mut app: AsyncApp,
-    ) {
-        while let Some(msg) = receiver.next().await
-            && let Some(clap_plugin) = Weak::upgrade(&clap_plugin)
-        {
-            match msg {
-                Message::Initialized {
-                    plugin_gui,
-                    plugin_audio_ports,
-                } => {
-                    clap_plugin.gui.borrow_mut().set_plugin_gui(plugin_gui);
-                    *clap_plugin.plugin_audio_ports.borrow_mut() = plugin_audio_ports;
-
-                    if let Some(p) = *clap_plugin.plugin_audio_ports.borrow_mut() {
-                        let mut plugin = clap_plugin.plugin.borrow_mut();
-                        let mut h = plugin.plugin_handle();
-                        let inputs = p.count(&mut h, true);
-                        let outputs = p.count(&mut h, false);
-                        println!("{} inputs, {} outputs", inputs, outputs);
-
-                        let mut dump = |count, is_input| {
-                            for i in 0..count {
-                                let mut buffer = AudioPortInfoBuffer::new();
-                                let info = p.get(&mut h, i, is_input, &mut buffer).unwrap();
-
-                                println!(
-                                    "{}: '{}' Channel Count={} Flags={:?} Type:{:?}",
-                                    i,
-                                    str::from_utf8(info.name).unwrap(),
-                                    info.channel_count,
-                                    info.flags,
-                                    info.port_type
-                                );
-                            }
-                        };
-
-                        println!("Inputs:");
-                        dump(inputs, true);
-
-                        println!("Outputs:");
-                        dump(outputs, false);
-                    }
-                }
-                Message::RunOnMainThread => {
-                    clap_plugin
-                        .plugin
-                        .borrow_mut()
-                        .call_on_main_thread_callback();
-                }
-                Message::ResizeHintsChanged => {
-                    println!("Handling changed resize hints not supported");
-                }
-                Message::RequestResize(new_size) => {
-                    clap_plugin
-                        .gui
-                        .borrow_mut()
-                        .request_resize(new_size, &mut app);
-                }
-            }
-        }
     }
 
     pub fn show_gui(self: &Rc<Self>, window: &mut Window, app: &mut App) {
@@ -200,6 +151,82 @@ impl ClapPlugin {
                 .start_processing()
                 .unwrap(),
         )
+    }
+}
+
+struct ClapPluginMessageHandler {
+    weak_plugin: Weak<ClapPlugin>,
+    receiver: UnboundedReceiver<Message>,
+    app: AsyncApp,
+    initialized_sender: Option<oneshot::Sender<()>>,
+}
+
+impl ClapPluginMessageHandler {
+    async fn run(&mut self) {
+        while let Some(msg) = self.receiver.next().await
+            && let Some(clap_plugin) = Weak::upgrade(&self.weak_plugin)
+        {
+            match msg {
+                Message::Initialized {
+                    plugin_gui,
+                    plugin_audio_ports,
+                } => {
+                    clap_plugin.gui.borrow_mut().set_plugin_gui(plugin_gui);
+                    *clap_plugin.plugin_audio_ports.borrow_mut() = plugin_audio_ports;
+
+                    if let Some(p) = *clap_plugin.plugin_audio_ports.borrow_mut() {
+                        let mut plugin = clap_plugin.plugin.borrow_mut();
+                        let mut h = plugin.plugin_handle();
+                        let inputs = p.count(&mut h, true);
+                        let outputs = p.count(&mut h, false);
+                        println!("{} inputs, {} outputs", inputs, outputs);
+
+                        let mut dump = |count, is_input| {
+                            for i in 0..count {
+                                let mut buffer = AudioPortInfoBuffer::new();
+                                let info = p.get(&mut h, i, is_input, &mut buffer).unwrap();
+
+                                println!(
+                                    "{}: '{}' Channel Count={} Flags={:?} Type:{:?}",
+                                    i,
+                                    str::from_utf8(info.name).unwrap(),
+                                    info.channel_count,
+                                    info.flags,
+                                    info.port_type
+                                );
+                            }
+                        };
+
+                        println!("Inputs:");
+                        dump(inputs, true);
+
+                        println!("Outputs:");
+                        dump(outputs, false);
+                    }
+
+                    let _ = self
+                        .initialized_sender
+                        .take()
+                        .expect("Should only be initialized once!")
+                        .send(());
+                }
+                Message::RunOnMainThread => {
+                    clap_plugin
+                        .plugin
+                        .borrow_mut()
+                        .call_on_main_thread_callback();
+                }
+                Message::ResizeHintsChanged => {
+                    println!("Handling changed resize hints not supported");
+                }
+                Message::RequestResize(new_size) => {
+                    clap_plugin
+                        .gui
+                        .borrow_mut()
+                        .request_resize(new_size, &mut self.app);
+                }
+            }
+        }
     }
 }
 

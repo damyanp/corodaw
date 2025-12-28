@@ -29,17 +29,18 @@ struct Module {
 }
 
 impl Module {
-    pub fn new(
+    pub async fn new(
         name: String,
         mut plugin: RefCell<FoundPlugin>,
         audio_graph: &mut AudioGraph,
-        cx: &mut App,
+        cx: &mut AsyncApp,
     ) -> Self {
-        let main_volume = cx.new(|_| SliderState::new().min(0.0).max(1.0));
+        let main_volume = cx.new(|_| SliderState::new().min(0.0).max(1.0)).unwrap();
 
         let plugin = RefCell::get_mut(&mut plugin);
 
-        let plugin = ClapPlugin::new(plugin, cx);
+        let plugin = ClapPlugin::new(plugin, cx).await;
+
         let plugin_id = audio_graph.add_node(plugin.get_audio_graph_node_desc(true));
 
         Self {
@@ -104,7 +105,7 @@ pub struct Corodaw {
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
     modules: Vec<Entity<Module>>,
     counter: u32,
-    audio_graph: AudioGraph,
+    audio_graph: Rc<RefCell<AudioGraph>>,
     _audio: Audio,
 }
 
@@ -131,7 +132,7 @@ impl Corodaw {
             plugin_selector,
             modules: Vec::default(), //vec![cx.new(|cx| Module::new(cx, "Master".to_owned()))],
             counter: 0,
-            audio_graph,
+            audio_graph: Rc::new(RefCell::new(audio_graph)),
             _audio: audio,
         }
     }
@@ -144,14 +145,22 @@ impl Corodaw {
             .expect("The Add button should only be enabled if a plugin is selected")
             .clone();
 
-        let module = cx.new(|cx| {
-            let name = format!("Module {}: {}", self.counter, plugin.borrow().name);
-
-            Module::new(name, plugin, &mut self.audio_graph, cx)
-        });
-
-        self.modules.push(module);
+        let name = format!("Module {}: {}", self.counter, plugin.borrow().name);
         self.counter += 1;
+
+        let audio_graph = self.audio_graph.clone();
+
+        cx.spawn(async move |e, cx| {
+            let mut audio_graph = audio_graph.borrow_mut();
+            let module = Module::new(name, plugin, &mut *audio_graph, cx).await;
+
+            e.update(cx, |corodaw, cx| {
+                let module = cx.new(|_| module);
+                corodaw.modules.push(module);
+            })
+            .unwrap();
+        })
+        .detach();
     }
 }
 
