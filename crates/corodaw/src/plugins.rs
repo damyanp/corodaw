@@ -174,36 +174,6 @@ impl ClapPluginMessageHandler {
                     clap_plugin.gui.borrow_mut().set_plugin_gui(plugin_gui);
                     *clap_plugin.plugin_audio_ports.borrow_mut() = plugin_audio_ports;
 
-                    if let Some(p) = *clap_plugin.plugin_audio_ports.borrow_mut() {
-                        let mut plugin = clap_plugin.plugin.borrow_mut();
-                        let mut h = plugin.plugin_handle();
-                        let inputs = p.count(&mut h, true);
-                        let outputs = p.count(&mut h, false);
-                        println!("{} inputs, {} outputs", inputs, outputs);
-
-                        let mut dump = |count, is_input| {
-                            for i in 0..count {
-                                let mut buffer = AudioPortInfoBuffer::new();
-                                let info = p.get(&mut h, i, is_input, &mut buffer).unwrap();
-
-                                println!(
-                                    "{}: '{}' Channel Count={} Flags={:?} Type:{:?}",
-                                    i,
-                                    str::from_utf8(info.name).unwrap(),
-                                    info.channel_count,
-                                    info.flags,
-                                    info.port_type
-                                );
-                            }
-                        };
-
-                        println!("Inputs:");
-                        dump(inputs, true);
-
-                        println!("Outputs:");
-                        dump(outputs, false);
-                    }
-
                     let _ = self
                         .initialized_sender
                         .take()
