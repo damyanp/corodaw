@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 
-use audio_blocks::AudioBlock;
 use clack_host::{
     prelude::{
         AudioPortBuffer, AudioPortBufferType, AudioPorts, InputAudioBuffers, InputEvents,
@@ -39,12 +38,24 @@ pub fn get_audio_graph_node_desc_for_clap_plugin(
 
 struct ClapPluginProcessor {
     plugin_audio_processor: PluginAudioProcessor<ClapPlugin>,
+    audio_ports: AudioPorts,
 }
 
 impl ClapPluginProcessor {
     fn new(clap_plugin: &ClapPlugin) -> Self {
+        let output_ports = clap_plugin.get_audio_ports(false);
+        let total_channel_count = output_ports
+            .iter()
+            .copied()
+            .reduce(|a, b| a + b)
+            .unwrap_or(0);
+
+        let audio_ports =
+            AudioPorts::with_capacity(total_channel_count as usize, output_ports.len());
+
         Self {
             plugin_audio_processor: clap_plugin.get_audio_processor(),
+            audio_ports,
         }
     }
 }
@@ -65,22 +76,12 @@ impl Processor for ClapPluginProcessor {
         let steady_time = None;
         let transport = None;
 
-        let total_channel_count = out_audio_buffers
-            .iter()
-            .map(|buffer| buffer.num_channels())
-            .reduce(|a, b| a + b)
-            .unwrap_or(0);
-
-        let mut audio_ports =
-            AudioPorts::with_capacity(total_channel_count as usize, out_audio_buffers.len());
-
         let mut audio_outputs =
-            audio_ports.with_output_buffers(out_audio_buffers.iter_mut().map(|port| {
-                AudioPortBuffer {
+            self.audio_ports
+                .with_output_buffers(out_audio_buffers.iter_mut().map(|port| AudioPortBuffer {
                     latency: 0,
                     channels: AudioPortBufferType::f32_output_only(port.channels_mut()),
-                }
-            }));
+                }));
 
         processor
             .process(
