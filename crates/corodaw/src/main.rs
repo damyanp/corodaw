@@ -34,7 +34,7 @@ impl Module {
     pub async fn new(
         name: String,
         mut plugin: RefCell<FoundPlugin>,
-        audio_graph: &mut AudioGraph,
+        audio_graph: Rc<RefCell<AudioGraph>>,
         cx: &mut AsyncApp,
     ) -> Self {
         let main_volume = cx.new(|_| SliderState::new().min(0.0).max(1.0)).unwrap();
@@ -43,8 +43,9 @@ impl Module {
 
         let plugin = ClapPlugin::new(plugin, cx).await;
 
-        let plugin_id =
-            audio_graph.add_node(get_audio_graph_node_desc_for_clap_plugin(&plugin, true));
+        let plugin_id = audio_graph
+            .borrow_mut()
+            .add_node(get_audio_graph_node_desc_for_clap_plugin(&plugin, true));
 
         Self {
             name,
@@ -154,8 +155,7 @@ impl Corodaw {
         let audio_graph = self.audio_graph.clone();
 
         cx.spawn(async move |e, cx| {
-            let mut audio_graph = audio_graph.borrow_mut();
-            let module = Module::new(name, plugin, &mut audio_graph, cx).await;
+            let module = Module::new(name, plugin, audio_graph, cx).await;
 
             e.update(cx, |corodaw, cx| {
                 let module = cx.new(|_| module);
