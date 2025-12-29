@@ -10,7 +10,7 @@ pub struct Audio {
 }
 
 impl Audio {
-    pub fn new(audio_graph_worker: AudioGraphWorker) -> Result<Audio, Error> {
+    pub fn new(mut audio_graph_worker: AudioGraphWorker) -> Result<Audio, Error> {
         let cpal = cpal::default_host();
         let device = cpal.default_output_device().unwrap();
 
@@ -19,6 +19,8 @@ impl Audio {
             sample_rate: 48_000,
             buffer_size: BufferSize::Fixed(1024),
         };
+
+        audio_graph_worker.configure(config.channels, config.sample_rate);
 
         let mut audio_thread = AudioThread {
             audio_graph_worker,

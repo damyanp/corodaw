@@ -102,7 +102,7 @@ impl ClapPlugin {
     }
 
     pub fn get_audio_graph_node_desc(&self, is_generator: bool) -> audio_graph::NodeDesc {
-        let processor = Box::new(self.get_audio_processor());
+        let processor = RefCell::new(Box::new(self.get_audio_processor()));
 
         let audio_ports = self.plugin_audio_ports.borrow_mut();
         let mut plugin = self.plugin.borrow_mut();
@@ -119,8 +119,7 @@ impl ClapPlugin {
                             .unwrap();
 
                         audio_graph::AudioPortDesc {
-                            _channel_count: info.channel_count,
-                            _sample_format: cpal::SampleFormat::F32,
+                            num_channels: info.channel_count.try_into().expect("Are there really so many channels that we can't fit the count into a u16?"),
                         }
                     })
                     .collect()
@@ -131,9 +130,9 @@ impl ClapPlugin {
 
         audio_graph::NodeDesc {
             _is_generator: is_generator,
-            _processor: processor,
-            _audio_inputs: collect_ports(true),
-            _audio_outputs: collect_ports(false),
+            processor,
+            audio_inputs: collect_ports(true),
+            audio_outputs: collect_ports(false),
         }
     }
 
