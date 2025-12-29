@@ -43,9 +43,10 @@ impl Module {
 
         let plugin = ClapPlugin::new(plugin, cx).await;
 
-        let plugin_id = audio_graph
-            .borrow_mut()
-            .add_node(get_audio_graph_node_desc_for_clap_plugin(&plugin, true));
+        let mut audio_graph = audio_graph.borrow_mut();
+        let plugin_id =
+            audio_graph.add_node(get_audio_graph_node_desc_for_clap_plugin(&plugin, true));
+        audio_graph.set_output_node(plugin_id, true);
 
         Self {
             name,

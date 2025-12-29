@@ -15,6 +15,7 @@ pub struct NodeId(usize);
 
 enum Message {
     AddNode { id: NodeId, desc: NodeDesc },
+    SetOutputNode(NodeId, bool),
 }
 
 pub fn audio_graph() -> (AudioGraph, AudioGraphWorker) {
@@ -44,6 +45,12 @@ impl AudioGraph {
             .expect("send should not fail");
 
         id
+    }
+
+    pub fn set_output_node(&mut self, node_id: NodeId, is_output: bool) {
+        self.sender
+            .send(Message::SetOutputNode(node_id, is_output))
+            .expect("send should not fail");
     }
 }
 
@@ -75,16 +82,25 @@ impl AudioGraphWorker {
         let num_frames = data.len() / (self.channels as usize);
         let mut block = AudioBlockInterleavedViewMut::from_slice(data, self.channels, num_frames);
 
-        // for now: just the first node
-        let node = self.nodes.iter_mut().next();
-        if let Some((_, node)) = node {
+        // Process all the nodes (TODO: do them in the right order!)
+        for node in self.nodes.values_mut() {
             node.process(num_frames);
-            let port = &node.audio_buffers.ports[0];
-
-            block.copy_from_block(port);
         }
 
-        //data.fill(0.0);
+        // Sum all the output from the output nodes
+        block.fill_with(0.0);
+
+        let output_ports = self
+            .nodes
+            .values()
+            .filter(|node| node.is_output)
+            .map(|node| &node.audio_buffers.ports[0]);
+        for port in output_ports {
+            for (dst, src) in block.frames_iter_mut().zip(port.frames_iter()) {
+                assert_eq!(port.num_channels(), port.num_channels());
+                dst.zip(src).for_each(|(dst, src)| *dst += *src);
+            }
+        }
     }
 
     fn process_messages(&mut self) {
@@ -94,6 +110,11 @@ impl AudioGraphWorker {
                     let previous = self.nodes.insert(id, Node::new(desc));
                     assert!(previous.is_none());
                 }
+                Message::SetOutputNode(node_id, is_output) => {
+                    self.nodes
+                        .get_mut(&node_id)
+                        .map(|node| node.is_output = is_output);
+                }
             }
         }
     }
@@ -102,6 +123,7 @@ impl AudioGraphWorker {
 struct Node {
     desc: NodeDesc,
     audio_buffers: AudioBuffers,
+    is_output: bool,
 }
 
 pub struct NodeDesc {
@@ -123,6 +145,7 @@ impl Node {
         Node {
             desc,
             audio_buffers,
+            is_output: false,
         }
     }
 
