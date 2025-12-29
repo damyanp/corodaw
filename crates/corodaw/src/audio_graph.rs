@@ -7,9 +7,8 @@ use std::{
 use audio_blocks::{
     AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, AudioBlockOps, AudioBlockSequential,
 };
-use clack_host::{prelude::*, process::PluginAudioProcessor};
 
-use crate::plugins::ClapPlugin;
+pub mod clap_adapter;
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
 pub struct NodeId(usize);
@@ -115,7 +114,7 @@ pub struct NodeDesc {
 impl Node {
     fn new(desc: NodeDesc) -> Self {
         assert!(
-            desc.audio_inputs.len() == 0,
+            desc.audio_inputs.is_empty(),
             "Audio inputs not yet implemented"
         );
 
@@ -169,51 +168,5 @@ impl AudioBuffers {
                 port.set_active_num_frames(num_frames);
             }
         }
-    }
-}
-
-impl Processor for PluginAudioProcessor<ClapPlugin> {
-    fn process(&mut self, out_audio_buffers: &mut [AudioBlockSequential<f32>]) {
-        let processor = if self.is_started() {
-            self.as_started_mut()
-        } else {
-            println!("Starting processor!");
-            self.start_processing()
-        }
-        .unwrap();
-
-        let audio_inputs = InputAudioBuffers::empty();
-        let input_events = InputEvents::empty();
-        let mut output_events = OutputEvents::void();
-        let steady_time = None;
-        let transport = None;
-
-        let total_channel_count = out_audio_buffers
-            .iter()
-            .map(|buffer| buffer.num_channels())
-            .reduce(|a, b| a + b)
-            .unwrap_or(0);
-
-        let mut audio_ports =
-            AudioPorts::with_capacity(total_channel_count as usize, out_audio_buffers.len());
-
-        let mut audio_outputs =
-            audio_ports.with_output_buffers(out_audio_buffers.iter_mut().map(|port| {
-                AudioPortBuffer {
-                    latency: 0,
-                    channels: AudioPortBufferType::f32_output_only(port.channels_mut()),
-                }
-            }));
-
-        processor
-            .process(
-                &audio_inputs,
-                &mut audio_outputs,
-                &input_events,
-                &mut output_events,
-                steady_time,
-                transport,
-            )
-            .unwrap();
     }
 }

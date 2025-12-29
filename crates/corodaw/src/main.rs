@@ -10,7 +10,9 @@ use gpui_component::{
 
 use crate::{
     audio::Audio,
-    audio_graph::{AudioGraph, NodeId, audio_graph},
+    audio_graph::{
+        AudioGraph, NodeId, audio_graph, clap_adapter::get_audio_graph_node_desc_for_clap_plugin,
+    },
     plugins::{
         ClapPlugin,
         discovery::{FoundPlugin, get_plugins},
@@ -41,7 +43,8 @@ impl Module {
 
         let plugin = ClapPlugin::new(plugin, cx).await;
 
-        let plugin_id = audio_graph.add_node(plugin.get_audio_graph_node_desc(true));
+        let plugin_id =
+            audio_graph.add_node(get_audio_graph_node_desc_for_clap_plugin(&plugin, true));
 
         Self {
             name,
@@ -152,7 +155,7 @@ impl Corodaw {
 
         cx.spawn(async move |e, cx| {
             let mut audio_graph = audio_graph.borrow_mut();
-            let module = Module::new(name, plugin, &mut *audio_graph, cx).await;
+            let module = Module::new(name, plugin, &mut audio_graph, cx).await;
 
             e.update(cx, |corodaw, cx| {
                 let module = cx.new(|_| module);

@@ -22,10 +22,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use crate::{
-    audio_graph,
-    plugins::{discovery::FoundPlugin, gui::Gui, timers::Timers},
-};
+use crate::plugins::{discovery::FoundPlugin, gui::Gui, timers::Timers};
 
 pub mod discovery;
 mod gui;
@@ -101,42 +98,28 @@ impl ClapPlugin {
         self.gui.borrow().has_gui()
     }
 
-    pub fn get_audio_graph_node_desc(&self, is_generator: bool) -> audio_graph::NodeDesc {
-        let processor = RefCell::new(Box::new(self.get_audio_processor()));
-
+    pub fn get_audio_ports(&self, is_input: bool) -> Vec<u32> {
         let audio_ports = self.plugin_audio_ports.borrow_mut();
         let mut plugin = self.plugin.borrow_mut();
         let mut handle = plugin.plugin_handle();
 
-        let mut collect_ports = |is_input| {
-            if let Some(audio_ports) = *audio_ports {
+        audio_ports
+            .map(|audio_ports| {
                 let count = audio_ports.count(&mut handle, is_input);
                 (0..count)
                     .map(|index| {
                         let mut buffer = AudioPortInfoBuffer::new();
-                        let info = audio_ports
+                        audio_ports
                             .get(&mut handle, index, is_input, &mut buffer)
-                            .unwrap();
-
-                        audio_graph::AudioPortDesc {
-                            num_channels: info.channel_count.try_into().expect("Are there really so many channels that we can't fit the count into a u16?"),
-                        }
+                            .unwrap()
+                            .channel_count
                     })
                     .collect()
-            } else {
-                Vec::default()
-            }
-        };
-
-        audio_graph::NodeDesc {
-            _is_generator: is_generator,
-            processor,
-            audio_inputs: collect_ports(true),
-            audio_outputs: collect_ports(false),
-        }
+            })
+            .unwrap_or_default()
     }
 
-    fn get_audio_processor(&self) -> PluginAudioProcessor<ClapPlugin> {
+    pub fn get_audio_processor(&self) -> PluginAudioProcessor<ClapPlugin> {
         let configuration = PluginAudioConfiguration {
             sample_rate: 48_000.0,
             min_frames_count: 1,
