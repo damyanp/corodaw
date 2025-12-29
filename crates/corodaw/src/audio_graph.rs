@@ -111,9 +111,9 @@ impl AudioGraphWorker {
                     assert!(previous.is_none());
                 }
                 Message::SetOutputNode(node_id, is_output) => {
-                    self.nodes
-                        .get_mut(&node_id)
-                        .map(|node| node.is_output = is_output);
+                    if let Some(node) = self.nodes.get_mut(&node_id) {
+                        node.is_output = is_output
+                    }
                 }
             }
         }
