@@ -184,7 +184,7 @@ impl AudioBuffers {
 
     fn prepare_for_processing(&mut self, num_frames: usize) {
         for port in &mut self.ports {
-            if port.num_frames() < num_frames {
+            if port.num_frames_allocated() < num_frames {
                 println!("Allocating new audio buffers for {num_frames} frames");
                 *port = AudioBlockSequential::new(port.num_channels(), num_frames);
             } else {
