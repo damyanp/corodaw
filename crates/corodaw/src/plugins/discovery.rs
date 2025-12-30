@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     io::Write,
     path::{Path, PathBuf},
+    rc::Rc,
 };
 
 use clack_host::{bundle::PluginBundle, plugin::PluginDescriptor};
@@ -16,7 +17,7 @@ pub struct FoundPlugin {
     pub path: PathBuf,
 
     #[serde(skip)]
-    _bundle: Option<PluginBundle>,
+    bundle: Rc<RefCell<Option<PluginBundle>>>,
 }
 
 impl FoundPlugin {
@@ -41,21 +42,21 @@ impl FoundPlugin {
                 id,
                 name,
                 path,
-                _bundle: Some(bundle),
+                bundle: Rc::new(RefCell::new(Some(bundle))),
             })
         } else {
             None
         }
     }
 
-    pub fn load_bundle(&mut self) -> PluginBundle {
-        if let Some(bundle) = &self._bundle {
+    pub fn load_bundle(&self) -> PluginBundle {
+        if let Some(bundle) = self.bundle.borrow().as_ref() {
             bundle.clone()
         } else {
             println!("Loading bundle from {}", self.path.display());
             let bundle = unsafe { PluginBundle::load(&self.path) }
                 .expect("Currently no error handling around loading bundles!");
-            self._bundle = Some(bundle.clone());
+            self.bundle.replace(Some(bundle.clone()));
             bundle
         }
     }
