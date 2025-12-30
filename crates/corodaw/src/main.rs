@@ -15,8 +15,9 @@ use crate::{
     },
     builtin::GainControl,
     plugins::{
-        ClapPlugin,
+        ClapPlugin, ClapPluginManager,
         discovery::{FoundPlugin, get_plugins},
+        message_handler,
     },
 };
 
@@ -37,9 +38,10 @@ struct Module {
 impl Module {
     pub async fn new(
         name: String,
+        plugin_manager: Rc<ClapPluginManager>,
         mut plugin: RefCell<FoundPlugin>,
         audio_graph: Rc<RefCell<AudioGraph>>,
-        cx: &mut AsyncApp,
+        mut cx: AsyncApp,
     ) -> Self {
         let initial_gain = 1.0;
         let gain_slider = cx
@@ -54,14 +56,13 @@ impl Module {
         let gain = cx.new(|_| GainControl::default()).unwrap();
 
         let plugin = RefCell::get_mut(&mut plugin);
-
-        let plugin = ClapPlugin::new(plugin, cx).await;
+        let plugin = plugin_manager.create_plugin(plugin).await;
 
         let mut audio_graph = audio_graph.borrow_mut();
         let plugin_id = audio_graph.add_node(get_audio_graph_node_desc_for_clap_plugin(&plugin));
 
         let gain_id = gain
-            .update(cx, |gain, _| {
+            .update(&mut cx, |gain, _| {
                 audio_graph.add_node(gain.get_node_desc(initial_gain))
             })
             .unwrap();
@@ -138,6 +139,7 @@ impl SelectItem for SelectablePlugin {
 }
 
 pub struct Corodaw {
+    clap_plugin_manager: Rc<ClapPluginManager>,
     _plugins: Vec<RefCell<FoundPlugin>>,
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
     modules: Vec<Entity<Module>>,
@@ -155,6 +157,12 @@ impl Corodaw {
         let (audio_graph, audio_graph_worker) = audio_graph();
         let audio = Audio::new(audio_graph_worker).unwrap();
 
+        let clap_plugin_manager = Rc::new(ClapPluginManager::new());
+
+        let m = Rc::downgrade(&clap_plugin_manager);
+        cx.spawn(move |_, cx: &mut AsyncApp| message_handler(m, cx.clone()))
+            .detach();
+
         let searchable_plugins = SearchableVec::new(
             plugins
                 .iter()
@@ -165,6 +173,7 @@ impl Corodaw {
         let plugin_selector = cx.new(|cx| SelectState::new(searchable_plugins, None, window, cx));
 
         Self {
+            clap_plugin_manager,
             _plugins: plugins,
             plugin_selector,
             modules: Vec::default(), //vec![cx.new(|cx| Module::new(cx, "Master".to_owned()))],
@@ -188,7 +197,18 @@ impl Corodaw {
         let audio_graph = self.audio_graph.clone();
 
         cx.spawn(async move |e, cx| {
-            let module = Module::new(name, plugin, audio_graph, cx).await;
+            let module = e
+                .update(cx, |corodaw, cx| {
+                    Module::new(
+                        name,
+                        corodaw.clap_plugin_manager.clone(),
+                        plugin,
+                        audio_graph,
+                        cx.to_async(),
+                    )
+                })
+                .unwrap()
+                .await;
 
             e.update(cx, |corodaw, cx| {
                 let module = cx.new(|_| module);
