@@ -1,5 +1,6 @@
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell, RefMut};
 
+use audio_blocks::AudioBlockSequential;
 use clack_host::{
     prelude::{
         AudioPortBuffer, AudioPortBufferType, AudioPorts, InputAudioBuffers, InputEvents,
@@ -61,7 +62,11 @@ impl ClapPluginProcessor {
 }
 
 impl Processor for ClapPluginProcessor {
-    fn process(&mut self, out_audio_buffers: &mut [audio_blocks::AudioBlockSequential<f32>]) {
+    fn process(
+        &mut self,
+        _in_audio_buffers: &[Option<Ref<'_, AudioBlockSequential<f32>>>],
+        out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
+    ) {
         let processor = if self.plugin_audio_processor.is_started() {
             self.plugin_audio_processor.as_started_mut()
         } else {

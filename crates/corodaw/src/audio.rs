@@ -17,7 +17,7 @@ impl Audio {
         let config = StreamConfig {
             channels: 2,
             sample_rate: 48_000,
-            buffer_size: BufferSize::Fixed(1024),
+            buffer_size: BufferSize::Fixed(4096),
         };
 
         audio_graph_worker.configure(config.channels, config.sample_rate);

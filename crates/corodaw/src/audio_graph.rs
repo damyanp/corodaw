@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Ref, RefCell, RefMut},
     collections::HashMap,
     sync::mpsc::{Receiver, Sender, channel},
 };
@@ -14,8 +14,17 @@ pub mod clap_adapter;
 pub struct NodeId(usize);
 
 enum Message {
-    AddNode { id: NodeId, desc: NodeDesc },
+    AddNode {
+        id: NodeId,
+        desc: NodeDesc,
+    },
     SetOutputNode(NodeId, bool),
+    Connect {
+        source: NodeId,
+        source_port: u32,
+        dest: NodeId,
+        dest_port: u32,
+    },
 }
 
 pub fn audio_graph() -> (AudioGraph, AudioGraphWorker) {
@@ -47,9 +56,20 @@ impl AudioGraph {
         id
     }
 
-    pub fn set_output_node(&mut self, node_id: NodeId, is_output: bool) {
+    pub fn set_output_node(&self, node_id: NodeId, is_output: bool) {
         self.sender
             .send(Message::SetOutputNode(node_id, is_output))
+            .expect("send should not fail");
+    }
+
+    pub fn connect(&self, source: NodeId, source_port: u32, dest: NodeId, dest_port: u32) {
+        self.sender
+            .send(Message::Connect {
+                source,
+                source_port,
+                dest,
+                dest_port,
+            })
             .expect("send should not fail");
     }
 }
@@ -82,20 +102,26 @@ impl AudioGraphWorker {
         let num_frames = data.len() / (self.channels as usize);
         let mut block = AudioBlockInterleavedViewMut::from_slice(data, self.channels, num_frames);
 
-        // Process all the nodes (TODO: do them in the right order!)
+        // Prepare all the nodes
         for node in self.nodes.values_mut() {
-            node.process(num_frames);
+            node.prepare_for_processing(num_frames);
+        }
+
+        // Process all the nodes (TODO: do them in the right order!)
+        for node in self.nodes.values() {
+            node.process(self);
         }
 
         // Sum all the output from the output nodes
         block.fill_with(0.0);
 
-        let output_ports = self
+        let output_audio_buffers = self
             .nodes
             .values()
             .filter(|node| node.is_output)
-            .map(|node| &node.audio_buffers.ports[0]);
-        for port in output_ports {
+            .map(|node| &node.audio_buffers);
+        for audio_buffers in output_audio_buffers {
+            let port = &audio_buffers.ports[0].borrow();
             for (dst, src) in block.frames_iter_mut().zip(port.frames_iter()) {
                 assert_eq!(port.num_channels(), port.num_channels());
                 dst.zip(src).for_each(|(dst, src)| *dst += *src);
@@ -115,6 +141,15 @@ impl AudioGraphWorker {
                         node.is_output = is_output
                     }
                 }
+                Message::Connect {
+                    source,
+                    source_port,
+                    dest,
+                    dest_port,
+                } => {
+                    let dest = self.nodes.get_mut(&dest).unwrap();
+                    dest.audio_connections[dest_port as usize] = Some((source, source_port));
+                }
             }
         }
     }
@@ -124,6 +159,7 @@ struct Node {
     desc: NodeDesc,
     audio_buffers: AudioBuffers,
     is_output: bool,
+    audio_connections: Vec<Option<(NodeId, u32)>>,
 }
 
 pub struct NodeDesc {
@@ -135,33 +171,53 @@ pub struct NodeDesc {
 
 impl Node {
     fn new(desc: NodeDesc) -> Self {
-        assert!(
-            desc.audio_inputs.is_empty(),
-            "Audio inputs not yet implemented"
-        );
-
         let audio_buffers = AudioBuffers::new(desc.audio_outputs.as_slice(), 1024);
+        let audio_connections = desc.audio_inputs.iter().map(|_| None).collect();
 
         Node {
             desc,
             audio_buffers,
             is_output: false,
+            audio_connections,
         }
     }
 
-    fn process(&mut self, num_frames: usize) {
-        self.audio_buffers.prepare_for_processing(num_frames);
+    fn process(&self, audio_graph: &AudioGraphWorker) {
+        let inputs: Vec<_> = self
+            .audio_connections
+            .iter()
+            .map(|connection| {
+                connection.map(|(node_id, port_id)| {
+                    audio_graph.nodes.get(&node_id).unwrap().audio_buffers.ports[port_id as usize]
+                        .borrow()
+                })
+            })
+            .collect();
+
+        let mut borrowed_output_ports: Vec<_> = self
+            .audio_buffers
+            .ports
+            .iter()
+            .map(|port| port.borrow_mut())
+            .collect();
 
         let processor = &self.desc.processor;
-
         processor
             .borrow_mut()
-            .process(self.audio_buffers.ports.as_mut_slice());
+            .process(inputs.as_slice(), borrowed_output_ports.as_mut_slice());
+    }
+
+    fn prepare_for_processing(&mut self, num_frames: usize) {
+        self.audio_buffers.prepare_for_processing(num_frames);
     }
 }
 
 pub trait Processor: Send {
-    fn process(&mut self, out_audio_buffers: &mut [AudioBlockSequential<f32>]);
+    fn process(
+        &mut self,
+        in_audio_buffers: &[Option<Ref<'_, AudioBlockSequential<f32>>>],
+        out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
+    );
 }
 
 pub struct AudioPortDesc {
@@ -169,7 +225,7 @@ pub struct AudioPortDesc {
 }
 
 struct AudioBuffers {
-    ports: Vec<AudioBlockSequential<f32>>,
+    ports: Vec<RefCell<AudioBlockSequential<f32>>>,
 }
 
 impl AudioBuffers {
@@ -178,17 +234,22 @@ impl AudioBuffers {
             ports: ports
                 .iter()
                 .map(|desc| AudioBlockSequential::new(desc.num_channels, num_frames))
+                .map(RefCell::new)
                 .collect(),
         }
     }
 
     fn prepare_for_processing(&mut self, num_frames: usize) {
         for port in &mut self.ports {
-            if port.num_frames_allocated() < num_frames {
+            let mut port_ref = port.borrow_mut();
+            if port_ref.num_frames_allocated() < num_frames {
                 println!("Allocating new audio buffers for {num_frames} frames");
-                *port = AudioBlockSequential::new(port.num_channels(), num_frames);
+                let num_channels = port_ref.num_channels();
+                drop(port_ref);
+
+                port.replace(AudioBlockSequential::new(num_channels, num_frames));
             } else {
-                port.set_active_num_frames(num_frames);
+                port_ref.set_active_num_frames(num_frames);
             }
         }
     }
