@@ -25,7 +25,6 @@ impl GainControl {
         };
 
         NodeDesc {
-            _is_generator: false,
             processor: RefCell::new(Box::new(processor)),
             audio_inputs: vec![AudioPortDesc { num_channels: 2 }],
             audio_outputs: vec![AudioPortDesc { num_channels: 2 }],

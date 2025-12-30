@@ -163,7 +163,6 @@ struct Node {
 }
 
 pub struct NodeDesc {
-    pub _is_generator: bool,
     pub processor: RefCell<Box<dyn Processor>>,
     pub audio_inputs: Vec<AudioPortDesc>,
     pub audio_outputs: Vec<AudioPortDesc>,

@@ -14,10 +14,7 @@ use crate::{
     plugins::ClapPlugin,
 };
 
-pub fn get_audio_graph_node_desc_for_clap_plugin(
-    clap_plugin: &ClapPlugin,
-    is_generator: bool,
-) -> NodeDesc {
+pub fn get_audio_graph_node_desc_for_clap_plugin(clap_plugin: &ClapPlugin) -> NodeDesc {
     let collect_ports = |is_input| {
         clap_plugin
             .get_audio_ports(is_input)
@@ -30,7 +27,6 @@ pub fn get_audio_graph_node_desc_for_clap_plugin(
     };
 
     NodeDesc {
-        _is_generator: is_generator,
         processor: RefCell::new(Box::new(ClapPluginProcessor::new(clap_plugin))),
         audio_inputs: collect_ports(true).collect(),
         audio_outputs: collect_ports(false).collect(),
