@@ -40,14 +40,21 @@ pub struct ClapPluginManager {
 }
 
 impl ClapPluginManager {
-    pub fn new() -> Self {
+    pub fn new(cx: &App) -> Rc<Self> {
         let (sender, receiver) = unbounded();
-        Self {
+
+        let this = Rc::new(Self {
             plugins: RefCell::new(HashMap::new()),
             next_id: Cell::new(ClapPluginId(1)),
             receiver: Cell::new(Some(receiver)),
             sender,
-        }
+        });
+
+        let m = Rc::downgrade(&this);
+        cx.spawn(async move |cx| message_handler(m, cx).await)
+            .detach();
+
+        this
     }
 
     pub async fn create_plugin(&self, plugin: &mut FoundPlugin) -> Rc<ClapPlugin> {
@@ -68,7 +75,7 @@ impl ClapPluginManager {
     }
 }
 
-pub async fn message_handler(clap_plugin_manager: Weak<ClapPluginManager>, mut app: AsyncApp) {
+pub async fn message_handler(clap_plugin_manager: Weak<ClapPluginManager>, app: &mut AsyncApp) {
     println!("[message_handler] start");
     let mut receiver = clap_plugin_manager
         .upgrade()
@@ -106,7 +113,7 @@ pub async fn message_handler(clap_plugin_manager: Weak<ClapPluginManager>, mut a
                 println!("Handling changed resize hints not supported");
             }
             MessagePayload::RequestResize(new_size) => {
-                plugin.gui.borrow_mut().request_resize(new_size, &mut app);
+                plugin.gui.borrow_mut().request_resize(new_size, app);
             }
         }
     }

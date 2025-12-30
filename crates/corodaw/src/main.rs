@@ -17,7 +17,6 @@ use crate::{
     plugins::{
         ClapPlugin, ClapPluginManager,
         discovery::{FoundPlugin, get_plugins},
-        message_handler,
     },
 };
 
@@ -157,11 +156,7 @@ impl Corodaw {
         let (audio_graph, audio_graph_worker) = audio_graph();
         let audio = Audio::new(audio_graph_worker).unwrap();
 
-        let clap_plugin_manager = Rc::new(ClapPluginManager::new());
-
-        let m = Rc::downgrade(&clap_plugin_manager);
-        cx.spawn(move |_, cx: &mut AsyncApp| message_handler(m, cx.clone()))
-            .detach();
+        let clap_plugin_manager = ClapPluginManager::new(cx);
 
         let searchable_plugins = SearchableVec::new(
             plugins
