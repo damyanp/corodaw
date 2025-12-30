@@ -318,7 +318,6 @@ unsafe impl Send for ClapPluginShared {}
 
 impl<'a> host::SharedHandler<'a> for ClapPluginShared {
     fn initializing(&self, instance: InitializingPluginHandle<'a>) {
-        println!("initializing");
         let _ = instance.get_extension::<PluginAudioPorts>();
     }
 
@@ -355,7 +354,6 @@ impl<'a> ClapPluginMainThread<'a> {
 
 impl<'a> host::MainThreadHandler<'a> for ClapPluginMainThread<'a> {
     fn initialized(&mut self, instance: InitializedPluginHandle<'a>) {
-        println!("Initialized!");
         self.timer_support = instance.get_extension();
         self.shared.send_message(MessagePayload::Initialized {
             plugin_gui: instance.get_extension(),
