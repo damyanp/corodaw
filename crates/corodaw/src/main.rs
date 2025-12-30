@@ -41,10 +41,11 @@ impl Module {
         audio_graph: Rc<RefCell<AudioGraph>>,
         cx: &mut AsyncApp,
     ) -> Self {
+        let initial_gain = 1.0;
         let gain_slider = cx
             .new(|_| {
                 SliderState::new()
-                    .default_value(1.0)
+                    .default_value(initial_gain)
                     .min(0.0)
                     .max(1.0)
                     .step(0.01)
@@ -61,7 +62,9 @@ impl Module {
             audio_graph.add_node(get_audio_graph_node_desc_for_clap_plugin(&plugin, true));
 
         let gain_id = gain
-            .update(cx, |gain, _| audio_graph.add_node(gain.get_node_desc()))
+            .update(cx, |gain, _| {
+                audio_graph.add_node(gain.get_node_desc(initial_gain))
+            })
             .unwrap();
 
         audio_graph.connect(plugin_id, 0, gain_id, 0);
