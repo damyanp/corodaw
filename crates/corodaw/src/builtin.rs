@@ -9,15 +9,15 @@ use crate::audio_graph::{AudioPortDesc, NodeDesc, Processor};
 
 #[derive(Default)]
 pub struct GainControl {
-    sender: Option<Sender<f32>>,
+    sender: RefCell<Option<Sender<f32>>>,
 }
 
 impl GainControl {
-    pub fn get_node_desc(&mut self, initial_gain: f32) -> NodeDesc {
-        assert!(self.sender.is_none());
+    pub fn get_node_desc(&self, initial_gain: f32) -> NodeDesc {
+        assert!(self.sender.borrow().is_none());
 
         let (sender, receiver) = channel();
-        self.sender = Some(sender);
+        self.sender.replace(Some(sender));
 
         let processor = GainControlProcessor {
             receiver,
@@ -31,8 +31,8 @@ impl GainControl {
         }
     }
 
-    pub fn set_gain(&mut self, gain: f32) {
-        if let Some(sender) = &self.sender {
+    pub fn set_gain(&self, gain: f32) {
+        if let Some(sender) = self.sender.borrow().as_ref() {
             sender.send(gain).unwrap();
         }
     }

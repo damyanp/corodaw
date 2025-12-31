@@ -48,7 +48,7 @@ pub struct Corodaw {
     clap_plugin_manager: Rc<ClapPluginManager>,
     _plugins: Vec<RefCell<FoundPlugin>>,
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
-    modules: Vec<Entity<Module>>,
+    modules: Vec<Module>,
     counter: u32,
     audio_graph: Rc<RefCell<AudioGraph>>,
     _audio: Audio,
@@ -99,21 +99,15 @@ impl Corodaw {
         let audio_graph = self.audio_graph.clone();
 
         cx.spawn(async move |e, cx| {
-            let module = e
-                .update(cx, |corodaw, cx| {
-                    Module::new(
-                        name,
-                        corodaw.clap_plugin_manager.clone(),
-                        plugin,
-                        audio_graph,
-                        cx.to_async(),
-                    )
-                })
-                .unwrap()
-                .await;
+            let clap_plugin_manager = e
+                .read_with(cx, |corodaw, _| corodaw.clap_plugin_manager.clone())
+                .unwrap();
 
-            e.update(cx, |corodaw, cx| {
-                let module = cx.new(|_| module);
+            let module = Module::new(name, clap_plugin_manager, plugin, audio_graph, cx).await;
+
+            let module = module.expect("TODO: error handling for when module creation fails");
+
+            e.update(cx, |corodaw, _| {
                 corodaw.modules.push(module);
             })
             .unwrap();
@@ -145,7 +139,11 @@ impl Render for Corodaw {
                     )
                     .child(Select::new(&self.plugin_selector)),
             )
-            .children(self.modules.iter().map(|m| div().w_full().child(m.clone())))
+            .children(
+                self.modules
+                    .iter()
+                    .map(|m| div().w_full().child(m.get_ui())),
+            )
     }
 }
 
