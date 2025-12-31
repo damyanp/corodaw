@@ -23,20 +23,8 @@ impl Module {
 }
 
 impl Render for Module {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let show_disabled = true;
-
-        div()
-            .border_1()
-            .border_color(cx.theme().border)
-            .p_5()
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child("Name")
-                    .child(Slider::new(&self.gain_slider).min_w_128())
-                    .child(Button::new("show").label("Show").disabled(show_disabled)),
-            )
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Slider::new(&self.gain_slider)
     }
 }
 
@@ -47,7 +35,7 @@ pub struct Corodaw {
 impl Corodaw {
     fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
         Self {
-            modules: Vec::default(), //vec![cx.new(|cx| Module::new(cx, "Master".to_owned()))],
+            modules: Vec::default(),
         }
     }
 
