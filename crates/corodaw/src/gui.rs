@@ -7,20 +7,14 @@ use gpui::{
     Size, Subscription, Window, WindowBounds, WindowOptions,
 };
 
-#[derive(Default)]
 pub struct GpuiPluginGui {
-    plugin_gui: Option<PluginGui>,
+    plugin_gui: PluginGui,
     window_handle: Option<AnyWindowHandle>,
     window_closed_subscription: Option<Subscription>,
 }
 
 impl GpuiPluginGui {
     pub fn show(&mut self, clap_plugin: Rc<ClapPlugin<Self>>, window: &mut Window, app: &mut App) {
-        let Some(plugin_gui) = self.plugin_gui.as_ref() else {
-            println!("Plugin doesn't have a GUI!");
-            return;
-        };
-
         let config = GuiConfiguration {
             api_type: GuiApiType::default_for_current_platform()
                 .expect("This platform supports UI"),
@@ -29,6 +23,7 @@ impl GpuiPluginGui {
 
         let mut plugin = clap_plugin.plugin.borrow_mut();
         let mut plugin_handle = plugin.plugin_handle();
+        let plugin_gui = &self.plugin_gui;
 
         if !plugin_gui.is_api_supported(&mut plugin_handle, config) {
             println!("Plugin doesn't support API");
@@ -99,13 +94,12 @@ impl GpuiPluginGui {
             // still there or not!
             if !cx.windows().into_iter().any(|w| w == window_handle) {
                 let mut gui = clap_plugin.gui.borrow_mut();
+                let gui = gui.as_mut().unwrap();
 
                 gui.window_handle = None;
                 gui.window_closed_subscription = None;
-
-                if let Some(plugin_gui) = gui.plugin_gui.as_ref() {
-                    plugin_gui.destroy(&mut clap_plugin.plugin.borrow_mut().plugin_handle());
-                }
+                gui.plugin_gui
+                    .destroy(&mut clap_plugin.plugin.borrow_mut().plugin_handle());
             }
         });
 
@@ -120,10 +114,6 @@ impl GpuiPluginGui {
 impl engine::plugins::Gui for GpuiPluginGui {
     type Context = AsyncApp;
 
-    fn set_plugin_gui(&mut self, plugin_gui: Option<PluginGui>) {
-        self.plugin_gui = plugin_gui;
-    }
-
     fn request_resize(&mut self, size: GuiSize, cx: &mut AsyncApp) {
         let Some(window_handle) = self.window_handle else {
             return;
@@ -133,6 +123,14 @@ impl engine::plugins::Gui for GpuiPluginGui {
             window.resize(size.to_size(window));
         })
         .expect("update_window should succeed");
+    }
+
+    fn new(plugin_gui: PluginGui) -> Self {
+        Self {
+            plugin_gui,
+            window_handle: None,
+            window_closed_subscription: None,
+        }
     }
 }
 
@@ -155,9 +153,11 @@ impl ClapPluginView {
             self.last_size = new_size;
 
             let mut plugin_instance = self.clap_plugin.plugin.borrow_mut();
-            let Some(plugin_gui) = self.clap_plugin.gui.borrow().plugin_gui else {
+            let gui = self.clap_plugin.gui.borrow();
+            let Some(gui) = gui.as_ref() else {
                 return;
             };
+            let plugin_gui = &gui.plugin_gui;
 
             let mut handle = plugin_instance.plugin_handle();
 

@@ -114,13 +114,24 @@ impl ModuleUI {
 
     fn on_show(&mut self, _e: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         let p = self.plugin.clone();
-        self.plugin.gui.borrow_mut().show(p, window, cx);
+        self.plugin
+            .gui
+            .borrow_mut()
+            .as_mut()
+            .expect("on_show should only be called for a plugin that has a gui")
+            .show(p, window, cx);
     }
 }
 
 impl Render for ModuleUI {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let show_disabled = self.plugin.gui.borrow().has_gui();
+        let show_disabled = self
+            .plugin
+            .gui
+            .borrow()
+            .as_ref()
+            .map(|g| g.has_gui())
+            .unwrap_or(true);
 
         div()
             .border_1()

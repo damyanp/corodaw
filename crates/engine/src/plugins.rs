@@ -27,10 +27,10 @@ use crate::plugins::{discovery::FoundPlugin, timers::Timers};
 pub mod discovery;
 mod timers;
 
-pub trait Gui: Default + 'static {
+pub trait Gui: 'static {
     type Context;
 
-    fn set_plugin_gui(&mut self, plugin_gui: Option<PluginGui>);
+    fn new(plugin_gui: PluginGui) -> Self;
     fn request_resize(&mut self, size: GuiSize, cx: &mut Self::Context);
 }
 
@@ -66,11 +66,9 @@ where
         let id = self.next_id.get();
         self.next_id.set(ClapPluginId(id.0 + 1));
 
-        let (clap_plugin, initialized_receiver) = ClapPlugin::new(id, plugin, self.sender.clone());
+        let clap_plugin = ClapPlugin::new(id, plugin, self.sender.clone()).await;
         let old_plugin = self.plugins.borrow_mut().insert(id, clap_plugin.clone());
         assert!(old_plugin.is_none());
-
-        initialized_receiver.await.unwrap();
 
         clap_plugin
     }
@@ -100,19 +98,6 @@ where
             };
 
             match payload {
-                MessagePayload::Initialized {
-                    plugin_gui,
-                    plugin_audio_ports,
-                } => {
-                    plugin.gui.borrow_mut().set_plugin_gui(plugin_gui);
-                    *plugin.plugin_audio_ports.borrow_mut() = plugin_audio_ports;
-
-                    let initialized = plugin
-                        .initialized
-                        .replace(None)
-                        .expect("Plugin should only be initialized once");
-                    initialized.send(()).unwrap();
-                }
                 MessagePayload::RunOnMainThread => {
                     plugin.plugin.borrow_mut().call_on_main_thread_callback();
                 }
@@ -120,7 +105,9 @@ where
                     println!("Handling changed resize hints not supported");
                 }
                 MessagePayload::RequestResize(new_size) => {
-                    plugin.gui.borrow_mut().request_resize(new_size, app);
+                    if let Some(gui) = plugin.gui.borrow_mut().as_mut() {
+                        gui.request_resize(new_size, app);
+                    }
                 }
             }
         }
@@ -132,18 +119,17 @@ pub struct ClapPlugin<GUI>
 where
     GUI: Gui,
 {
-    initialized: Cell<Option<oneshot::Sender<()>>>,
     pub plugin: RefCell<PluginInstance<Self>>,
-    pub gui: RefCell<GUI>,
+    pub gui: RefCell<Option<GUI>>,
     plugin_audio_ports: RefCell<Option<PluginAudioPorts>>,
 }
 
 impl<GUI: Gui> ClapPlugin<GUI> {
-    fn new(
+    async fn new(
         clap_plugin_id: ClapPluginId,
         plugin: &mut FoundPlugin,
         sender: UnboundedSender<Message>,
-    ) -> (Rc<Self>, oneshot::Receiver<()>) {
+    ) -> Rc<Self> {
         let bundle = plugin.load_bundle();
         bundle
             .get_plugin_factory()
@@ -160,25 +146,27 @@ impl<GUI: Gui> ClapPlugin<GUI> {
             plugin_id: clap_plugin_id,
         };
 
-        let plugin = clack_host::plugin::PluginInstance::new(
+        let (initialized_sender, initialized_receiver) = oneshot::channel::<()>();
+
+        let mut plugin = clack_host::plugin::PluginInstance::new(
             move |_| shared,
-            move |shared| ClapPluginMainThread::new(shared),
+            move |_| ClapPluginMainThread::new(initialized_sender),
             &bundle,
             plugin_id.as_c_str(),
             &host,
         )
         .unwrap();
 
-        let (initialized_sender, initialized_receiver) = oneshot::channel::<()>();
+        initialized_receiver.await.unwrap();
 
-        let clap_plugin = Rc::new(Self {
-            initialized: Cell::new(Some(initialized_sender)),
+        let audio_ports = plugin.plugin_handle().get_extension();
+        let gui = plugin.plugin_handle().get_extension().map(GUI::new);
+
+        Rc::new(Self {
             plugin: RefCell::new(plugin),
-            gui: RefCell::default(),
-            plugin_audio_ports: RefCell::new(None),
-        });
-
-        (clap_plugin, initialized_receiver)
+            gui: RefCell::new(gui),
+            plugin_audio_ports: RefCell::new(audio_ports),
+        })
     }
 
     pub fn get_audio_ports(&self, is_input: bool) -> Vec<u32> {
@@ -225,10 +213,6 @@ struct Message {
 }
 
 enum MessagePayload {
-    Initialized {
-        plugin_gui: Option<PluginGui>,
-        plugin_audio_ports: Option<PluginAudioPorts>,
-    },
     RunOnMainThread,
     ResizeHintsChanged,
     RequestResize(GuiSize),
@@ -340,17 +324,17 @@ impl<'a> host::SharedHandler<'a> for ClapPluginShared {
 }
 
 pub struct ClapPluginMainThread<'a> {
-    shared: &'a ClapPluginShared,
     plugin: Option<InitializedPluginHandle<'a>>,
+    initialized: Cell<Option<oneshot::Sender<()>>>,
     timer_support: Option<PluginTimer>,
     _timers: Rc<Timers>,
 }
 
 impl<'a> ClapPluginMainThread<'a> {
-    fn new(shared: &'a ClapPluginShared) -> Self {
+    fn new(initialized: oneshot::Sender<()>) -> Self {
         Self {
-            shared,
             plugin: None,
+            initialized: Cell::new(Some(initialized)),
             timer_support: None,
             _timers: Rc::new(Timers::new()),
         }
@@ -360,10 +344,11 @@ impl<'a> ClapPluginMainThread<'a> {
 impl<'a> host::MainThreadHandler<'a> for ClapPluginMainThread<'a> {
     fn initialized(&mut self, instance: InitializedPluginHandle<'a>) {
         self.timer_support = instance.get_extension();
-        self.shared.send_message(MessagePayload::Initialized {
-            plugin_gui: instance.get_extension(),
-            plugin_audio_ports: instance.get_extension(),
-        });
+        self.initialized
+            .replace(None)
+            .expect("Plugin should only be initialized once")
+            .send(())
+            .unwrap();
         self.plugin = Some(instance);
     }
 }
