@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+clack-extensions.workspace = true
 cpal.workspace = true
 engine = { path = "../engine" }
 gpui.workspace = true

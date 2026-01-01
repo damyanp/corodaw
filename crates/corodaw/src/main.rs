@@ -10,7 +10,7 @@ use gpui_component::{
     *,
 };
 
-use crate::module::Module;
+use crate::{gui::GpuiPluginGui, module::Module};
 use engine::{
     audio::Audio,
     audio_graph::{AudioGraph, audio_graph},
@@ -21,6 +21,8 @@ use engine::{
 };
 
 mod module;
+
+mod gui;
 
 #[derive(Clone)]
 struct SelectablePlugin(RefCell<FoundPlugin>);
@@ -43,7 +45,7 @@ impl SelectItem for SelectablePlugin {
     }
 }
 
-struct GpuiClapPluginManager(Rc<ClapPluginManager>);
+struct GpuiClapPluginManager(Rc<ClapPluginManager<GpuiPluginGui>>);
 
 impl GpuiClapPluginManager {
     fn new(cx: &App) -> Self {
@@ -54,7 +56,7 @@ impl GpuiClapPluginManager {
         GpuiClapPluginManager(inner)
     }
 
-    fn spawn_message_handler(cx: &App, manager: Weak<ClapPluginManager>) {
+    fn spawn_message_handler(cx: &App, manager: Weak<ClapPluginManager<GpuiPluginGui>>) {
         cx.spawn(async move |cx| ClapPluginManager::message_handler(manager, cx).await)
             .detach();
     }
@@ -64,7 +66,7 @@ pub struct Corodaw {
     clap_plugin_manager: GpuiClapPluginManager,
     _plugins: Vec<RefCell<FoundPlugin>>,
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
-    modules: Vec<Module>,
+    modules: Vec<Module<GpuiPluginGui>>,
     counter: u32,
     audio_graph: Rc<RefCell<AudioGraph>>,
     _audio: Audio,

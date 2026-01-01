@@ -15,7 +15,6 @@ use futures_channel::{
     mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
     oneshot,
 };
-use gpui::{App, AsyncApp, Window};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -23,37 +22,47 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use crate::plugins::{discovery::FoundPlugin, gui::Gui, timers::Timers};
+use crate::plugins::{discovery::FoundPlugin, timers::Timers};
 
 pub mod discovery;
-mod gui;
 mod timers;
+
+pub trait Gui: Default + 'static {
+    type Context;
+
+    fn set_plugin_gui(&mut self, plugin_gui: Option<PluginGui>);
+    fn request_resize(&mut self, size: GuiSize, cx: &mut Self::Context);
+}
 
 #[derive(Debug, Hash, Copy, Clone, Eq, PartialEq)]
 pub struct ClapPluginId(usize);
 
-pub struct ClapPluginManager {
-    plugins: RefCell<HashMap<ClapPluginId, Rc<ClapPlugin>>>,
+pub struct ClapPluginManager<GUI>
+where
+    GUI: Gui,
+{
+    plugins: RefCell<HashMap<ClapPluginId, Rc<ClapPlugin<GUI>>>>,
     next_id: Cell<ClapPluginId>,
     receiver: Cell<Option<UnboundedReceiver<Message>>>,
     sender: UnboundedSender<Message>,
 }
 
-impl ClapPluginManager {
+impl<GUI> ClapPluginManager<GUI>
+where
+    GUI: Gui,
+{
     pub fn new() -> Rc<Self> {
         let (sender, receiver) = unbounded();
 
-        let this = Rc::new(Self {
+        Rc::new(Self {
             plugins: RefCell::new(HashMap::new()),
             next_id: Cell::new(ClapPluginId(1)),
             receiver: Cell::new(Some(receiver)),
             sender,
-        });
-
-        this
+        })
     }
 
-    pub async fn create_plugin(&self, plugin: &mut FoundPlugin) -> Rc<ClapPlugin> {
+    pub async fn create_plugin(&self, plugin: &mut FoundPlugin) -> Rc<ClapPlugin<GUI>> {
         let id = self.next_id.get();
         self.next_id.set(ClapPluginId(id.0 + 1));
 
@@ -66,11 +75,14 @@ impl ClapPluginManager {
         clap_plugin
     }
 
-    pub fn get_plugin(&self, clap_plugin_id: ClapPluginId) -> Rc<ClapPlugin> {
+    pub fn get_plugin(&self, clap_plugin_id: ClapPluginId) -> Rc<ClapPlugin<GUI>> {
         self.plugins.borrow().get(&clap_plugin_id).unwrap().clone()
     }
 
-    pub async fn message_handler(clap_plugin_manager: Weak<ClapPluginManager>, app: &mut AsyncApp) {
+    pub async fn message_handler(
+        clap_plugin_manager: Weak<ClapPluginManager<GUI>>,
+        app: &mut GUI::Context,
+    ) {
         println!("[message_handler] start");
         let mut receiver = clap_plugin_manager
             .upgrade()
@@ -116,14 +128,17 @@ impl ClapPluginManager {
     }
 }
 
-pub struct ClapPlugin {
+pub struct ClapPlugin<GUI>
+where
+    GUI: Gui,
+{
     initialized: Cell<Option<oneshot::Sender<()>>>,
-    plugin: RefCell<PluginInstance<Self>>,
-    gui: RefCell<Gui>,
+    pub plugin: RefCell<PluginInstance<Self>>,
+    pub gui: RefCell<GUI>,
     plugin_audio_ports: RefCell<Option<PluginAudioPorts>>,
 }
 
-impl ClapPlugin {
+impl<GUI: Gui> ClapPlugin<GUI> {
     fn new(
         clap_plugin_id: ClapPluginId,
         plugin: &mut FoundPlugin,
@@ -159,20 +174,11 @@ impl ClapPlugin {
         let clap_plugin = Rc::new(Self {
             initialized: Cell::new(Some(initialized_sender)),
             plugin: RefCell::new(plugin),
-            gui: RefCell::new(Gui::default()),
+            gui: RefCell::default(),
             plugin_audio_ports: RefCell::new(None),
         });
 
         (clap_plugin, initialized_receiver)
-    }
-
-    pub fn show_gui(self: &Rc<Self>, window: &mut Window, app: &mut App) {
-        let mut gui = self.gui.borrow_mut();
-        gui.show(self.clone(), window, app);
-    }
-
-    pub fn has_gui(&self) -> bool {
-        self.gui.borrow().has_gui()
     }
 
     pub fn get_audio_ports(&self, is_input: bool) -> Vec<u32> {
@@ -196,7 +202,7 @@ impl ClapPlugin {
             .unwrap_or_default()
     }
 
-    pub fn get_audio_processor(&self) -> PluginAudioProcessor<ClapPlugin> {
+    pub fn get_audio_processor(&self) -> PluginAudioProcessor<ClapPlugin<GUI>> {
         let configuration = PluginAudioConfiguration {
             sample_rate: 48_000.0,
             min_frames_count: 1,
@@ -228,7 +234,10 @@ enum MessagePayload {
     RequestResize(GuiSize),
 }
 
-impl HostHandlers for ClapPlugin {
+impl<GUI> HostHandlers for ClapPlugin<GUI>
+where
+    GUI: Gui,
+{
     type Shared<'a> = ClapPluginShared;
     type MainThread<'a> = ClapPluginMainThread<'a>;
     type AudioProcessor<'a> = ();

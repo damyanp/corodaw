@@ -10,29 +10,37 @@ use gpui_component::{
 use engine::{
     audio_graph::{AudioGraph, clap_adapter::get_audio_graph_node_desc_for_clap_plugin},
     builtin::GainControl,
-    plugins::{ClapPlugin, ClapPluginManager, discovery::FoundPlugin},
+    plugins::{ClapPlugin, ClapPluginManager, Gui, discovery::FoundPlugin},
 };
 
-pub struct Module {
-    _audio: ModuleAudio,
+use crate::gui::GpuiPluginGui;
+
+pub struct Module<GUI>
+where
+    GUI: Gui,
+{
+    _audio: ModuleAudio<GUI>,
     ui: Entity<ModuleUI>,
 }
 
-struct ModuleAudio {
-    plugin: Rc<ClapPlugin>,
+struct ModuleAudio<GUI>
+where
+    GUI: Gui,
+{
+    plugin: Rc<ClapPlugin<GUI>>,
     gain: Rc<GainControl>,
 }
 
 struct ModuleUI {
     name: String,
     gain_slider: Entity<SliderState>,
-    plugin: Rc<ClapPlugin>,
+    plugin: Rc<ClapPlugin<GpuiPluginGui>>,
 }
 
-impl Module {
+impl Module<GpuiPluginGui> {
     pub async fn new(
         name: String,
-        plugin_manager: Rc<ClapPluginManager>,
+        plugin_manager: Rc<ClapPluginManager<GpuiPluginGui>>,
         plugin: RefCell<FoundPlugin>,
         audio_graph: Rc<RefCell<AudioGraph>>,
         cx: &mut AsyncApp,
@@ -50,13 +58,16 @@ impl Module {
     }
 }
 
-impl ModuleAudio {
+impl<GUI> ModuleAudio<GUI>
+where
+    GUI: Gui,
+{
     async fn new(
-        plugin_manager: Rc<ClapPluginManager>,
+        plugin_manager: Rc<ClapPluginManager<GUI>>,
         mut plugin: RefCell<FoundPlugin>,
         audio_graph: Rc<RefCell<AudioGraph>>,
         initial_gain: f32,
-    ) -> ModuleAudio {
+    ) -> ModuleAudio<GUI> {
         let plugin = RefCell::get_mut(&mut plugin);
         let plugin = plugin_manager.create_plugin(plugin).await;
 
@@ -77,7 +88,7 @@ impl ModuleUI {
     fn new(
         name: impl Into<String>,
         initial_gain: f32,
-        module_audio: &ModuleAudio,
+        module_audio: &ModuleAudio<GpuiPluginGui>,
         cx: &mut App,
     ) -> ModuleUI {
         let gain_slider = cx.new(|_| {
@@ -102,13 +113,14 @@ impl ModuleUI {
     }
 
     fn on_show(&mut self, _e: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.plugin.show_gui(window, cx);
+        let p = self.plugin.clone();
+        self.plugin.gui.borrow_mut().show(p, window, cx);
     }
 }
 
 impl Render for ModuleUI {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let show_disabled = self.plugin.has_gui();
+        let show_disabled = self.plugin.gui.borrow().has_gui();
 
         div()
             .border_1()

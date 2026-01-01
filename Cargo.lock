@@ -1242,6 +1242,7 @@ name = "corodaw"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clack-extensions",
  "cpal",
  "engine",
  "gpui",
