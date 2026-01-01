@@ -7,21 +7,17 @@ use gpui_component::{
     *,
 };
 
-use crate::{
+use crate::module::Module;
+use engine::{
     audio::Audio,
     audio_graph::{AudioGraph, audio_graph},
-    module::Module,
     plugins::{
         ClapPluginManager,
         discovery::{FoundPlugin, get_plugins},
     },
 };
 
-mod audio;
-mod audio_graph;
-mod builtin;
 mod module;
-mod plugins;
 
 #[derive(Clone)]
 struct SelectablePlugin(RefCell<FoundPlugin>);

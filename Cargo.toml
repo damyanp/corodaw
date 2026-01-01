@@ -1,9 +1,22 @@
 [workspace]
 resolver = "3"
-members = ["crates/corodaw"]
+members = ["crates/corodaw", "crates/engine"]
 default-members = ["crates/corodaw"]
 
 [workspace.dependencies]
 anyhow = "1.0.100"
+clack-extensions = { package = "clack-extensions", git = "https://github.com/prokopyl/clack.git", features = [
+  "audio-ports",
+  "clack-host",
+  "gui",
+  "log",
+  "params",
+  "raw-window-handle_06",
+  "timer"
+] }
+clack-host = { package = "clack-host", git = "https://github.com/prokopyl/clack.git" }
+cpal = "0.17.0"
+futures = "0.3.31"
+futures-channel = "0.3.31"
 gpui = "0.2.2"
 gpui-component = "0.5.0"

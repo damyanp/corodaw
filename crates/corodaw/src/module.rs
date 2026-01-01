@@ -7,7 +7,7 @@ use gpui_component::{
     *,
 };
 
-use crate::{
+use engine::{
     audio_graph::{AudioGraph, clap_adapter::get_audio_graph_node_desc_for_clap_plugin},
     builtin::GainControl,
     plugins::{ClapPlugin, ClapPluginManager, discovery::FoundPlugin},
