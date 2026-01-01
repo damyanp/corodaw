@@ -40,7 +40,7 @@ pub struct ClapPluginManager {
 }
 
 impl ClapPluginManager {
-    pub fn new(cx: &App) -> Rc<Self> {
+    pub fn new() -> Rc<Self> {
         let (sender, receiver) = unbounded();
 
         let this = Rc::new(Self {
@@ -49,10 +49,6 @@ impl ClapPluginManager {
             receiver: Cell::new(Some(receiver)),
             sender,
         });
-
-        let m = Rc::downgrade(&this);
-        cx.spawn(async move |cx| message_handler(m, cx).await)
-            .detach();
 
         this
     }
@@ -73,51 +69,51 @@ impl ClapPluginManager {
     pub fn get_plugin(&self, clap_plugin_id: ClapPluginId) -> Rc<ClapPlugin> {
         self.plugins.borrow().get(&clap_plugin_id).unwrap().clone()
     }
-}
 
-pub async fn message_handler(clap_plugin_manager: Weak<ClapPluginManager>, app: &mut AsyncApp) {
-    println!("[message_handler] start");
-    let mut receiver = clap_plugin_manager
-        .upgrade()
-        .unwrap()
-        .receiver
-        .take()
-        .unwrap();
+    pub async fn message_handler(clap_plugin_manager: Weak<ClapPluginManager>, app: &mut AsyncApp) {
+        println!("[message_handler] start");
+        let mut receiver = clap_plugin_manager
+            .upgrade()
+            .unwrap()
+            .receiver
+            .take()
+            .unwrap();
 
-    while let Some(Message { plugin_id, payload }) = receiver.next().await {
-        let plugin = {
-            let Some(manager) = clap_plugin_manager.upgrade() else {
-                break;
+        while let Some(Message { plugin_id, payload }) = receiver.next().await {
+            let plugin = {
+                let Some(manager) = clap_plugin_manager.upgrade() else {
+                    break;
+                };
+                manager.get_plugin(plugin_id)
             };
-            manager.get_plugin(plugin_id)
-        };
 
-        match payload {
-            MessagePayload::Initialized {
-                plugin_gui,
-                plugin_audio_ports,
-            } => {
-                plugin.gui.borrow_mut().set_plugin_gui(plugin_gui);
-                *plugin.plugin_audio_ports.borrow_mut() = plugin_audio_ports;
+            match payload {
+                MessagePayload::Initialized {
+                    plugin_gui,
+                    plugin_audio_ports,
+                } => {
+                    plugin.gui.borrow_mut().set_plugin_gui(plugin_gui);
+                    *plugin.plugin_audio_ports.borrow_mut() = plugin_audio_ports;
 
-                let initialized = plugin
-                    .initialized
-                    .replace(None)
-                    .expect("Plugin should only be initialized once");
-                initialized.send(()).unwrap();
-            }
-            MessagePayload::RunOnMainThread => {
-                plugin.plugin.borrow_mut().call_on_main_thread_callback();
-            }
-            MessagePayload::ResizeHintsChanged => {
-                println!("Handling changed resize hints not supported");
-            }
-            MessagePayload::RequestResize(new_size) => {
-                plugin.gui.borrow_mut().request_resize(new_size, app);
+                    let initialized = plugin
+                        .initialized
+                        .replace(None)
+                        .expect("Plugin should only be initialized once");
+                    initialized.send(()).unwrap();
+                }
+                MessagePayload::RunOnMainThread => {
+                    plugin.plugin.borrow_mut().call_on_main_thread_callback();
+                }
+                MessagePayload::ResizeHintsChanged => {
+                    println!("Handling changed resize hints not supported");
+                }
+                MessagePayload::RequestResize(new_size) => {
+                    plugin.gui.borrow_mut().request_resize(new_size, app);
+                }
             }
         }
+        println!("[message_handler] end");
     }
-    println!("[message_handler] end");
 }
 
 pub struct ClapPlugin {

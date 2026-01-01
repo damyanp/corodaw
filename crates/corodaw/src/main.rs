@@ -1,4 +1,7 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
 
 use gpui::*;
 use gpui_component::{
@@ -40,8 +43,25 @@ impl SelectItem for SelectablePlugin {
     }
 }
 
+struct GpuiClapPluginManager(Rc<ClapPluginManager>);
+
+impl GpuiClapPluginManager {
+    fn new(cx: &App) -> Self {
+        let inner = ClapPluginManager::new();
+
+        Self::spawn_message_handler(cx, Rc::downgrade(&inner));
+
+        GpuiClapPluginManager(inner)
+    }
+
+    fn spawn_message_handler(cx: &App, manager: Weak<ClapPluginManager>) {
+        cx.spawn(async move |cx| ClapPluginManager::message_handler(manager, cx).await)
+            .detach();
+    }
+}
+
 pub struct Corodaw {
-    clap_plugin_manager: Rc<ClapPluginManager>,
+    clap_plugin_manager: GpuiClapPluginManager,
     _plugins: Vec<RefCell<FoundPlugin>>,
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
     modules: Vec<Module>,
@@ -59,7 +79,7 @@ impl Corodaw {
         let (audio_graph, audio_graph_worker) = audio_graph();
         let audio = Audio::new(audio_graph_worker).unwrap();
 
-        let clap_plugin_manager = ClapPluginManager::new(cx);
+        let clap_plugin_manager = GpuiClapPluginManager::new(cx);
 
         let searchable_plugins = SearchableVec::new(
             plugins
@@ -96,7 +116,7 @@ impl Corodaw {
 
         cx.spawn(async move |e, cx| {
             let clap_plugin_manager = e
-                .read_with(cx, |corodaw, _| corodaw.clap_plugin_manager.clone())
+                .read_with(cx, |corodaw, _| corodaw.clap_plugin_manager.0.clone())
                 .unwrap();
 
             let module = Module::new(name, clap_plugin_manager, plugin, audio_graph, cx).await;
