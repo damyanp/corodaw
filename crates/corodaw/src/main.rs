@@ -32,7 +32,7 @@ impl SelectItem for SelectablePlugin {
     type Value = RefCell<FoundPlugin>;
 
     fn title(&self) -> SharedString {
-        self.0.borrow().name.clone()
+        SharedString::new(self.0.borrow().name.as_str())
     }
 
     fn value(&self) -> &Self::Value {

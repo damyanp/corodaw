@@ -6,14 +6,13 @@ use std::{
 };
 
 use clack_host::{bundle::PluginBundle, plugin::PluginDescriptor};
-use gpui::SharedString;
 use serde::{Deserialize, Serialize};
 use walkdir::{DirEntry, WalkDir};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FoundPlugin {
-    pub id: SharedString,
-    pub name: SharedString,
+    pub id: String,
+    pub name: String,
     pub path: PathBuf,
 
     #[serde(skip)]
@@ -29,11 +28,11 @@ impl FoundPlugin {
         let id = descriptor
             .id()
             .and_then(|id| id.to_str().ok())
-            .map(SharedString::new);
+            .map(String::from);
         let name = descriptor
             .name()
             .and_then(|name| name.to_str().ok())
-            .map(SharedString::new);
+            .map(String::from);
 
         if let Some(id) = id
             && let Some(name) = name
