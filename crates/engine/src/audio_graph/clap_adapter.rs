@@ -11,12 +11,10 @@ use clack_host::{
 
 use crate::{
     audio_graph::{AudioPortDesc, NodeDesc, Processor},
-    plugins::{ClapPlugin, Gui},
+    plugins::ClapPlugin,
 };
 
-pub fn get_audio_graph_node_desc_for_clap_plugin<GUI: Gui + 'static>(
-    clap_plugin: &ClapPlugin<GUI>,
-) -> NodeDesc {
+pub fn get_audio_graph_node_desc_for_clap_plugin(clap_plugin: &ClapPlugin) -> NodeDesc {
     let collect_ports = |is_input| {
         clap_plugin
             .get_audio_ports(is_input)
@@ -29,19 +27,19 @@ pub fn get_audio_graph_node_desc_for_clap_plugin<GUI: Gui + 'static>(
     };
 
     NodeDesc {
-        processor: RefCell::new(Box::new(ClapPluginProcessor::<GUI>::new(clap_plugin))),
+        processor: RefCell::new(Box::new(ClapPluginProcessor::new(clap_plugin))),
         audio_inputs: collect_ports(true).collect(),
         audio_outputs: collect_ports(false).collect(),
     }
 }
 
-struct ClapPluginProcessor<GUI: Gui> {
-    plugin_audio_processor: PluginAudioProcessor<ClapPlugin<GUI>>,
+struct ClapPluginProcessor {
+    plugin_audio_processor: PluginAudioProcessor<ClapPlugin>,
     audio_ports: AudioPorts,
 }
 
-impl<GUI: Gui> ClapPluginProcessor<GUI> {
-    fn new(clap_plugin: &ClapPlugin<GUI>) -> Self {
+impl ClapPluginProcessor {
+    fn new(clap_plugin: &ClapPlugin) -> Self {
         let output_ports = clap_plugin.get_audio_ports(false);
         let total_channel_count = output_ports
             .iter()
@@ -59,7 +57,7 @@ impl<GUI: Gui> ClapPluginProcessor<GUI> {
     }
 }
 
-impl<GUI: Gui> Processor for ClapPluginProcessor<GUI> {
+impl Processor for ClapPluginProcessor {
     fn process(
         &mut self,
         _in_audio_buffers: &[Option<Ref<'_, AudioBlockSequential<f32>>>],

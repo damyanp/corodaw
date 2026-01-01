@@ -1,6 +1,6 @@
 use clack_extensions::{
     audio_ports::{AudioPortInfoBuffer, PluginAudioPorts},
-    gui::{GuiSize, HostGui, HostGuiImpl, PluginGui},
+    gui::{GuiSize, HostGui, HostGuiImpl},
     log::{HostLog, HostLogImpl},
     params::{HostParams, HostParamsImplMainThread, HostParamsImplShared},
     timer::{HostTimer, PluginTimer},
@@ -27,31 +27,19 @@ use crate::plugins::{discovery::FoundPlugin, timers::Timers};
 pub mod discovery;
 mod timers;
 
-pub trait Gui: 'static {
-    type Context;
-
-    fn new(plugin_gui: PluginGui) -> Self;
-    fn request_resize(&mut self, size: GuiSize, cx: &mut Self::Context);
-}
-
 #[derive(Debug, Hash, Copy, Clone, Eq, PartialEq)]
 pub struct ClapPluginId(usize);
 
-pub struct ClapPluginManager<GUI>
-where
-    GUI: Gui,
-{
-    plugins: RefCell<HashMap<ClapPluginId, Rc<ClapPlugin<GUI>>>>,
+pub struct ClapPluginManager {
+    plugins: RefCell<HashMap<ClapPluginId, Rc<ClapPlugin>>>,
     next_id: Cell<ClapPluginId>,
     receiver: Cell<Option<UnboundedReceiver<Message>>>,
     sender: UnboundedSender<Message>,
+    gui_sender: UnboundedSender<GuiMessage>,
 }
 
-impl<GUI> ClapPluginManager<GUI>
-where
-    GUI: Gui,
-{
-    pub fn new() -> Rc<Self> {
+impl ClapPluginManager {
+    pub fn new(gui_sender: UnboundedSender<GuiMessage>) -> Rc<Self> {
         let (sender, receiver) = unbounded();
 
         Rc::new(Self {
@@ -59,28 +47,27 @@ where
             next_id: Cell::new(ClapPluginId(1)),
             receiver: Cell::new(Some(receiver)),
             sender,
+            gui_sender,
         })
     }
 
-    pub async fn create_plugin(&self, plugin: &mut FoundPlugin) -> Rc<ClapPlugin<GUI>> {
+    pub async fn create_plugin(&self, plugin: &mut FoundPlugin) -> Rc<ClapPlugin> {
         let id = self.next_id.get();
         self.next_id.set(ClapPluginId(id.0 + 1));
 
-        let clap_plugin = ClapPlugin::new(id, plugin, self.sender.clone()).await;
+        let clap_plugin =
+            ClapPlugin::new(id, plugin, self.sender.clone(), self.gui_sender.clone()).await;
         let old_plugin = self.plugins.borrow_mut().insert(id, clap_plugin.clone());
         assert!(old_plugin.is_none());
 
         clap_plugin
     }
 
-    pub fn get_plugin(&self, clap_plugin_id: ClapPluginId) -> Rc<ClapPlugin<GUI>> {
+    pub fn get_plugin(&self, clap_plugin_id: ClapPluginId) -> Rc<ClapPlugin> {
         self.plugins.borrow().get(&clap_plugin_id).unwrap().clone()
     }
 
-    pub async fn message_handler(
-        clap_plugin_manager: Weak<ClapPluginManager<GUI>>,
-        app: &mut GUI::Context,
-    ) {
+    pub async fn message_handler(clap_plugin_manager: Weak<ClapPluginManager>) {
         println!("[message_handler] start");
         let mut receiver = clap_plugin_manager
             .upgrade()
@@ -101,34 +88,23 @@ where
                 MessagePayload::RunOnMainThread => {
                     plugin.plugin.borrow_mut().call_on_main_thread_callback();
                 }
-                MessagePayload::ResizeHintsChanged => {
-                    println!("Handling changed resize hints not supported");
-                }
-                MessagePayload::RequestResize(new_size) => {
-                    if let Some(gui) = plugin.gui.borrow_mut().as_mut() {
-                        gui.request_resize(new_size, app);
-                    }
-                }
             }
         }
         println!("[message_handler] end");
     }
 }
 
-pub struct ClapPlugin<GUI>
-where
-    GUI: Gui,
-{
+pub struct ClapPlugin {
     pub plugin: RefCell<PluginInstance<Self>>,
-    pub gui: RefCell<Option<GUI>>,
     plugin_audio_ports: RefCell<Option<PluginAudioPorts>>,
 }
 
-impl<GUI: Gui> ClapPlugin<GUI> {
+impl ClapPlugin {
     async fn new(
         clap_plugin_id: ClapPluginId,
         plugin: &mut FoundPlugin,
         sender: UnboundedSender<Message>,
+        gui_sender: UnboundedSender<GuiMessage>,
     ) -> Rc<Self> {
         let bundle = plugin.load_bundle();
         bundle
@@ -143,6 +119,7 @@ impl<GUI: Gui> ClapPlugin<GUI> {
 
         let shared = ClapPluginShared {
             channel: sender,
+            gui_channel: gui_sender,
             plugin_id: clap_plugin_id,
         };
 
@@ -160,11 +137,9 @@ impl<GUI: Gui> ClapPlugin<GUI> {
         initialized_receiver.await.unwrap();
 
         let audio_ports = plugin.plugin_handle().get_extension();
-        let gui = plugin.plugin_handle().get_extension().map(GUI::new);
 
         Rc::new(Self {
             plugin: RefCell::new(plugin),
-            gui: RefCell::new(gui),
             plugin_audio_ports: RefCell::new(audio_ports),
         })
     }
@@ -190,7 +165,7 @@ impl<GUI: Gui> ClapPlugin<GUI> {
             .unwrap_or_default()
     }
 
-    pub fn get_audio_processor(&self) -> PluginAudioProcessor<ClapPlugin<GUI>> {
+    pub fn get_audio_processor(&self) -> PluginAudioProcessor<ClapPlugin> {
         let configuration = PluginAudioConfiguration {
             sample_rate: 48_000.0,
             min_frames_count: 1,
@@ -205,6 +180,10 @@ impl<GUI: Gui> ClapPlugin<GUI> {
                 .unwrap(),
         )
     }
+
+    pub fn get_id(&self) -> ClapPluginId {
+        self.plugin.borrow().access_shared_handler(|h| h.plugin_id)
+    }
 }
 
 struct Message {
@@ -214,14 +193,19 @@ struct Message {
 
 enum MessagePayload {
     RunOnMainThread,
+}
+
+pub struct GuiMessage {
+    pub plugin_id: ClapPluginId,
+    pub payload: GuiMessagePayload,
+}
+
+pub enum GuiMessagePayload {
     ResizeHintsChanged,
     RequestResize(GuiSize),
 }
 
-impl<GUI> HostHandlers for ClapPlugin<GUI>
-where
-    GUI: Gui,
-{
+impl HostHandlers for ClapPlugin {
     type Shared<'a> = ClapPluginShared;
     type MainThread<'a> = ClapPluginMainThread<'a>;
     type AudioProcessor<'a> = ();
@@ -240,6 +224,7 @@ where
 
 pub struct ClapPluginShared {
     channel: UnboundedSender<Message>,
+    gui_channel: UnboundedSender<GuiMessage>,
     plugin_id: ClapPluginId,
 }
 
@@ -247,6 +232,15 @@ impl ClapPluginShared {
     fn send_message(&self, payload: MessagePayload) {
         self.channel
             .unbounded_send(Message {
+                plugin_id: self.plugin_id,
+                payload,
+            })
+            .expect("unbounded_send should always succeed");
+    }
+
+    fn send_gui_message(&self, payload: GuiMessagePayload) {
+        self.gui_channel
+            .unbounded_send(GuiMessage {
                 plugin_id: self.plugin_id,
                 payload,
             })
@@ -262,11 +256,11 @@ impl HostLogImpl for ClapPluginShared {
 
 impl HostGuiImpl for ClapPluginShared {
     fn resize_hints_changed(&self) {
-        self.send_message(MessagePayload::ResizeHintsChanged);
+        self.send_gui_message(GuiMessagePayload::ResizeHintsChanged);
     }
 
     fn request_resize(&self, new_size: GuiSize) -> Result<(), clack_host::prelude::HostError> {
-        self.send_message(MessagePayload::RequestResize(new_size));
+        self.send_gui_message(GuiMessagePayload::RequestResize(new_size));
         Ok(())
     }
 

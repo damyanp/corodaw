@@ -8,6 +8,8 @@ anyhow.workspace = true
 clack-extensions.workspace = true
 cpal.workspace = true
 engine = { path = "../engine" }
+futures.workspace = true
+futures-channel.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
 raw-window-handle = "0.6.2"

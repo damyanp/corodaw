@@ -1,8 +1,11 @@
 use std::{
     cell::RefCell,
+    collections::HashMap,
     rc::{Rc, Weak},
 };
 
+use futures::StreamExt;
+use futures_channel::mpsc::{UnboundedReceiver, unbounded};
 use gpui::*;
 use gpui_component::{
     button::*,
@@ -15,7 +18,7 @@ use engine::{
     audio::Audio,
     audio_graph::{AudioGraph, audio_graph},
     plugins::{
-        ClapPluginManager,
+        ClapPlugin, ClapPluginId, ClapPluginManager, GuiMessage, GuiMessagePayload,
         discovery::{FoundPlugin, get_plugins},
     },
 };
@@ -45,28 +48,80 @@ impl SelectItem for SelectablePlugin {
     }
 }
 
-struct GpuiClapPluginManager(Rc<ClapPluginManager<GpuiPluginGui>>);
+struct GpuiClapPluginManager {
+    inner: Rc<ClapPluginManager>,
+    guis: RefCell<HashMap<ClapPluginId, Rc<GpuiPluginGui>>>,
+}
 
 impl GpuiClapPluginManager {
-    fn new(cx: &App) -> Self {
-        let inner = ClapPluginManager::new();
+    pub fn new(cx: &App) -> Rc<Self> {
+        let (gui_sender, gui_receiver) = unbounded();
+
+        let inner = ClapPluginManager::new(gui_sender);
 
         Self::spawn_message_handler(cx, Rc::downgrade(&inner));
 
-        GpuiClapPluginManager(inner)
+        let manager = Rc::new(GpuiClapPluginManager {
+            inner,
+            guis: RefCell::default(),
+        });
+        Self::spawn_gui_message_handler(cx, Rc::downgrade(&manager), gui_receiver);
+
+        manager
     }
 
-    fn spawn_message_handler(cx: &App, manager: Weak<ClapPluginManager<GpuiPluginGui>>) {
-        cx.spawn(async move |cx| ClapPluginManager::message_handler(manager, cx).await)
+    pub fn create_ui(self: &Rc<Self>, plugin: Rc<ClapPlugin>) -> Option<Rc<GpuiPluginGui>> {
+        let plugin_gui = plugin.plugin.borrow_mut().plugin_handle().get_extension();
+        if let Some(plugin_gui) = plugin_gui {
+            let gui = Rc::new(GpuiPluginGui::new(plugin.clone(), plugin_gui));
+            self.guis.borrow_mut().insert(plugin.get_id(), gui.clone());
+            Some(gui)
+        } else {
+            None
+        }
+    }
+
+    fn spawn_message_handler(cx: &App, manager: Weak<ClapPluginManager>) {
+        cx.spawn(async move |_| ClapPluginManager::message_handler(manager).await)
             .detach();
+    }
+
+    fn spawn_gui_message_handler(
+        cx: &App,
+        manager: Weak<Self>,
+        mut receiver: UnboundedReceiver<GuiMessage>,
+    ) {
+        cx.spawn(async move |cx| {
+            println!("[gui_message_handler] start");
+            while let Some(GuiMessage { plugin_id, payload }) = receiver.next().await {
+                let plugin = {
+                    let Some(manager) = manager.upgrade() else {
+                        break;
+                    };
+                    manager.guis.borrow().get(&plugin_id).unwrap().clone()
+                };
+
+                match payload {
+                    GuiMessagePayload::ResizeHintsChanged => {
+                        println!("Handling changed resize hints not supported");
+                    }
+                    GuiMessagePayload::RequestResize(size) => {
+                        plugin.request_resize(size, cx);
+                    }
+                }
+            }
+
+            println!("[gui_message_handler] end");
+        })
+        .detach();
     }
 }
 
 pub struct Corodaw {
-    clap_plugin_manager: GpuiClapPluginManager,
+    clap_plugin_manager: Rc<GpuiClapPluginManager>,
     _plugins: Vec<RefCell<FoundPlugin>>,
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
-    modules: Vec<Module<GpuiPluginGui>>,
+    modules: Vec<Module>,
     counter: u32,
     audio_graph: Rc<RefCell<AudioGraph>>,
     _audio: Audio,
@@ -118,7 +173,7 @@ impl Corodaw {
 
         cx.spawn(async move |e, cx| {
             let clap_plugin_manager = e
-                .read_with(cx, |corodaw, _| corodaw.clap_plugin_manager.0.clone())
+                .read_with(cx, |corodaw, _| corodaw.clap_plugin_manager.clone())
                 .unwrap();
 
             let module = Module::new(name, clap_plugin_manager, plugin, audio_graph, cx).await;

@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
 use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui};
 use engine::plugins::ClapPlugin;
@@ -9,19 +9,29 @@ use gpui::{
 
 pub struct GpuiPluginGui {
     plugin_gui: PluginGui,
-    window_handle: Option<AnyWindowHandle>,
-    window_closed_subscription: Option<Subscription>,
+    clap_plugin: Rc<ClapPlugin>,
+    window_handle: Cell<Option<AnyWindowHandle>>,
+    window_closed_subscription: Cell<Option<Subscription>>,
 }
 
 impl GpuiPluginGui {
-    pub fn show(&mut self, clap_plugin: Rc<ClapPlugin<Self>>, window: &mut Window, app: &mut App) {
+    pub fn new(clap_plugin: Rc<ClapPlugin>, plugin_gui: PluginGui) -> Self {
+        Self {
+            clap_plugin,
+            plugin_gui,
+            window_handle: Cell::default(),
+            window_closed_subscription: Cell::default(),
+        }
+    }
+
+    pub fn show(self: &Rc<Self>, window: &mut Window, app: &mut App) {
         let config = GuiConfiguration {
             api_type: GuiApiType::default_for_current_platform()
                 .expect("This platform supports UI"),
             is_floating: false,
         };
 
-        let mut plugin = clap_plugin.plugin.borrow_mut();
+        let mut plugin = self.clap_plugin.plugin.borrow_mut();
         let mut plugin_handle = plugin.plugin_handle();
         let plugin_gui = &self.plugin_gui;
 
@@ -44,7 +54,7 @@ impl GpuiPluginGui {
 
         let bounds = WindowBounds::centered(initial_size, app);
 
-        let clap_plugin_for_view = clap_plugin.clone();
+        let gui_for_view = self.clone();
         let window_handle = app
             .open_window(
                 WindowOptions {
@@ -61,7 +71,7 @@ impl GpuiPluginGui {
                         cx.observe_window_bounds(window, ClapPluginView::on_window_bounds)
                             .detach();
 
-                        ClapPluginView::new(clap_plugin_for_view)
+                        ClapPluginView::new(gui_for_view)
                     })
                 },
             )
@@ -84,38 +94,31 @@ impl GpuiPluginGui {
             println!("Error: {:?}", err);
         }
 
-        self.window_handle = Some(window_handle);
+        self.window_handle.replace(Some(window_handle));
 
-        let clap_plugin = clap_plugin.clone();
+        let gui = self.clone();
         let subscription = app.on_window_closed(move |cx| {
             // gpui doesn't seem to have a way to get a notification when a
             // specific window is closed, so instead we have to look at the
             // windows that haven't been closed to determine figure out if it is
             // still there or not!
             if !cx.windows().into_iter().any(|w| w == window_handle) {
-                let mut gui = clap_plugin.gui.borrow_mut();
-                let gui = gui.as_mut().unwrap();
-
-                gui.window_handle = None;
-                gui.window_closed_subscription = None;
+                gui.window_handle.replace(None);
+                gui.window_closed_subscription.replace(None);
                 gui.plugin_gui
-                    .destroy(&mut clap_plugin.plugin.borrow_mut().plugin_handle());
+                    .destroy(&mut gui.clap_plugin.plugin.borrow_mut().plugin_handle());
             }
         });
 
-        self.window_closed_subscription = Some(subscription);
+        self.window_closed_subscription.replace(Some(subscription));
     }
 
     pub fn has_gui(&self) -> bool {
-        self.window_handle.is_some()
+        self.window_handle.get().is_some()
     }
-}
 
-impl engine::plugins::Gui for GpuiPluginGui {
-    type Context = AsyncApp;
-
-    fn request_resize(&mut self, size: GuiSize, cx: &mut AsyncApp) {
-        let Some(window_handle) = self.window_handle else {
+    pub fn request_resize(&self, size: GuiSize, cx: &mut AsyncApp) {
+        let Some(window_handle) = self.window_handle.get() else {
             return;
         };
 
@@ -124,25 +127,17 @@ impl engine::plugins::Gui for GpuiPluginGui {
         })
         .expect("update_window should succeed");
     }
-
-    fn new(plugin_gui: PluginGui) -> Self {
-        Self {
-            plugin_gui,
-            window_handle: None,
-            window_closed_subscription: None,
-        }
-    }
 }
 
 struct ClapPluginView {
-    clap_plugin: Rc<ClapPlugin<GpuiPluginGui>>,
+    gui: Rc<GpuiPluginGui>,
     last_size: Size<Pixels>,
 }
 
 impl ClapPluginView {
-    fn new(clap_plugin: Rc<ClapPlugin<GpuiPluginGui>>) -> Self {
+    fn new(gui: Rc<GpuiPluginGui>) -> Self {
         Self {
-            clap_plugin,
+            gui,
             last_size: Size::default(),
         }
     }
@@ -152,15 +147,10 @@ impl ClapPluginView {
         if new_size != self.last_size {
             self.last_size = new_size;
 
-            let mut plugin_instance = self.clap_plugin.plugin.borrow_mut();
-            let gui = self.clap_plugin.gui.borrow();
-            let Some(gui) = gui.as_ref() else {
-                return;
-            };
-            let plugin_gui = &gui.plugin_gui;
-
+            let mut plugin_instance = self.gui.clap_plugin.plugin.borrow_mut();
             let mut handle = plugin_instance.plugin_handle();
 
+            let plugin_gui = self.gui.plugin_gui;
             if !plugin_gui.can_resize(&mut handle) {
                 return;
             }
