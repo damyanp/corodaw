@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/corodaw", "crates/engine"]
+members = ["crates/corodaw", "crates/corodaw-egui", "crates/engine"]
 default-members = ["crates/corodaw"]
 
 [workspace.dependencies]

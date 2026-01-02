@@ -19,6 +19,12 @@ pub struct FoundPlugin {
     bundle: Rc<RefCell<Option<PluginBundle>>>,
 }
 
+impl PartialEq for FoundPlugin {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.name == other.name && self.path == other.path
+    }
+}
+
 impl FoundPlugin {
     fn try_from_descriptor(
         descriptor: &PluginDescriptor,

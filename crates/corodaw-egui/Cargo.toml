@@ -1,0 +1,15 @@
+[package]
+name = "corodaw-egui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+clack-extensions.workspace = true
+cpal.workspace = true
+eframe = "0.33.3"
+engine = { path = "../engine" }
+futures.workspace = true
+futures-channel.workspace = true
+raw-window-handle = "0.6.2"
+smol = "2.0.2"
