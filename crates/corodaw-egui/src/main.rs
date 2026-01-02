@@ -17,7 +17,7 @@ use futures_channel::mpsc::{UnboundedReceiver, unbounded};
 use smol::LocalExecutor;
 use winit::{
     application::ApplicationHandler,
-    dpi::{LogicalSize, PhysicalSize},
+    dpi::PhysicalSize,
     event::{DeviceEvent, DeviceId, StartCause, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
@@ -309,7 +309,7 @@ fn display_found_plugin(value: &Option<Rc<FoundPlugin>>) -> &str {
 
 struct App<'a> {
     executor: Rc<LocalExecutor<'a>>,
-    _corodaw: Rc<RefCell<Corodaw<'a>>>,
+    corodaw: Rc<RefCell<Corodaw<'a>>>,
     eframe: EframeWinitApplication<'a>,
 }
 
@@ -321,7 +321,7 @@ impl<'a> App<'a> {
     ) -> Self {
         Self {
             executor,
-            _corodaw: corodaw,
+            corodaw,
             eframe,
         }
     }
@@ -330,7 +330,7 @@ impl<'a> App<'a> {
 impl ApplicationHandler<UserEvent> for App<'_> {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
         for f in self
-            ._corodaw
+            .corodaw
             .borrow()
             .pending_with_active_event_loop_fns
             .replace(Vec::default())
@@ -338,9 +338,7 @@ impl ApplicationHandler<UserEvent> for App<'_> {
             f(event_loop);
         }
 
-        while self.executor.try_tick() {
-            println!("Ticked!");
-        }
+        while self.executor.try_tick() {}
 
         self.eframe.new_events(event_loop, cause);
     }
