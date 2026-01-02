@@ -51,7 +51,7 @@ impl ClapPluginManager {
         })
     }
 
-    pub async fn create_plugin(&self, plugin: &mut FoundPlugin) -> Rc<ClapPlugin> {
+    pub async fn create_plugin(&self, plugin: &FoundPlugin) -> Rc<ClapPlugin> {
         let id = self.next_id.get();
         self.next_id.set(ClapPluginId(id.0 + 1));
 
@@ -102,7 +102,7 @@ pub struct ClapPlugin {
 impl ClapPlugin {
     async fn new(
         clap_plugin_id: ClapPluginId,
-        plugin: &mut FoundPlugin,
+        plugin: &FoundPlugin,
         sender: UnboundedSender<Message>,
         gui_sender: UnboundedSender<GuiMessage>,
     ) -> Rc<Self> {

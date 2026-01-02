@@ -61,7 +61,7 @@ impl FoundPlugin {
     }
 }
 
-pub fn get_plugins() -> Vec<RefCell<FoundPlugin>> {
+pub fn get_plugins() -> Vec<Rc<FoundPlugin>> {
     load_plugin_cache()
         .unwrap_or_else(|| {
             let plugins = find_plugins();
@@ -69,7 +69,7 @@ pub fn get_plugins() -> Vec<RefCell<FoundPlugin>> {
             plugins
         })
         .into_iter()
-        .map(RefCell::new)
+        .map(Rc::new)
         .collect()
 }
 

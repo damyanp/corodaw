@@ -35,7 +35,7 @@ impl Module {
     pub async fn new(
         name: String,
         plugin_manager: Rc<GpuiClapPluginManager>,
-        plugin: RefCell<FoundPlugin>,
+        plugin: &FoundPlugin,
         audio_graph: Rc<RefCell<AudioGraph>>,
         cx: &mut AsyncApp,
     ) -> Result<Self> {
@@ -64,11 +64,10 @@ impl Module {
 impl ModuleAudio {
     async fn new(
         plugin_manager: Rc<ClapPluginManager>,
-        mut plugin: RefCell<FoundPlugin>,
+        plugin: &FoundPlugin,
         audio_graph: Rc<RefCell<AudioGraph>>,
         initial_gain: f32,
     ) -> ModuleAudio {
-        let plugin = RefCell::get_mut(&mut plugin);
         let plugin = plugin_manager.create_plugin(plugin).await;
 
         let gain = Rc::new(GainControl::default());

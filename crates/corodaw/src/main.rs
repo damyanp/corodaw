@@ -28,19 +28,19 @@ mod module;
 mod gui;
 
 #[derive(Clone)]
-struct SelectablePlugin(RefCell<FoundPlugin>);
+struct SelectablePlugin(Rc<FoundPlugin>);
 
 impl SelectablePlugin {
-    fn new(p: &RefCell<FoundPlugin>) -> Self {
-        SelectablePlugin(p.clone())
+    fn new(p: Rc<FoundPlugin>) -> Self {
+        SelectablePlugin(p)
     }
 }
 
 impl SelectItem for SelectablePlugin {
-    type Value = RefCell<FoundPlugin>;
+    type Value = Rc<FoundPlugin>;
 
     fn title(&self) -> SharedString {
-        SharedString::new(self.0.borrow().name.as_str())
+        SharedString::new(self.0.name.as_str())
     }
 
     fn value(&self) -> &Self::Value {
@@ -119,7 +119,6 @@ impl GpuiClapPluginManager {
 
 pub struct Corodaw {
     clap_plugin_manager: Rc<GpuiClapPluginManager>,
-    _plugins: Vec<RefCell<FoundPlugin>>,
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
     modules: Vec<Module>,
     counter: u32,
@@ -128,11 +127,7 @@ pub struct Corodaw {
 }
 
 impl Corodaw {
-    fn new(
-        plugins: Vec<RefCell<FoundPlugin>>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    fn new(plugins: Vec<Rc<FoundPlugin>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (audio_graph, audio_graph_worker) = audio_graph();
         let audio = Audio::new(audio_graph_worker).unwrap();
 
@@ -140,7 +135,7 @@ impl Corodaw {
 
         let searchable_plugins = SearchableVec::new(
             plugins
-                .iter()
+                .into_iter()
                 .map(SelectablePlugin::new)
                 .collect::<Vec<_>>(),
         );
@@ -149,7 +144,6 @@ impl Corodaw {
 
         Self {
             clap_plugin_manager,
-            _plugins: plugins,
             plugin_selector,
             modules: Vec::default(), //vec![cx.new(|cx| Module::new(cx, "Master".to_owned()))],
             counter: 0,
@@ -166,7 +160,7 @@ impl Corodaw {
             .expect("The Add button should only be enabled if a plugin is selected")
             .clone();
 
-        let name = format!("Module {}: {}", self.counter, plugin.borrow().name);
+        let name = format!("Module {}: {}", self.counter, plugin.name);
         self.counter += 1;
 
         let audio_graph = self.audio_graph.clone();
@@ -176,7 +170,7 @@ impl Corodaw {
                 .read_with(cx, |corodaw, _| corodaw.clap_plugin_manager.clone())
                 .unwrap();
 
-            let module = Module::new(name, clap_plugin_manager, plugin, audio_graph, cx).await;
+            let module = Module::new(name, clap_plugin_manager, &plugin, audio_graph, cx).await;
 
             let module = module.expect("TODO: error handling for when module creation fails");
 
@@ -227,7 +221,6 @@ fn main() {
 
     println!("Found {} plugins", plugins.len());
     for plugin in &plugins {
-        let plugin = plugin.borrow();
         println!("{}: {} ({})", plugin.id, plugin.name, plugin.path.display());
     }
 
