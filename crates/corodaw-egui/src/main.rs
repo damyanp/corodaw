@@ -17,7 +17,7 @@ use futures_channel::mpsc::{UnboundedReceiver, unbounded};
 use smol::LocalExecutor;
 use winit::{
     application::ApplicationHandler,
-    dpi::LogicalSize,
+    dpi::{LogicalSize, PhysicalSize},
     event::{DeviceEvent, DeviceId, StartCause, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
@@ -120,11 +120,20 @@ impl EguiClapPluginManager {
             height: 600,
         });
 
+        let is_resizeable = plugin_gui
+            .get_resize_hints(&mut plugin_handle)
+            .map(|h| h.can_resize_horizontally && h.can_resize_vertically)
+            .unwrap_or(false);
+
         let window = event_loop
-            .create_window(Window::default_attributes().with_inner_size(LogicalSize {
-                width: initial_size.width,
-                height: initial_size.height,
-            }))
+            .create_window(
+                Window::default_attributes()
+                    .with_inner_size(PhysicalSize {
+                        width: initial_size.width,
+                        height: initial_size.height,
+                    })
+                    .with_resizable(is_resizeable),
+            )
             .expect("Window creation to succeed");
 
         unsafe {
@@ -138,7 +147,7 @@ impl EguiClapPluginManager {
             plugin_id,
             Rc::new(EguiPluginGui {
                 _plugin_gui: plugin_gui,
-                _window: window,
+                window,
             }),
         );
     }
@@ -146,12 +155,15 @@ impl EguiClapPluginManager {
 
 struct EguiPluginGui {
     _plugin_gui: PluginGui,
-    _window: Window,
+    window: Window,
 }
 
 impl EguiPluginGui {
-    fn request_resize(self: &Rc<EguiPluginGui>, _size: GuiSize) {
-        todo!();
+    fn request_resize(self: &Rc<EguiPluginGui>, size: GuiSize) {
+        let _ = self.window.request_inner_size(PhysicalSize {
+            width: size.width,
+            height: size.height,
+        });
     }
 }
 
