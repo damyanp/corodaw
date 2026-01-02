@@ -3,19 +3,89 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use eframe::egui::{self, Color32, ComboBox, Margin, Stroke};
+use clack_extensions::gui::GuiSize;
+use eframe::egui::{self, Color32, ComboBox, Margin, Stroke, ahash::HashMap};
 use engine::plugins::{
-    ClapPlugin, ClapPluginManager,
+    ClapPlugin, ClapPluginId, ClapPluginManager, GuiMessage, GuiMessagePayload,
     discovery::{FoundPlugin, get_plugins},
 };
-use futures_channel::mpsc::unbounded;
+use futures::StreamExt;
+use futures_channel::mpsc::{UnboundedReceiver, unbounded};
 use smol::LocalExecutor;
+
+struct EguiClapPluginManager {
+    inner: Rc<ClapPluginManager>,
+    guis: RefCell<HashMap<ClapPluginId, Rc<EguiPluginGui>>>,
+}
+
+impl EguiClapPluginManager {
+    fn new(executor: &LocalExecutor) -> Rc<Self> {
+        let (gui_sender, gui_receiver) = unbounded();
+
+        let inner = ClapPluginManager::new(gui_sender);
+        Self::spawn_message_handler(executor, Rc::downgrade(&inner));
+
+        let manager = Rc::new(Self {
+            inner,
+            guis: RefCell::default(),
+        });
+        Self::spawn_gui_message_handler(executor, Rc::downgrade(&manager), gui_receiver);
+
+        manager
+    }
+
+    fn spawn_message_handler(executor: &LocalExecutor, manager: Weak<ClapPluginManager>) {
+        executor
+            .spawn(async move {
+                ClapPluginManager::message_handler(manager).await;
+            })
+            .detach();
+    }
+
+    fn spawn_gui_message_handler(
+        executor: &LocalExecutor,
+        manager: Weak<Self>,
+        mut receiver: UnboundedReceiver<GuiMessage>,
+    ) {
+        executor
+            .spawn(async move {
+                println!("[gui_message_handler] start");
+                while let Some(GuiMessage { plugin_id, payload }) = receiver.next().await {
+                    let plugin = {
+                        let Some(manager) = manager.upgrade() else {
+                            break;
+                        };
+                        manager.guis.borrow().get(&plugin_id).unwrap().clone()
+                    };
+
+                    match payload {
+                        GuiMessagePayload::ResizeHintsChanged => {
+                            println!("Handling changed resize hints not supported");
+                        }
+                        GuiMessagePayload::RequestResize(size) => {
+                            plugin.request_resize(size);
+                        }
+                    }
+                }
+                println!("[gui_message_handler] end");
+            })
+            .detach();
+    }
+}
+
+struct EguiPluginGui;
+
+impl EguiPluginGui {
+    fn request_resize(self: &Rc<EguiPluginGui>, size: GuiSize) {
+        todo!();
+    }
+}
 
 struct Corodaw {
     found_plugins: Vec<Rc<FoundPlugin>>,
     state: Rc<RefCell<State>>,
 
-    manager: Rc<ClapPluginManager>,
+    manager: Rc<EguiClapPluginManager>,
 }
 
 #[derive(Default)]
@@ -28,24 +98,13 @@ struct State {
 
 impl Corodaw {
     fn new(executor: &LocalExecutor) -> Self {
-        let (gui_sender, _gui_receiver) = unbounded();
-
-        let manager = ClapPluginManager::new(gui_sender);
-        Corodaw::spawn_message_handler(executor, Rc::downgrade(&manager));
+        let manager = EguiClapPluginManager::new(executor);
 
         Self {
             found_plugins: get_plugins(),
             state: Rc::default(),
             manager,
         }
-    }
-
-    fn spawn_message_handler(executor: &LocalExecutor, manager: Weak<ClapPluginManager>) {
-        executor
-            .spawn(async move {
-                ClapPluginManager::message_handler(manager).await;
-            })
-            .detach();
     }
 
     fn update(
@@ -65,7 +124,7 @@ impl Corodaw {
                 ui.add_enabled_ui(state.selected_plugin.is_some(), |ui| {
                     if ui.button("Add Module").clicked() {
                         let my_state = self.state.clone();
-                        let manager = self.manager.clone();
+                        let manager = self.manager.inner.clone();
                         executor
                             .spawn(async move { my_state.borrow_mut().add_module(manager).await })
                             .detach();
