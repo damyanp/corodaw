@@ -3,9 +3,9 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use clack_extensions::gui::GuiSize;
+use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui};
 use eframe::{
-    UserEvent,
+    EframeWinitApplication, UserEvent,
     egui::{self, Color32, ComboBox, Margin, Stroke, ahash::HashMap},
 };
 use engine::plugins::{
@@ -17,9 +17,10 @@ use futures_channel::mpsc::{UnboundedReceiver, unbounded};
 use smol::LocalExecutor;
 use winit::{
     application::ApplicationHandler,
+    dpi::LogicalSize,
     event::{DeviceEvent, DeviceId, StartCause, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::WindowId,
+    window::{Window, WindowId},
 };
 
 struct EguiClapPluginManager {
@@ -80,9 +81,73 @@ impl EguiClapPluginManager {
             })
             .detach();
     }
+
+    fn show_plugin_gui(&self, event_loop: &ActiveEventLoop, plugin: Rc<ClapPlugin>) {
+        let mut guis = self.guis.borrow_mut();
+
+        let plugin_id = plugin.get_id();
+
+        if guis.contains_key(&plugin_id) {
+            println!("Asked to show a plugin that is already shown!");
+            return;
+        }
+
+        let mut plugin = plugin.plugin.borrow_mut();
+        let mut plugin_handle = plugin.plugin_handle();
+
+        let Some(plugin_gui) = plugin_handle.get_extension::<PluginGui>() else {
+            println!("No GUI for plugin!");
+            return;
+        };
+
+        let config = GuiConfiguration {
+            api_type: GuiApiType::default_for_current_platform()
+                .expect("This platform supports UI"),
+            is_floating: false,
+        };
+
+        if !plugin_gui.is_api_supported(&mut plugin_handle, config) {
+            println!("Plugin doesn't support API");
+            return;
+        }
+
+        plugin_gui
+            .create(&mut plugin_handle, config)
+            .expect("create succeeds");
+
+        let initial_size = plugin_gui.get_size(&mut plugin_handle).unwrap_or(GuiSize {
+            width: 800,
+            height: 600,
+        });
+
+        let window = event_loop
+            .create_window(Window::default_attributes().with_inner_size(LogicalSize {
+                width: initial_size.width,
+                height: initial_size.height,
+            }))
+            .expect("Window creation to succeed");
+
+        unsafe {
+            let window = clack_extensions::gui::Window::from_window(&window).unwrap();
+            plugin_gui
+                .set_parent(&mut plugin_handle, window)
+                .expect("set_parent succeeds");
+        }
+
+        guis.insert(
+            plugin_id,
+            Rc::new(EguiPluginGui {
+                _plugin_gui: plugin_gui,
+                _window: window,
+            }),
+        );
+    }
 }
 
-struct EguiPluginGui;
+struct EguiPluginGui {
+    _plugin_gui: PluginGui,
+    _window: Window,
+}
 
 impl EguiPluginGui {
     fn request_resize(self: &Rc<EguiPluginGui>, _size: GuiSize) {
@@ -96,6 +161,9 @@ struct Corodaw<'a> {
     found_plugins: Vec<Rc<FoundPlugin>>,
     state: State,
     manager: Rc<EguiClapPluginManager>,
+
+    #[allow(clippy::type_complexity)]
+    pending_with_active_event_loop_fns: RefCell<Vec<Box<dyn FnOnce(&ActiveEventLoop) + 'a>>>,
 }
 
 #[derive(Default)]
@@ -116,6 +184,7 @@ impl<'a> Corodaw<'a> {
             found_plugins: get_plugins(),
             state: State::default(),
             manager,
+            pending_with_active_event_loop_fns: RefCell::default(),
         }));
 
         r.borrow_mut().this = Rc::downgrade(&r);
@@ -133,17 +202,14 @@ impl<'a> Corodaw<'a> {
                             .spawn(async move {
                                 let mut this = clone.borrow_mut();
                                 let manager = this.manager.inner.clone();
-                                this.state.add_module(manager).await
+                                this.state.add_module(manager).await;
                             })
                             .detach();
                     }
                 });
                 ComboBox::from_id_salt("Plugin")
                     .width(ui.available_width())
-                    .selected_text(format!(
-                        "{}",
-                        display_found_plugin(&self.state.selected_plugin)
-                    ))
+                    .selected_text(display_found_plugin(&self.state.selected_plugin).to_string())
                     .show_ui(ui, |ui| {
                         for plugin in &self.found_plugins {
                             ui.selectable_value(
@@ -155,24 +221,39 @@ impl<'a> Corodaw<'a> {
                     });
             });
             for module in &self.state.modules {
-                module.add_to_ui(ui);
+                module.add_to_ui(self, ui);
             }
         });
+    }
+
+    fn show_plugin_ui(&self, plugin: Rc<ClapPlugin>) {
+        let this = self.this.upgrade().unwrap();
+
+        self.run_with_active_event_loop(move |event_loop: &ActiveEventLoop| {
+            this.borrow().manager.show_plugin_gui(event_loop, plugin);
+        });
+    }
+
+    fn run_with_active_event_loop<Fn>(&self, f: Fn)
+    where
+        Fn: FnOnce(&ActiveEventLoop) + 'a,
+    {
+        self.pending_with_active_event_loop_fns
+            .borrow_mut()
+            .push(Box::new(f));
     }
 }
 
 impl State {
     async fn add_module(&mut self, manager: Rc<ClapPluginManager>) {
-        println!("State::add_module");
-
-        let Some(plugin) = &self.selected_plugin else {
-            return;
-        };
+        let plugin = self.selected_plugin.as_ref().unwrap();
 
         let name = format!("Module {}: {}", self.counter, plugin.name);
         self.counter += 1;
 
-        self.modules.push(Module::new(name, plugin, manager).await);
+        let module = Module::new(name, plugin, manager).await;
+
+        self.modules.push(module);
     }
 }
 
@@ -190,7 +271,7 @@ impl Module {
         }
     }
 
-    fn add_to_ui(&self, ui: &mut egui::Ui) {
+    fn add_to_ui(&self, corodaw: &Corodaw, ui: &mut egui::Ui) {
         egui::Frame::new()
             .stroke(Stroke::new(1.0, Color32::WHITE))
             .inner_margin(Margin::same(5))
@@ -199,7 +280,9 @@ impl Module {
                 ui.horizontal(|ui| {
                     ui.label(&self.name);
                     ui.take_available_space();
-                    let _ = ui.button("Show");
+                    if ui.button("Show").clicked() {
+                        corodaw.show_plugin_ui(self._plugin.clone());
+                    }
                 });
             });
     }
@@ -212,14 +295,18 @@ fn display_found_plugin(value: &Option<Rc<FoundPlugin>>) -> &str {
         .unwrap_or("<none>")
 }
 
-struct App<'a, T> {
+struct App<'a> {
     executor: Rc<LocalExecutor<'a>>,
     _corodaw: Rc<RefCell<Corodaw<'a>>>,
-    eframe: T,
+    eframe: EframeWinitApplication<'a>,
 }
 
-impl<'a, T> App<'a, T> {
-    fn new(executor: Rc<LocalExecutor<'a>>, corodaw: Rc<RefCell<Corodaw<'a>>>, eframe: T) -> Self {
+impl<'a> App<'a> {
+    fn new(
+        executor: Rc<LocalExecutor<'a>>,
+        corodaw: Rc<RefCell<Corodaw<'a>>>,
+        eframe: EframeWinitApplication<'a>,
+    ) -> Self {
         Self {
             executor,
             _corodaw: corodaw,
@@ -228,11 +315,17 @@ impl<'a, T> App<'a, T> {
     }
 }
 
-impl<T> ApplicationHandler<UserEvent> for App<'_, T>
-where
-    T: ApplicationHandler<UserEvent>,
-{
+impl ApplicationHandler<UserEvent> for App<'_> {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+        for f in self
+            ._corodaw
+            .borrow()
+            .pending_with_active_event_loop_fns
+            .replace(Vec::default())
+        {
+            f(event_loop);
+        }
+
         while self.executor.try_tick() {
             println!("Ticked!");
         }
