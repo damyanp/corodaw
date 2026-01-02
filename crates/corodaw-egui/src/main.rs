@@ -1,13 +1,12 @@
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
-    time::Duration,
 };
 
 use clack_extensions::gui::GuiSize;
 use eframe::{
-    EframePumpStatus,
-    egui::{self, Color32, ComboBox, Margin, Stroke, ViewportBuilder, ahash::HashMap},
+    UserEvent,
+    egui::{self, Color32, ComboBox, Margin, Stroke, ahash::HashMap},
 };
 use engine::plugins::{
     ClapPlugin, ClapPluginId, ClapPluginManager, GuiMessage, GuiMessagePayload,
@@ -16,7 +15,12 @@ use engine::plugins::{
 use futures::StreamExt;
 use futures_channel::mpsc::{UnboundedReceiver, unbounded};
 use smol::LocalExecutor;
-use winit::event_loop::{ControlFlow, EventLoop};
+use winit::{
+    application::ApplicationHandler,
+    event::{DeviceEvent, DeviceId, StartCause, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    window::WindowId,
+};
 
 struct EguiClapPluginManager {
     inner: Rc<ClapPluginManager>,
@@ -81,7 +85,7 @@ impl EguiClapPluginManager {
 struct EguiPluginGui;
 
 impl EguiPluginGui {
-    fn request_resize(self: &Rc<EguiPluginGui>, size: GuiSize) {
+    fn request_resize(self: &Rc<EguiPluginGui>, _size: GuiSize) {
         todo!();
     }
 }
@@ -117,7 +121,7 @@ impl Corodaw<'_> {
 }
 
 impl eframe::App for Corodaw<'_> {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         while self.executor.try_tick() {
             println!("Ticked!");
         }
@@ -206,26 +210,85 @@ fn display_found_plugin(value: &Option<Rc<FoundPlugin>>) -> &str {
         .unwrap_or("<none>")
 }
 
+struct App<T> {
+    eframe: T, //ApplicationHandler<UserEvent>
+}
+
+impl<T> App<T> {
+    fn new(eframe: T) -> Self {
+        Self { eframe }
+    }
+}
+
+impl<T> ApplicationHandler<UserEvent> for App<T>
+where
+    T: ApplicationHandler<UserEvent>,
+{
+    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+        self.eframe.new_events(event_loop, cause);
+    }
+
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.eframe.resumed(event_loop);
+    }
+
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+        self.eframe.user_event(event_loop, event);
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        self.eframe.window_event(event_loop, window_id, event);
+    }
+
+    fn device_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        self.eframe.device_event(event_loop, device_id, event);
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.eframe.about_to_wait(event_loop);
+    }
+
+    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
+        self.eframe.suspended(event_loop);
+    }
+
+    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+        self.eframe.exiting(event_loop);
+    }
+
+    fn memory_warning(&mut self, event_loop: &ActiveEventLoop) {
+        self.eframe.memory_warning(event_loop);
+    }
+}
+
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions::default();
 
-    let mut eventloop = EventLoop::<eframe::UserEvent>::with_user_event()
+    let eventloop = EventLoop::<eframe::UserEvent>::with_user_event()
         .build()
         .unwrap();
     eventloop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = eframe::create_native(
+    let eframe = eframe::create_native(
         "Corodaw",
         options,
         Box::new(|_| Ok(Box::new(Corodaw::new()))),
         &eventloop,
     );
 
-    while let EframePumpStatus::Continue(cf) =
-        app.pump_eframe_app(&mut eventloop, Some(Duration::ZERO))
-    {
-        println!("{:?}", cf);
-    }
+    let mut app = App::new(eframe);
+
+    eventloop.run_app(&mut app)?;
 
     Ok(())
 }
