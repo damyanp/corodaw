@@ -301,16 +301,13 @@ impl State {
 
 struct Module {
     name: String,
-    _plugin: Rc<ClapPlugin>,
+    plugin: Rc<ClapPlugin>,
 }
 
 impl Module {
     async fn new(name: String, plugin: &FoundPlugin, manager: Rc<ClapPluginManager>) -> Self {
         let plugin = manager.create_plugin(plugin).await;
-        Self {
-            name,
-            _plugin: plugin,
-        }
+        Self { name, plugin }
     }
 
     fn add_to_ui(&self, corodaw: &Corodaw, ui: &mut egui::Ui) {
@@ -323,7 +320,7 @@ impl Module {
                     ui.label(&self.name);
                     ui.take_available_space();
                     if ui.button("Show").clicked() {
-                        corodaw.show_plugin_ui(self._plugin.clone());
+                        corodaw.show_plugin_ui(self.plugin.clone());
                     }
                 });
             });
