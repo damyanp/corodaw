@@ -1,10 +1,14 @@
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
+    time::Duration,
 };
 
 use clack_extensions::gui::GuiSize;
-use eframe::egui::{self, Color32, ComboBox, Margin, Stroke, ahash::HashMap};
+use eframe::{
+    EframePumpStatus,
+    egui::{self, Color32, ComboBox, Margin, Stroke, ViewportBuilder, ahash::HashMap},
+};
 use engine::plugins::{
     ClapPlugin, ClapPluginId, ClapPluginManager, GuiMessage, GuiMessagePayload,
     discovery::{FoundPlugin, get_plugins},
@@ -12,6 +16,7 @@ use engine::plugins::{
 use futures::StreamExt;
 use futures_channel::mpsc::{UnboundedReceiver, unbounded};
 use smol::LocalExecutor;
+use winit::event_loop::{ControlFlow, EventLoop};
 
 struct EguiClapPluginManager {
     inner: Rc<ClapPluginManager>,
@@ -81,7 +86,8 @@ impl EguiPluginGui {
     }
 }
 
-struct Corodaw {
+struct Corodaw<'a> {
+    executor: LocalExecutor<'a>,
     found_plugins: Vec<Rc<FoundPlugin>>,
     state: Rc<RefCell<State>>,
 
@@ -96,24 +102,23 @@ struct State {
     counter: u32,
 }
 
-impl Corodaw {
-    fn new(executor: &LocalExecutor) -> Self {
-        let manager = EguiClapPluginManager::new(executor);
+impl Corodaw<'_> {
+    fn new() -> Self {
+        let executor = LocalExecutor::new();
+        let manager = EguiClapPluginManager::new(&executor);
 
         Self {
+            executor,
             found_plugins: get_plugins(),
             state: Rc::default(),
             manager,
         }
     }
+}
 
-    fn update(
-        &mut self,
-        executor: &LocalExecutor,
-        ctx: &egui::Context,
-        _frame: &mut eframe::Frame,
-    ) {
-        while executor.try_tick() {
+impl eframe::App for Corodaw<'_> {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        while self.executor.try_tick() {
             println!("Ticked!");
         }
 
@@ -125,7 +130,7 @@ impl Corodaw {
                     if ui.button("Add Module").clicked() {
                         let my_state = self.state.clone();
                         let manager = self.manager.inner.clone();
-                        executor
+                        self.executor
                             .spawn(async move { my_state.borrow_mut().add_module(manager).await })
                             .detach();
                     }
@@ -202,12 +207,25 @@ fn display_found_plugin(value: &Option<Rc<FoundPlugin>>) -> &str {
 }
 
 fn main() -> eframe::Result {
-    let executor = LocalExecutor::new();
-
-    let mut corodaw = Corodaw::new(&executor);
-
     let options = eframe::NativeOptions::default();
-    eframe::run_simple_native("Corodaw", options, move |ctx, frame| {
-        corodaw.update(&executor, ctx, frame);
-    })
+
+    let mut eventloop = EventLoop::<eframe::UserEvent>::with_user_event()
+        .build()
+        .unwrap();
+    eventloop.set_control_flow(ControlFlow::Poll);
+
+    let mut app = eframe::create_native(
+        "Corodaw",
+        options,
+        Box::new(|_| Ok(Box::new(Corodaw::new()))),
+        &eventloop,
+    );
+
+    while let EframePumpStatus::Continue(cf) =
+        app.pump_eframe_app(&mut eventloop, Some(Duration::ZERO))
+    {
+        println!("{:?}", cf);
+    }
+
+    Ok(())
 }
