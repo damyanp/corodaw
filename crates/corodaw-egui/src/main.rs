@@ -117,10 +117,12 @@ impl<'a> Corodaw<'a> {
             manager,
         }
     }
-}
 
-impl eframe::App for Corodaw<'_> {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context) {
+        while self.executor.try_tick() {
+            println!("Ticked!");
+        }
+
         let mut state = self.state.borrow_mut();
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -206,13 +208,16 @@ fn display_found_plugin(value: &Option<Rc<FoundPlugin>>) -> &str {
 }
 
 struct App<'a, T> {
-    executor: Rc<LocalExecutor<'a>>,
+    _corodaw: Rc<RefCell<Corodaw<'a>>>,
     eframe: T,
 }
 
 impl<'a, T> App<'a, T> {
-    fn new(executor: Rc<LocalExecutor<'a>>, eframe: T) -> Self {
-        Self { executor, eframe }
+    fn new(corodaw: Rc<RefCell<Corodaw<'a>>>, eframe: T) -> Self {
+        Self {
+            _corodaw: corodaw,
+            eframe,
+        }
     }
 }
 
@@ -238,10 +243,6 @@ where
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        while self.executor.try_tick() {
-            println!("Ticked!");
-        }
-
         self.eframe.window_event(event_loop, window_id, event);
     }
 
@@ -280,16 +281,30 @@ fn main() -> eframe::Result {
     eventloop.set_control_flow(ControlFlow::Poll);
 
     let executor = Rc::new(LocalExecutor::new());
+    let corodaw = Rc::new(RefCell::new(Corodaw::new(executor.clone())));
 
-    let executor_for_eframe = executor.clone();
+    struct AppProxy<'a> {
+        corodaw: Rc<RefCell<Corodaw<'a>>>,
+    }
+    impl eframe::App for AppProxy<'_> {
+        fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+            self.corodaw.borrow_mut().update(ctx);
+        }
+    }
+
+    let corodaw_for_proxy = corodaw.clone();
     let eframe = eframe::create_native(
         "Corodaw",
         options,
-        Box::new(|_| Ok(Box::new(Corodaw::new(executor_for_eframe)))),
+        Box::new(|_| {
+            Ok(Box::new(AppProxy {
+                corodaw: corodaw_for_proxy,
+            }))
+        }),
         &eventloop,
     );
 
-    let mut app = App::new(executor, eframe);
+    let mut app = App::new(corodaw, eframe);
 
     eventloop.run_app(&mut app)?;
 
