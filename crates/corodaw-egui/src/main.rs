@@ -107,8 +107,7 @@ struct State {
 }
 
 impl<'a> Corodaw<'a> {
-    fn new() -> Rc<RefCell<Self>> {
-        let executor = Rc::new(LocalExecutor::new());
+    fn new(executor: Rc<LocalExecutor<'a>>) -> Rc<RefCell<Self>> {
         let manager = EguiClapPluginManager::new(&executor);
 
         let r = Rc::new(RefCell::new(Self {
@@ -125,10 +124,6 @@ impl<'a> Corodaw<'a> {
     }
 
     fn update(&mut self, ctx: &egui::Context) {
-        while self.executor.try_tick() {
-            println!("Ticked!");
-        }
-
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(self.state.selected_plugin.is_some(), |ui| {
@@ -218,13 +213,15 @@ fn display_found_plugin(value: &Option<Rc<FoundPlugin>>) -> &str {
 }
 
 struct App<'a, T> {
+    executor: Rc<LocalExecutor<'a>>,
     _corodaw: Rc<RefCell<Corodaw<'a>>>,
     eframe: T,
 }
 
 impl<'a, T> App<'a, T> {
-    fn new(corodaw: Rc<RefCell<Corodaw<'a>>>, eframe: T) -> Self {
+    fn new(executor: Rc<LocalExecutor<'a>>, corodaw: Rc<RefCell<Corodaw<'a>>>, eframe: T) -> Self {
         Self {
+            executor,
             _corodaw: corodaw,
             eframe,
         }
@@ -236,6 +233,10 @@ where
     T: ApplicationHandler<UserEvent>,
 {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+        while self.executor.try_tick() {
+            println!("Ticked!");
+        }
+
         self.eframe.new_events(event_loop, cause);
     }
 
@@ -290,7 +291,8 @@ fn main() -> eframe::Result {
         .unwrap();
     eventloop.set_control_flow(ControlFlow::Poll);
 
-    let corodaw = Corodaw::new();
+    let executor = Rc::new(LocalExecutor::new());
+    let corodaw = Corodaw::new(executor.clone());
 
     struct AppProxy<'a> {
         corodaw: Rc<RefCell<Corodaw<'a>>>,
@@ -313,7 +315,7 @@ fn main() -> eframe::Result {
         &eventloop,
     );
 
-    let mut app = App::new(corodaw, eframe);
+    let mut app = App::new(executor, corodaw, eframe);
 
     eventloop.run_app(&mut app)?;
 
