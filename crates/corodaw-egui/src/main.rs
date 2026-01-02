@@ -91,7 +91,7 @@ impl EguiPluginGui {
 }
 
 struct Corodaw<'a> {
-    executor: LocalExecutor<'a>,
+    executor: Rc<LocalExecutor<'a>>,
     found_plugins: Vec<Rc<FoundPlugin>>,
     state: Rc<RefCell<State>>,
 
@@ -106,9 +106,8 @@ struct State {
     counter: u32,
 }
 
-impl Corodaw<'_> {
-    fn new() -> Self {
-        let executor = LocalExecutor::new();
+impl<'a> Corodaw<'a> {
+    fn new(executor: Rc<LocalExecutor<'a>>) -> Self {
         let manager = EguiClapPluginManager::new(&executor);
 
         Self {
@@ -122,10 +121,6 @@ impl Corodaw<'_> {
 
 impl eframe::App for Corodaw<'_> {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        while self.executor.try_tick() {
-            println!("Ticked!");
-        }
-
         let mut state = self.state.borrow_mut();
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -210,17 +205,18 @@ fn display_found_plugin(value: &Option<Rc<FoundPlugin>>) -> &str {
         .unwrap_or("<none>")
 }
 
-struct App<T> {
-    eframe: T, //ApplicationHandler<UserEvent>
+struct App<'a, T> {
+    executor: Rc<LocalExecutor<'a>>,
+    eframe: T,
 }
 
-impl<T> App<T> {
-    fn new(eframe: T) -> Self {
-        Self { eframe }
+impl<'a, T> App<'a, T> {
+    fn new(executor: Rc<LocalExecutor<'a>>, eframe: T) -> Self {
+        Self { executor, eframe }
     }
 }
 
-impl<T> ApplicationHandler<UserEvent> for App<T>
+impl<T> ApplicationHandler<UserEvent> for App<'_, T>
 where
     T: ApplicationHandler<UserEvent>,
 {
@@ -242,6 +238,10 @@ where
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        while self.executor.try_tick() {
+            println!("Ticked!");
+        }
+
         self.eframe.window_event(event_loop, window_id, event);
     }
 
@@ -279,14 +279,17 @@ fn main() -> eframe::Result {
         .unwrap();
     eventloop.set_control_flow(ControlFlow::Poll);
 
+    let executor = Rc::new(LocalExecutor::new());
+
+    let executor_for_eframe = executor.clone();
     let eframe = eframe::create_native(
         "Corodaw",
         options,
-        Box::new(|_| Ok(Box::new(Corodaw::new()))),
+        Box::new(|_| Ok(Box::new(Corodaw::new(executor_for_eframe)))),
         &eventloop,
     );
 
-    let mut app = App::new(eframe);
+    let mut app = App::new(executor, eframe);
 
     eventloop.run_app(&mut app)?;
 
