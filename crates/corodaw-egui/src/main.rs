@@ -26,6 +26,7 @@ use winit::{
 struct EguiClapPluginManager {
     inner: Rc<ClapPluginManager>,
     guis: RefCell<HashMap<ClapPluginId, Rc<EguiPluginGui>>>,
+    windows: RefCell<HashMap<WindowId, ClapPluginId>>,
 }
 
 impl EguiClapPluginManager {
@@ -38,6 +39,7 @@ impl EguiClapPluginManager {
         let manager = Rc::new(Self {
             inner,
             guis: RefCell::default(),
+            windows: RefCell::default(),
         });
         Self::spawn_gui_message_handler(executor, Rc::downgrade(&manager), gui_receiver);
 
@@ -82,17 +84,17 @@ impl EguiClapPluginManager {
             .detach();
     }
 
-    fn show_plugin_gui(&self, event_loop: &ActiveEventLoop, plugin: Rc<ClapPlugin>) {
+    fn show_plugin_gui(&self, event_loop: &ActiveEventLoop, clap_plugin: Rc<ClapPlugin>) {
         let mut guis = self.guis.borrow_mut();
 
-        let plugin_id = plugin.get_id();
+        let plugin_id = clap_plugin.get_id();
 
         if guis.contains_key(&plugin_id) {
             println!("Asked to show a plugin that is already shown!");
             return;
         }
 
-        let mut plugin = plugin.plugin.borrow_mut();
+        let mut plugin = clap_plugin.plugin.borrow_mut();
         let mut plugin_handle = plugin.plugin_handle();
 
         let Some(plugin_gui) = plugin_handle.get_extension::<PluginGui>() else {
@@ -143,19 +145,47 @@ impl EguiClapPluginManager {
                 .expect("set_parent succeeds");
         }
 
-        guis.insert(
-            plugin_id,
-            Rc::new(EguiPluginGui {
-                _plugin_gui: plugin_gui,
-                window,
-            }),
-        );
+        drop(plugin);
+
+        let window_id = window.id();
+        let gui = Rc::new(EguiPluginGui {
+            clap_plugin,
+            plugin_gui,
+            window,
+        });
+
+        guis.insert(plugin_id, gui);
+        self.windows.borrow_mut().insert(window_id, plugin_id);
+    }
+
+    fn window_event(&self, window_id: WindowId, event: &WindowEvent) -> bool {
+        let mut windows = self.windows.borrow_mut();
+
+        if let Some(id) = windows.get(&window_id) {
+            match event {
+                WindowEvent::CloseRequested => {
+                    self.guis.borrow_mut().remove(id);
+                    windows.remove(&window_id);
+                }
+                _ => (),
+            }
+            return true;
+        }
+        false
     }
 }
 
 struct EguiPluginGui {
-    _plugin_gui: PluginGui,
+    clap_plugin: Rc<ClapPlugin>,
+    plugin_gui: PluginGui,
     window: Window,
+}
+
+impl Drop for EguiPluginGui {
+    fn drop(&mut self) {
+        self.plugin_gui
+            .destroy(&mut self.clap_plugin.plugin.borrow_mut().plugin_handle());
+    }
 }
 
 impl EguiPluginGui {
@@ -357,6 +387,15 @@ impl ApplicationHandler<UserEvent> for App<'_> {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        if self
+            .corodaw
+            .borrow()
+            .manager
+            .window_event(window_id, &event)
+        {
+            return;
+        }
+
         self.eframe.window_event(event_loop, window_id, event);
     }
 
@@ -421,6 +460,8 @@ fn main() -> eframe::Result {
     let mut app = App::new(executor, corodaw, eframe);
 
     eventloop.run_app(&mut app)?;
+
+    println!("[main] exit");
 
     Ok(())
 }
