@@ -91,10 +91,10 @@ impl EguiPluginGui {
 }
 
 struct Corodaw<'a> {
+    this: Weak<RefCell<Self>>,
     executor: Rc<LocalExecutor<'a>>,
     found_plugins: Vec<Rc<FoundPlugin>>,
-    state: Rc<RefCell<State>>,
-
+    state: State,
     manager: Rc<EguiClapPluginManager>,
 }
 
@@ -107,15 +107,21 @@ struct State {
 }
 
 impl<'a> Corodaw<'a> {
-    fn new(executor: Rc<LocalExecutor<'a>>) -> Self {
+    fn new() -> Rc<RefCell<Self>> {
+        let executor = Rc::new(LocalExecutor::new());
         let manager = EguiClapPluginManager::new(&executor);
 
-        Self {
+        let r = Rc::new(RefCell::new(Self {
+            this: Weak::default(),
             executor,
             found_plugins: get_plugins(),
-            state: Rc::default(),
+            state: State::default(),
             manager,
-        }
+        }));
+
+        r.borrow_mut().this = Rc::downgrade(&r);
+
+        r
     }
 
     fn update(&mut self, ctx: &egui::Context) {
@@ -123,33 +129,37 @@ impl<'a> Corodaw<'a> {
             println!("Ticked!");
         }
 
-        let mut state = self.state.borrow_mut();
-
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.add_enabled_ui(state.selected_plugin.is_some(), |ui| {
+                ui.add_enabled_ui(self.state.selected_plugin.is_some(), |ui| {
                     if ui.button("Add Module").clicked() {
-                        let my_state = self.state.clone();
-                        let manager = self.manager.inner.clone();
+                        let clone = self.this.upgrade().unwrap();
                         self.executor
-                            .spawn(async move { my_state.borrow_mut().add_module(manager).await })
+                            .spawn(async move {
+                                let mut this = clone.borrow_mut();
+                                let manager = this.manager.inner.clone();
+                                this.state.add_module(manager).await
+                            })
                             .detach();
                     }
                 });
                 ComboBox::from_id_salt("Plugin")
                     .width(ui.available_width())
-                    .selected_text(format!("{}", display_found_plugin(&state.selected_plugin)))
+                    .selected_text(format!(
+                        "{}",
+                        display_found_plugin(&self.state.selected_plugin)
+                    ))
                     .show_ui(ui, |ui| {
                         for plugin in &self.found_plugins {
                             ui.selectable_value(
-                                &mut state.selected_plugin,
+                                &mut self.state.selected_plugin,
                                 Some(plugin.clone()),
                                 plugin.name.to_owned(),
                             );
                         }
                     });
             });
-            for module in &state.modules {
+            for module in &self.state.modules {
                 module.add_to_ui(ui);
             }
         });
@@ -280,8 +290,7 @@ fn main() -> eframe::Result {
         .unwrap();
     eventloop.set_control_flow(ControlFlow::Poll);
 
-    let executor = Rc::new(LocalExecutor::new());
-    let corodaw = Rc::new(RefCell::new(Corodaw::new(executor.clone())));
+    let corodaw = Corodaw::new();
 
     struct AppProxy<'a> {
         corodaw: Rc<RefCell<Corodaw<'a>>>,
