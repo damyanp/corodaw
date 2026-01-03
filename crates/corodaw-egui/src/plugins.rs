@@ -177,13 +177,16 @@ impl EguiClapPluginManager {
 
                     let mut p = plugin.plugin_handle();
 
-                    let _ = self.guis.borrow_mut().get(id).unwrap().plugin_gui.set_size(
-                        &mut p,
-                        GuiSize {
-                            width: size.width,
-                            height: size.height,
-                        },
-                    );
+                    let plugin_gui = self.guis.borrow_mut().get(id).unwrap().plugin_gui;
+                    if plugin_gui.can_resize(&mut p) {
+                        let _ = plugin_gui.set_size(
+                            &mut p,
+                            GuiSize {
+                                width: size.width,
+                                height: size.height,
+                            },
+                        );
+                    }
                 }
                 _ => (),
             }
