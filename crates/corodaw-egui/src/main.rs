@@ -473,7 +473,7 @@ fn main() -> eframe::Result {
     let eventloop = EventLoop::<eframe::UserEvent>::with_user_event()
         .build()
         .unwrap();
-    eventloop.set_control_flow(ControlFlow::Poll);
+    eventloop.set_control_flow(ControlFlow::Wait);
 
     let executor = Rc::new(LocalExecutor::new());
     let corodaw = Corodaw::new(executor.clone());
