@@ -158,6 +158,10 @@ impl EguiClapPluginManager {
         self.windows.borrow_mut().insert(window_id, plugin_id);
     }
 
+    pub fn has_plugin_gui(&self, plugin: &ClapPlugin) -> bool {
+        self.guis.borrow().contains_key(&plugin.get_id())
+    }
+
     pub fn window_event(&self, window_id: WindowId, event: &WindowEvent) -> bool {
         let mut windows = self.windows.borrow_mut();
 

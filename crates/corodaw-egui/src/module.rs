@@ -64,9 +64,13 @@ impl Module {
                         self.gain.set_gain(gain_value);
                     }
 
-                    if ui.button("Show").clicked() {
-                        corodaw.show_plugin_ui(self.plugin.clone());
-                    }
+                    let has_gui = corodaw.has_plugin_gui(&self.plugin);
+
+                    ui.add_enabled_ui(!has_gui, |ui| {
+                        if ui.button("Show").clicked() {
+                            corodaw.show_plugin_ui(self.plugin.clone());
+                        }
+                    });
                 });
             });
     }

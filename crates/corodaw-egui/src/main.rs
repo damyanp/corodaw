@@ -106,6 +106,10 @@ impl<'a> Corodaw<'a> {
         });
     }
 
+    fn has_plugin_gui(&self, plugin: &ClapPlugin) -> bool {
+        self.manager.has_plugin_gui(plugin)
+    }
+
     fn run_with_active_event_loop<Fn>(&self, f: Fn)
     where
         Fn: FnOnce(&ActiveEventLoop) + 'a,
