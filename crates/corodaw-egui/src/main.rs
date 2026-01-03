@@ -1,16 +1,23 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     rc::{Rc, Weak},
 };
 
 use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui};
 use eframe::{
     EframeWinitApplication, UserEvent,
-    egui::{self, Color32, ComboBox, Margin, Stroke, ahash::HashMap},
+    egui::{self, Color32, ComboBox, Margin, Slider, Stroke, ahash::HashMap},
 };
-use engine::plugins::{
-    ClapPlugin, ClapPluginId, ClapPluginManager, GuiMessage, GuiMessagePayload,
-    discovery::{FoundPlugin, get_plugins},
+use engine::{
+    audio::Audio,
+    audio_graph::{
+        AudioGraph, audio_graph, clap_adapter::get_audio_graph_node_desc_for_clap_plugin,
+    },
+    builtin::GainControl,
+    plugins::{
+        ClapPlugin, ClapPluginId, ClapPluginManager, GuiMessage, GuiMessagePayload,
+        discovery::{FoundPlugin, get_plugins},
+    },
 };
 use futures::StreamExt;
 use futures_channel::mpsc::{UnboundedReceiver, unbounded};
@@ -208,12 +215,29 @@ struct Corodaw<'a> {
     pending_with_active_event_loop_fns: RefCell<Vec<Box<dyn FnOnce(&ActiveEventLoop) + 'a>>>,
 }
 
-#[derive(Default)]
 struct State {
     selected_plugin: Option<Rc<FoundPlugin>>,
 
     modules: Vec<Module>,
     counter: u32,
+
+    audio_graph: Rc<RefCell<AudioGraph>>,
+    _audio: Audio,
+}
+
+impl State {
+    fn new() -> Self {
+        let (audio_graph, audio_graph_worker) = audio_graph();
+        let audio = Audio::new(audio_graph_worker).unwrap();
+
+        Self {
+            selected_plugin: None,
+            modules: Vec::default(),
+            counter: 0,
+            audio_graph: Rc::new(RefCell::new(audio_graph)),
+            _audio: audio,
+        }
+    }
 }
 
 impl<'a> Corodaw<'a> {
@@ -224,7 +248,7 @@ impl<'a> Corodaw<'a> {
             this: Weak::default(),
             executor,
             found_plugins: get_plugins(),
-            state: State::default(),
+            state: State::new(),
             manager,
             pending_with_active_event_loop_fns: RefCell::default(),
         }));
@@ -293,7 +317,7 @@ impl State {
         let name = format!("Module {}: {}", self.counter, plugin.name);
         self.counter += 1;
 
-        let module = Module::new(name, plugin, manager).await;
+        let module = Module::new(name, plugin, manager, self.audio_graph.clone()).await;
 
         self.modules.push(module);
     }
@@ -302,12 +326,34 @@ impl State {
 struct Module {
     name: String,
     plugin: Rc<ClapPlugin>,
+    gain: Rc<GainControl>,
+    gain_value: Cell<f32>,
 }
 
 impl Module {
-    async fn new(name: String, plugin: &FoundPlugin, manager: Rc<ClapPluginManager>) -> Self {
+    async fn new(
+        name: String,
+        plugin: &FoundPlugin,
+        manager: Rc<ClapPluginManager>,
+        audio_graph: Rc<RefCell<AudioGraph>>,
+    ) -> Self {
         let plugin = manager.create_plugin(plugin).await;
-        Self { name, plugin }
+
+        let gain_value = 1.0;
+        let gain = Rc::new(GainControl::default());
+
+        let mut audio_graph = audio_graph.borrow_mut();
+        let plugin_id = audio_graph.add_node(get_audio_graph_node_desc_for_clap_plugin(&plugin));
+        let gain_id = audio_graph.add_node(gain.get_node_desc(gain_value));
+        audio_graph.connect(plugin_id, 0, gain_id, 0);
+        audio_graph.set_output_node(gain_id, true);
+
+        Self {
+            name,
+            plugin,
+            gain,
+            gain_value: Cell::new(gain_value),
+        }
     }
 
     fn add_to_ui(&self, corodaw: &Corodaw, ui: &mut egui::Ui) {
@@ -317,8 +363,18 @@ impl Module {
             .outer_margin(Margin::same(5))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.take_available_width();
                     ui.label(&self.name);
-                    ui.take_available_space();
+
+                    let mut gain_value = self.gain_value.get();
+                    if ui
+                        .add(Slider::new(&mut gain_value, 0.0..=1.0).show_value(false))
+                        .changed()
+                    {
+                        self.gain_value.replace(gain_value);
+                        self.gain.set_gain(gain_value);
+                    }
+
                     if ui.button("Show").clicked() {
                         corodaw.show_plugin_ui(self.plugin.clone());
                     }
