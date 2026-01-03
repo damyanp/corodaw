@@ -1,210 +1,25 @@
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     rc::{Rc, Weak},
 };
 
-use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui};
-use eframe::{
-    EframeWinitApplication, UserEvent,
-    egui::{self, Color32, ComboBox, Margin, Slider, Stroke, ahash::HashMap},
-};
+use eframe::egui::{self, ComboBox};
 use engine::{
     audio::Audio,
-    audio_graph::{
-        AudioGraph, audio_graph, clap_adapter::get_audio_graph_node_desc_for_clap_plugin,
-    },
-    builtin::GainControl,
+    audio_graph::{AudioGraph, audio_graph},
     plugins::{
-        ClapPlugin, ClapPluginId, ClapPluginManager, GuiMessage, GuiMessagePayload,
+        ClapPlugin, ClapPluginManager,
         discovery::{FoundPlugin, get_plugins},
     },
 };
-use futures::StreamExt;
-use futures_channel::mpsc::{UnboundedReceiver, unbounded};
 use smol::LocalExecutor;
-use winit::{
-    application::ApplicationHandler,
-    dpi::PhysicalSize,
-    event::{DeviceEvent, DeviceId, StartCause, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::{Window, WindowId},
-};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 
-struct EguiClapPluginManager {
-    inner: Rc<ClapPluginManager>,
-    guis: RefCell<HashMap<ClapPluginId, Rc<EguiPluginGui>>>,
-    windows: RefCell<HashMap<WindowId, ClapPluginId>>,
-}
+use crate::{app::App, module::Module, plugins::EguiClapPluginManager};
 
-impl EguiClapPluginManager {
-    fn new(executor: &LocalExecutor) -> Rc<Self> {
-        let (gui_sender, gui_receiver) = unbounded();
-
-        let inner = ClapPluginManager::new(gui_sender);
-        Self::spawn_message_handler(executor, Rc::downgrade(&inner));
-
-        let manager = Rc::new(Self {
-            inner,
-            guis: RefCell::default(),
-            windows: RefCell::default(),
-        });
-        Self::spawn_gui_message_handler(executor, Rc::downgrade(&manager), gui_receiver);
-
-        manager
-    }
-
-    fn spawn_message_handler(executor: &LocalExecutor, manager: Weak<ClapPluginManager>) {
-        executor
-            .spawn(async move {
-                ClapPluginManager::message_handler(manager).await;
-            })
-            .detach();
-    }
-
-    fn spawn_gui_message_handler(
-        executor: &LocalExecutor,
-        manager: Weak<Self>,
-        mut receiver: UnboundedReceiver<GuiMessage>,
-    ) {
-        executor
-            .spawn(async move {
-                println!("[gui_message_handler] start");
-                while let Some(GuiMessage { plugin_id, payload }) = receiver.next().await {
-                    let plugin = {
-                        let Some(manager) = manager.upgrade() else {
-                            break;
-                        };
-                        manager.guis.borrow().get(&plugin_id).unwrap().clone()
-                    };
-
-                    match payload {
-                        GuiMessagePayload::ResizeHintsChanged => {
-                            println!("Handling changed resize hints not supported");
-                        }
-                        GuiMessagePayload::RequestResize(size) => {
-                            plugin.request_resize(size);
-                        }
-                    }
-                }
-                println!("[gui_message_handler] end");
-            })
-            .detach();
-    }
-
-    fn show_plugin_gui(&self, event_loop: &ActiveEventLoop, clap_plugin: Rc<ClapPlugin>) {
-        let mut guis = self.guis.borrow_mut();
-
-        let plugin_id = clap_plugin.get_id();
-
-        if guis.contains_key(&plugin_id) {
-            println!("Asked to show a plugin that is already shown!");
-            return;
-        }
-
-        let mut plugin = clap_plugin.plugin.borrow_mut();
-        let mut plugin_handle = plugin.plugin_handle();
-
-        let Some(plugin_gui) = plugin_handle.get_extension::<PluginGui>() else {
-            println!("No GUI for plugin!");
-            return;
-        };
-
-        let config = GuiConfiguration {
-            api_type: GuiApiType::default_for_current_platform()
-                .expect("This platform supports UI"),
-            is_floating: false,
-        };
-
-        if !plugin_gui.is_api_supported(&mut plugin_handle, config) {
-            println!("Plugin doesn't support API");
-            return;
-        }
-
-        plugin_gui
-            .create(&mut plugin_handle, config)
-            .expect("create succeeds");
-
-        let initial_size = plugin_gui.get_size(&mut plugin_handle).unwrap_or(GuiSize {
-            width: 800,
-            height: 600,
-        });
-
-        let is_resizeable = plugin_gui
-            .get_resize_hints(&mut plugin_handle)
-            .map(|h| h.can_resize_horizontally && h.can_resize_vertically)
-            .unwrap_or(false);
-
-        let window = event_loop
-            .create_window(
-                Window::default_attributes()
-                    .with_inner_size(PhysicalSize {
-                        width: initial_size.width,
-                        height: initial_size.height,
-                    })
-                    .with_resizable(is_resizeable),
-            )
-            .expect("Window creation to succeed");
-
-        unsafe {
-            let window = clack_extensions::gui::Window::from_window(&window).unwrap();
-            plugin_gui
-                .set_parent(&mut plugin_handle, window)
-                .expect("set_parent succeeds");
-        }
-
-        let _ = plugin_gui.show(&mut plugin_handle);
-
-        drop(plugin);
-
-        let window_id = window.id();
-        let gui = Rc::new(EguiPluginGui {
-            clap_plugin,
-            plugin_gui,
-            window,
-        });
-
-        guis.insert(plugin_id, gui);
-        self.windows.borrow_mut().insert(window_id, plugin_id);
-    }
-
-    fn window_event(&self, window_id: WindowId, event: &WindowEvent) -> bool {
-        let mut windows = self.windows.borrow_mut();
-
-        if let Some(id) = windows.get(&window_id) {
-            match event {
-                WindowEvent::CloseRequested => {
-                    self.guis.borrow_mut().remove(id);
-                    windows.remove(&window_id);
-                }
-                _ => (),
-            }
-            return true;
-        }
-        false
-    }
-}
-
-struct EguiPluginGui {
-    clap_plugin: Rc<ClapPlugin>,
-    plugin_gui: PluginGui,
-    window: Window,
-}
-
-impl Drop for EguiPluginGui {
-    fn drop(&mut self) {
-        self.plugin_gui
-            .destroy(&mut self.clap_plugin.plugin.borrow_mut().plugin_handle());
-    }
-}
-
-impl EguiPluginGui {
-    fn request_resize(self: &Rc<EguiPluginGui>, size: GuiSize) {
-        let _ = self.window.request_inner_size(PhysicalSize {
-            width: size.width,
-            height: size.height,
-        });
-    }
-}
+mod app;
+mod module;
+mod plugins;
 
 struct Corodaw<'a> {
     this: Weak<RefCell<Self>>,
@@ -312,159 +127,11 @@ impl<'a> Corodaw<'a> {
     }
 }
 
-struct Module {
-    name: String,
-    plugin: Rc<ClapPlugin>,
-    gain: Rc<GainControl>,
-    gain_value: Cell<f32>,
-}
-
-impl Module {
-    async fn new(
-        name: String,
-        plugin: &FoundPlugin,
-        manager: Rc<ClapPluginManager>,
-        audio_graph: Rc<RefCell<AudioGraph>>,
-    ) -> Self {
-        let plugin = manager.create_plugin(plugin).await;
-
-        let gain_value = 1.0;
-        let gain = Rc::new(GainControl::default());
-
-        let mut audio_graph = audio_graph.borrow_mut();
-        let plugin_id = audio_graph.add_node(get_audio_graph_node_desc_for_clap_plugin(&plugin));
-        let gain_id = audio_graph.add_node(gain.get_node_desc(gain_value));
-        audio_graph.connect(plugin_id, 0, gain_id, 0);
-        audio_graph.set_output_node(gain_id, true);
-
-        Self {
-            name,
-            plugin,
-            gain,
-            gain_value: Cell::new(gain_value),
-        }
-    }
-
-    fn add_to_ui(&self, corodaw: &Corodaw, ui: &mut egui::Ui) {
-        egui::Frame::new()
-            .stroke(Stroke::new(1.0, Color32::WHITE))
-            .inner_margin(Margin::same(5))
-            .outer_margin(Margin::same(5))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.take_available_width();
-                    ui.label(&self.name);
-
-                    let mut gain_value = self.gain_value.get();
-                    if ui
-                        .add(Slider::new(&mut gain_value, 0.0..=1.0).show_value(false))
-                        .changed()
-                    {
-                        self.gain_value.replace(gain_value);
-                        self.gain.set_gain(gain_value);
-                    }
-
-                    if ui.button("Show").clicked() {
-                        corodaw.show_plugin_ui(self.plugin.clone());
-                    }
-                });
-            });
-    }
-}
-
 fn display_found_plugin(value: &Option<Rc<FoundPlugin>>) -> &str {
     value
         .as_ref()
         .map(|plugin| plugin.name.as_str())
         .unwrap_or("<none>")
-}
-
-struct App<'a> {
-    executor: Rc<LocalExecutor<'a>>,
-    corodaw: Rc<RefCell<Corodaw<'a>>>,
-    eframe: EframeWinitApplication<'a>,
-}
-
-impl<'a> App<'a> {
-    fn new(
-        executor: Rc<LocalExecutor<'a>>,
-        corodaw: Rc<RefCell<Corodaw<'a>>>,
-        eframe: EframeWinitApplication<'a>,
-    ) -> Self {
-        Self {
-            executor,
-            corodaw,
-            eframe,
-        }
-    }
-}
-
-impl ApplicationHandler<UserEvent> for App<'_> {
-    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
-        for f in self
-            .corodaw
-            .borrow()
-            .pending_with_active_event_loop_fns
-            .replace(Vec::default())
-        {
-            f(event_loop);
-        }
-
-        while self.executor.try_tick() {}
-
-        self.eframe.new_events(event_loop, cause);
-    }
-
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        self.eframe.resumed(event_loop);
-    }
-
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
-        self.eframe.user_event(event_loop, event);
-    }
-
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        window_id: WindowId,
-        event: WindowEvent,
-    ) {
-        if self
-            .corodaw
-            .borrow()
-            .manager
-            .window_event(window_id, &event)
-        {
-            return;
-        }
-
-        self.eframe.window_event(event_loop, window_id, event);
-    }
-
-    fn device_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        device_id: DeviceId,
-        event: DeviceEvent,
-    ) {
-        self.eframe.device_event(event_loop, device_id, event);
-    }
-
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.eframe.about_to_wait(event_loop);
-    }
-
-    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
-        self.eframe.suspended(event_loop);
-    }
-
-    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
-        self.eframe.exiting(event_loop);
-    }
-
-    fn memory_warning(&mut self, event_loop: &ActiveEventLoop) {
-        self.eframe.memory_warning(event_loop);
-    }
 }
 
 fn main() -> eframe::Result {
