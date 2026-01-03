@@ -152,6 +152,8 @@ impl EguiClapPluginManager {
                 .expect("set_parent succeeds");
         }
 
+        let _ = plugin_gui.show(&mut plugin_handle);
+
         drop(plugin);
 
         let window_id = window.id();
