@@ -208,16 +208,14 @@ impl EguiPluginGui {
 
 struct Corodaw<'a> {
     this: Weak<RefCell<Self>>,
-    executor: Rc<LocalExecutor<'a>>,
-    found_plugins: Vec<Rc<FoundPlugin>>,
-    state: State,
-    manager: Rc<EguiClapPluginManager>,
 
+    executor: Rc<LocalExecutor<'a>>,
     #[allow(clippy::type_complexity)]
     pending_with_active_event_loop_fns: RefCell<Vec<Box<dyn FnOnce(&ActiveEventLoop) + 'a>>>,
-}
 
-struct State {
+    found_plugins: Vec<Rc<FoundPlugin>>,
+    manager: Rc<EguiClapPluginManager>,
+
     selected_plugin: Option<Rc<FoundPlugin>>,
 
     modules: Vec<Module>,
@@ -227,32 +225,23 @@ struct State {
     _audio: Audio,
 }
 
-impl State {
-    fn new() -> Self {
-        let (audio_graph, audio_graph_worker) = audio_graph();
-        let audio = Audio::new(audio_graph_worker).unwrap();
-
-        Self {
-            selected_plugin: None,
-            modules: Vec::default(),
-            counter: 0,
-            audio_graph: Rc::new(RefCell::new(audio_graph)),
-            _audio: audio,
-        }
-    }
-}
-
 impl<'a> Corodaw<'a> {
     fn new(executor: Rc<LocalExecutor<'a>>) -> Rc<RefCell<Self>> {
         let manager = EguiClapPluginManager::new(&executor);
+        let (audio_graph, audio_graph_worker) = audio_graph();
+        let audio = Audio::new(audio_graph_worker).unwrap();
 
         let r = Rc::new(RefCell::new(Self {
             this: Weak::default(),
             executor,
             found_plugins: get_plugins(),
-            state: State::new(),
             manager,
             pending_with_active_event_loop_fns: RefCell::default(),
+            selected_plugin: None,
+            modules: Vec::default(),
+            counter: 0,
+            audio_graph: Rc::new(RefCell::new(audio_graph)),
+            _audio: audio,
         }));
 
         r.borrow_mut().this = Rc::downgrade(&r);
@@ -263,32 +252,32 @@ impl<'a> Corodaw<'a> {
     fn update(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.add_enabled_ui(self.state.selected_plugin.is_some(), |ui| {
+                ui.add_enabled_ui(self.selected_plugin.is_some(), |ui| {
                     if ui.button("Add Module").clicked() {
                         let clone = self.this.upgrade().unwrap();
                         self.executor
                             .spawn(async move {
                                 let mut this = clone.borrow_mut();
                                 let manager = this.manager.inner.clone();
-                                this.state.add_module(manager).await;
+                                this.add_module(manager).await;
                             })
                             .detach();
                     }
                 });
                 ComboBox::from_id_salt("Plugin")
                     .width(ui.available_width())
-                    .selected_text(display_found_plugin(&self.state.selected_plugin).to_string())
+                    .selected_text(display_found_plugin(&self.selected_plugin).to_string())
                     .show_ui(ui, |ui| {
                         for plugin in &self.found_plugins {
                             ui.selectable_value(
-                                &mut self.state.selected_plugin,
+                                &mut self.selected_plugin,
                                 Some(plugin.clone()),
                                 plugin.name.to_owned(),
                             );
                         }
                     });
             });
-            for module in &self.state.modules {
+            for module in &self.modules {
                 module.add_to_ui(self, ui);
             }
         });
@@ -310,9 +299,7 @@ impl<'a> Corodaw<'a> {
             .borrow_mut()
             .push(Box::new(f));
     }
-}
 
-impl State {
     async fn add_module(&mut self, manager: Rc<ClapPluginManager>) {
         let plugin = self.selected_plugin.as_ref().unwrap();
 
