@@ -4,7 +4,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui};
+use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiResizeHints, GuiSize, PluginGui};
 use engine::plugins::{ClapPlugin, ClapPluginId, ClapPluginManager, GuiMessage, GuiMessagePayload};
 use futures::StreamExt;
 use futures_channel::mpsc::{UnboundedReceiver, unbounded};
@@ -56,16 +56,21 @@ impl EguiClapPluginManager {
             .spawn(async move {
                 println!("[gui_message_handler] start");
                 while let Some(GuiMessage { plugin_id, payload }) = receiver.next().await {
-                    let plugin = {
-                        let Some(manager) = manager.upgrade() else {
-                            break;
-                        };
-                        manager.guis.borrow().get(&plugin_id).unwrap().clone()
+                    let Some(manager) = manager.upgrade() else {
+                        break;
                     };
+                    let plugin = { manager.guis.borrow().get(&plugin_id).unwrap().clone() };
 
                     match payload {
                         GuiMessagePayload::ResizeHintsChanged => {
-                            println!("Handling changed resize hints not supported");
+                            let p = manager.inner.get_plugin(plugin_id);
+
+                            let resize_hints = plugin
+                                .plugin_gui
+                                .get_resize_hints(&mut p.plugin.borrow_mut().plugin_handle());
+                            if let Some(resize_hints) = resize_hints {
+                                plugin.update_resize_hints(resize_hints);
+                            }
                         }
                         GuiMessagePayload::RequestResize(size) => {
                             plugin.request_resize(size);
@@ -162,6 +167,20 @@ impl EguiClapPluginManager {
                     self.guis.borrow_mut().remove(id);
                     windows.remove(&window_id);
                 }
+                WindowEvent::Resized(size) => {
+                    let plugin = self.inner.get_plugin(*id);
+                    let mut plugin = plugin.plugin.borrow_mut();
+
+                    let mut p = plugin.plugin_handle();
+
+                    let _ = self.guis.borrow_mut().get(id).unwrap().plugin_gui.set_size(
+                        &mut p,
+                        GuiSize {
+                            width: size.width,
+                            height: size.height,
+                        },
+                    );
+                }
                 _ => (),
             }
             return true;
@@ -185,9 +204,19 @@ impl Drop for EguiPluginGui {
 
 impl EguiPluginGui {
     fn request_resize(self: &Rc<EguiPluginGui>, size: GuiSize) {
-        let _ = self.window.request_inner_size(PhysicalSize {
+        let size = PhysicalSize {
             width: size.width,
             height: size.height,
-        });
+        };
+        if self.window.inner_size() != size {
+            let _ = self.window.request_inner_size(size);
+        }
+    }
+
+    fn update_resize_hints(self: &Rc<EguiPluginGui>, resize_hints: GuiResizeHints) {
+        let can_resize = resize_hints.can_resize_horizontally && resize_hints.can_resize_vertically;
+        println!("{:?} can resize: {}", self.clap_plugin.get_id(), can_resize);
+
+        self.window.set_resizable(can_resize);
     }
 }
