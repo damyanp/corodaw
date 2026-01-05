@@ -8,7 +8,7 @@ use engine::{
     audio::Audio,
     audio_graph::{AudioGraph, audio_graph},
     plugins::{
-        ClapPlugin, ClapPluginManager,
+        ClapPlugin,
         discovery::{FoundPlugin, get_plugins},
     },
 };
@@ -72,8 +72,7 @@ impl<'a> Corodaw<'a> {
                         let clone = self.this.upgrade().unwrap();
                         self.executor
                             .spawn(async move {
-                                let manager = clone.borrow_mut().manager.inner.clone();
-                                clone.borrow_mut().add_module(manager).await;
+                                Corodaw::add_module(&clone).await;
                             })
                             .detach();
                     }
@@ -118,15 +117,22 @@ impl<'a> Corodaw<'a> {
             .push(Box::new(f));
     }
 
-    async fn add_module(&mut self, manager: Rc<ClapPluginManager>) {
-        let plugin = self.selected_plugin.as_ref().unwrap();
+    async fn add_module(this: &Rc<RefCell<Self>>) {
+        let module = {
+            let mut s = this.borrow_mut();
+            let manager = s.manager.inner.clone();
 
-        let name = format!("Module {}: {}", self.counter, plugin.name);
-        self.counter += 1;
+            let plugin = s.selected_plugin.as_ref().unwrap().clone();
+            let name = format!("Module {}: {}", s.counter, plugin.name);
+            s.counter += 1;
 
-        let module = Module::new(name, plugin, manager, self.audio_graph.clone()).await;
+            let audio_graph = s.audio_graph.clone();
 
-        self.modules.push(module);
+            Module::new(name, plugin, manager, audio_graph)
+        }
+        .await;
+
+        this.borrow_mut().modules.push(module);
     }
 }
 

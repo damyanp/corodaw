@@ -22,11 +22,11 @@ pub struct Module {
 impl Module {
     pub async fn new(
         name: String,
-        plugin: &FoundPlugin,
+        plugin: Rc<FoundPlugin>,
         manager: Rc<ClapPluginManager>,
         audio_graph: Rc<RefCell<AudioGraph>>,
     ) -> Self {
-        let plugin = manager.create_plugin(plugin).await;
+        let plugin = manager.create_plugin(&plugin).await;
 
         let gain_value = 1.0;
         let gain = Rc::new(GainControl::default());

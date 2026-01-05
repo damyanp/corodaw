@@ -3,7 +3,6 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use crate::module::Module;
 use engine::{
     audio::Audio,
     audio_graph::{AudioGraph, audio_graph},
@@ -21,6 +20,8 @@ use gpui_component::{
     *,
 };
 use plugin_ui_host::PluginUiHost;
+
+use crate::module::Module;
 
 mod module;
 
