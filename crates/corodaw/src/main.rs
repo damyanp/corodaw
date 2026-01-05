@@ -61,7 +61,7 @@ struct GpuiClapPluginManager {
     guis: RefCell<HashMap<ClapPluginId, Rc<GpuiPluginGui>>>,
 
     #[cfg(feature = "plugin-ui-host")]
-    ui_host: RefCell<PluginUiHost>,
+    ui_host: Rc<PluginUiHost>,
 }
 
 impl GpuiClapPluginManager {
@@ -78,9 +78,12 @@ impl GpuiClapPluginManager {
             guis: RefCell::default(),
 
             #[cfg(feature = "plugin-ui-host")]
-            ui_host: RefCell::new(PluginUiHost::new()),
+            ui_host: PluginUiHost::new(),
         });
         Self::spawn_gui_message_handler(cx, Rc::downgrade(&manager), gui_receiver);
+
+        #[cfg(feature = "plugin-ui-host")]
+        Self::spawn_ui_host_message_handler(cx, manager.ui_host.clone());
 
         manager
     }
@@ -135,12 +138,21 @@ impl GpuiClapPluginManager {
                     };
                     manager
                         .ui_host
-                        .borrow()
                         .handle_gui_message(GuiMessage { plugin_id, payload });
                 }
             }
 
             println!("[gui_message_handler] end");
+        })
+        .detach();
+    }
+
+    #[cfg(feature = "plugin-ui-host")]
+    fn spawn_ui_host_message_handler(cx: &App, plugin_ui_host: Rc<PluginUiHost>) {
+        cx.spawn(async move |cx| {
+            println!("[ui_host_message_handler] start");
+            plugin_ui_host.message_handler().await;
+            println!("[ui_host_message_handler] end");
         })
         .detach();
     }

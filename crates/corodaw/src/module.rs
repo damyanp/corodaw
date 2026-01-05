@@ -152,7 +152,7 @@ impl ModuleUI {
                 })
                 .unwrap();
 
-            plugin_manager.ui_host.borrow().show_gui(&plugin).await;
+            plugin_manager.ui_host.show_gui(&plugin).await;
         })
         .detach();
     }
@@ -167,10 +167,7 @@ impl Render for ModuleUI {
             }
             #[cfg(feature = "plugin-ui-host")]
             {
-                self.plugin_manager
-                    .ui_host
-                    .borrow()
-                    .has_gui(&self.clap_plugin)
+                self.plugin_manager.ui_host.has_gui(&self.clap_plugin)
             }
         };
 
