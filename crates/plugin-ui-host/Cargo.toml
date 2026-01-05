@@ -1,0 +1,17 @@
+[package]
+name = "plugin-ui-host"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+clack-extensions.workspace = true
+clack-host.workspace = true
+engine = { path = "../engine" }
+futures.workspace = true
+windows = { version = "0.62.2", features = [
+  "Win32_Graphics_Gdi",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }

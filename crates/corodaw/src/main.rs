@@ -12,8 +12,13 @@ use gpui_component::{
     select::{SearchableVec, Select, SelectItem, SelectState},
     *,
 };
+#[cfg(feature = "plugin-ui-host")]
+use plugin_ui_host::PluginUiHost;
 
-use crate::{gui::GpuiPluginGui, module::Module};
+#[cfg(feature = "internal-ui-host")]
+use crate::gui::GpuiPluginGui;
+
+use crate::module::Module;
 use engine::{
     audio::Audio,
     audio_graph::{AudioGraph, audio_graph},
@@ -25,6 +30,7 @@ use engine::{
 
 mod module;
 
+#[cfg(feature = "internal-ui-host")]
 mod gui;
 
 #[derive(Clone)]
@@ -50,7 +56,12 @@ impl SelectItem for SelectablePlugin {
 
 struct GpuiClapPluginManager {
     inner: Rc<ClapPluginManager>,
+
+    #[cfg(feature = "internal-ui-host")]
     guis: RefCell<HashMap<ClapPluginId, Rc<GpuiPluginGui>>>,
+
+    #[cfg(feature = "plugin-ui-host")]
+    ui_host: RefCell<PluginUiHost>,
 }
 
 impl GpuiClapPluginManager {
@@ -63,13 +74,18 @@ impl GpuiClapPluginManager {
 
         let manager = Rc::new(GpuiClapPluginManager {
             inner,
+            #[cfg(feature = "internal-ui-host")]
             guis: RefCell::default(),
+
+            #[cfg(feature = "plugin-ui-host")]
+            ui_host: RefCell::new(PluginUiHost::new()),
         });
         Self::spawn_gui_message_handler(cx, Rc::downgrade(&manager), gui_receiver);
 
         manager
     }
 
+    #[cfg(feature = "internal-ui-host")]
     pub fn create_ui(self: &Rc<Self>, plugin: Rc<ClapPlugin>) -> Option<Rc<GpuiPluginGui>> {
         let plugin_gui = plugin.plugin.borrow_mut().plugin_handle().get_extension();
         if let Some(plugin_gui) = plugin_gui {
@@ -94,20 +110,33 @@ impl GpuiClapPluginManager {
         cx.spawn(async move |cx| {
             println!("[gui_message_handler] start");
             while let Some(GuiMessage { plugin_id, payload }) = receiver.next().await {
-                let plugin = {
+                #[cfg(feature = "internal-ui-host")]
+                {
+                    let plugin = {
+                        let Some(manager) = manager.upgrade() else {
+                            break;
+                        };
+                        manager.guis.borrow().get(&plugin_id).unwrap().clone()
+                    };
+
+                    match payload {
+                        GuiMessagePayload::ResizeHintsChanged => {
+                            println!("Handling changed resize hints not supported");
+                        }
+                        GuiMessagePayload::RequestResize(size) => {
+                            plugin.request_resize(size, cx);
+                        }
+                    }
+                }
+                #[cfg(feature = "plugin-ui-host")]
+                {
                     let Some(manager) = manager.upgrade() else {
                         break;
                     };
-                    manager.guis.borrow().get(&plugin_id).unwrap().clone()
-                };
-
-                match payload {
-                    GuiMessagePayload::ResizeHintsChanged => {
-                        println!("Handling changed resize hints not supported");
-                    }
-                    GuiMessagePayload::RequestResize(size) => {
-                        plugin.request_resize(size, cx);
-                    }
+                    manager
+                        .ui_host
+                        .borrow()
+                        .handle_gui_message(GuiMessage { plugin_id, payload });
                 }
             }
 

@@ -95,6 +95,7 @@ impl ClapPluginManager {
 }
 
 pub struct ClapPlugin {
+    clap_plugin_id: ClapPluginId,
     pub plugin: RefCell<PluginInstance<Self>>,
     plugin_audio_ports: RefCell<Option<PluginAudioPorts>>,
 }
@@ -139,6 +140,7 @@ impl ClapPlugin {
         let audio_ports = plugin.plugin_handle().get_extension();
 
         Rc::new(Self {
+            clap_plugin_id,
             plugin: RefCell::new(plugin),
             plugin_audio_ports: RefCell::new(audio_ports),
         })
@@ -182,7 +184,7 @@ impl ClapPlugin {
     }
 
     pub fn get_id(&self) -> ClapPluginId {
-        self.plugin.borrow().access_shared_handler(|h| h.plugin_id)
+        self.clap_plugin_id
     }
 }
 
@@ -195,11 +197,13 @@ enum MessagePayload {
     RunOnMainThread,
 }
 
+#[derive(Debug)]
 pub struct GuiMessage {
     pub plugin_id: ClapPluginId,
     pub payload: GuiMessagePayload,
 }
 
+#[derive(Debug)]
 pub enum GuiMessagePayload {
     ResizeHintsChanged,
     RequestResize(GuiSize),
