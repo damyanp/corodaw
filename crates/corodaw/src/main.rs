@@ -1,9 +1,17 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
     rc::{Rc, Weak},
 };
 
+use crate::module::Module;
+use engine::{
+    audio::Audio,
+    audio_graph::{AudioGraph, audio_graph},
+    plugins::{
+        ClapPluginManager, GuiMessage,
+        discovery::{FoundPlugin, get_plugins},
+    },
+};
 use futures::StreamExt;
 use futures_channel::mpsc::{UnboundedReceiver, unbounded};
 use gpui::*;
@@ -12,26 +20,9 @@ use gpui_component::{
     select::{SearchableVec, Select, SelectItem, SelectState},
     *,
 };
-#[cfg(feature = "plugin-ui-host")]
 use plugin_ui_host::PluginUiHost;
 
-#[cfg(feature = "internal-ui-host")]
-use crate::gui::GpuiPluginGui;
-
-use crate::module::Module;
-use engine::{
-    audio::Audio,
-    audio_graph::{AudioGraph, audio_graph},
-    plugins::{
-        ClapPlugin, ClapPluginId, ClapPluginManager, GuiMessage, GuiMessagePayload,
-        discovery::{FoundPlugin, get_plugins},
-    },
-};
-
 mod module;
-
-#[cfg(feature = "internal-ui-host")]
-mod gui;
 
 #[derive(Clone)]
 struct SelectablePlugin(Rc<FoundPlugin>);
@@ -56,11 +47,6 @@ impl SelectItem for SelectablePlugin {
 
 struct GpuiClapPluginManager {
     inner: Rc<ClapPluginManager>,
-
-    #[cfg(feature = "internal-ui-host")]
-    guis: RefCell<HashMap<ClapPluginId, Rc<GpuiPluginGui>>>,
-
-    #[cfg(feature = "plugin-ui-host")]
     ui_host: Rc<PluginUiHost>,
 }
 
@@ -74,30 +60,12 @@ impl GpuiClapPluginManager {
 
         let manager = Rc::new(GpuiClapPluginManager {
             inner,
-            #[cfg(feature = "internal-ui-host")]
-            guis: RefCell::default(),
-
-            #[cfg(feature = "plugin-ui-host")]
             ui_host: PluginUiHost::new(),
         });
         Self::spawn_gui_message_handler(cx, Rc::downgrade(&manager), gui_receiver);
-
-        #[cfg(feature = "plugin-ui-host")]
         Self::spawn_ui_host_message_handler(cx, manager.ui_host.clone());
 
         manager
-    }
-
-    #[cfg(feature = "internal-ui-host")]
-    pub fn create_ui(self: &Rc<Self>, plugin: Rc<ClapPlugin>) -> Option<Rc<GpuiPluginGui>> {
-        let plugin_gui = plugin.plugin.borrow_mut().plugin_handle().get_extension();
-        if let Some(plugin_gui) = plugin_gui {
-            let gui = Rc::new(GpuiPluginGui::new(plugin.clone(), plugin_gui));
-            self.guis.borrow_mut().insert(plugin.get_id(), gui.clone());
-            Some(gui)
-        } else {
-            None
-        }
     }
 
     fn spawn_message_handler(cx: &App, manager: Weak<ClapPluginManager>) {
@@ -110,36 +78,15 @@ impl GpuiClapPluginManager {
         manager: Weak<Self>,
         mut receiver: UnboundedReceiver<GuiMessage>,
     ) {
-        cx.spawn(async move |cx| {
+        cx.spawn(async move |_| {
             println!("[gui_message_handler] start");
             while let Some(GuiMessage { plugin_id, payload }) = receiver.next().await {
-                #[cfg(feature = "internal-ui-host")]
-                {
-                    let plugin = {
-                        let Some(manager) = manager.upgrade() else {
-                            break;
-                        };
-                        manager.guis.borrow().get(&plugin_id).unwrap().clone()
-                    };
-
-                    match payload {
-                        GuiMessagePayload::ResizeHintsChanged => {
-                            println!("Handling changed resize hints not supported");
-                        }
-                        GuiMessagePayload::RequestResize(size) => {
-                            plugin.request_resize(size, cx);
-                        }
-                    }
-                }
-                #[cfg(feature = "plugin-ui-host")]
-                {
-                    let Some(manager) = manager.upgrade() else {
-                        break;
-                    };
-                    manager
-                        .ui_host
-                        .handle_gui_message(GuiMessage { plugin_id, payload });
-                }
+                let Some(manager) = manager.upgrade() else {
+                    break;
+                };
+                manager
+                    .ui_host
+                    .handle_gui_message(GuiMessage { plugin_id, payload });
             }
 
             println!("[gui_message_handler] end");
@@ -147,9 +94,8 @@ impl GpuiClapPluginManager {
         .detach();
     }
 
-    #[cfg(feature = "plugin-ui-host")]
     fn spawn_ui_host_message_handler(cx: &App, plugin_ui_host: Rc<PluginUiHost>) {
-        cx.spawn(async move |cx| {
+        cx.spawn(async move |_| {
             println!("[ui_host_message_handler] start");
             plugin_ui_host.message_handler().await;
             println!("[ui_host_message_handler] end");

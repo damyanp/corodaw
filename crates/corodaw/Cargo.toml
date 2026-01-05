@@ -14,8 +14,3 @@ gpui.workspace = true
 gpui-component.workspace = true
 plugin-ui-host = { path = "../plugin-ui-host" }
 raw-window-handle.workspace = true
-
-[features]
-default = ["plugin-ui-host"]
-internal-ui-host = []
-plugin-ui-host = []

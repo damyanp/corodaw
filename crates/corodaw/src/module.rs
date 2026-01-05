@@ -1,7 +1,5 @@
 use std::{cell::RefCell, rc::Rc};
 
-#[cfg(feature = "plugin-ui-host")]
-use engine::plugins::ClapPluginId;
 use gpui::*;
 use gpui_component::{
     button::*,
@@ -17,9 +15,6 @@ use engine::{
 
 use crate::GpuiClapPluginManager;
 
-#[cfg(feature = "internal-ui-host")]
-use create::gui::GpuiPluginGui;
-
 pub struct Module {
     _audio: ModuleAudio,
     ui: Entity<ModuleUI>,
@@ -33,14 +28,7 @@ struct ModuleAudio {
 struct ModuleUI {
     name: String,
     gain_slider: Entity<SliderState>,
-
-    #[cfg(feature = "internal-ui-host")]
-    gui: Rc<GpuiPluginGui>,
-
-    #[cfg(feature = "plugin-ui-host")]
     clap_plugin: Rc<ClapPlugin>,
-
-    #[cfg(feature = "plugin-ui-host")]
     plugin_manager: Rc<GpuiClapPluginManager>,
 }
 
@@ -62,18 +50,7 @@ impl Module {
         )
         .await;
 
-        let ui = {
-            #[cfg(feature = "internal-ui-host")]
-            {
-                let gui = plugin_manager.create_ui(audio.plugin.clone()).unwrap();
-
-                cx.new(|cx| ModuleUI::new(name, initial_gain, &audio, gui, cx))?
-            }
-            #[cfg(feature = "plugin-ui-host")]
-            {
-                cx.new(|cx| ModuleUI::new(name, initial_gain, &audio, plugin_manager, cx))?
-            }
-        };
+        let ui = cx.new(|cx| ModuleUI::new(name, initial_gain, &audio, plugin_manager, cx))?;
 
         Ok(Self { _audio: audio, ui })
     }
@@ -110,8 +87,7 @@ impl ModuleUI {
         name: impl Into<String>,
         initial_gain: f32,
         module_audio: &ModuleAudio,
-        #[cfg(feature = "internal-ui-host")] gui: Rc<GpuiPluginGui>,
-        #[cfg(feature = "plugin-ui-host")] manager: Rc<GpuiClapPluginManager>,
+        manager: Rc<GpuiClapPluginManager>,
         cx: &mut App,
     ) -> ModuleUI {
         let gain_slider = cx.new(|_| {
@@ -131,20 +107,12 @@ impl ModuleUI {
         Self {
             name: name.into(),
             gain_slider,
-            #[cfg(feature = "internal-ui-host")]
-            gui,
-            #[cfg(feature = "plugin-ui-host")]
             plugin_manager: manager,
-            #[cfg(feature = "plugin-ui-host")]
             clap_plugin: module_audio.plugin.clone(),
         }
     }
 
-    fn on_show(&mut self, _e: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        #[cfg(feature = "internal-ui-host")]
-        self.gui.show(window, cx);
-
-        #[cfg(feature = "plugin-ui-host")]
+    fn on_show(&mut self, _e: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         cx.spawn(async |this, cx| {
             let (plugin_manager, plugin) = this
                 .read_with(cx, |this, _| {
@@ -160,16 +128,7 @@ impl ModuleUI {
 
 impl Render for ModuleUI {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let show_disabled = {
-            #[cfg(feature = "internal-ui-host")]
-            {
-                self.gui.has_gui()
-            }
-            #[cfg(feature = "plugin-ui-host")]
-            {
-                self.plugin_manager.ui_host.has_gui(&self.clap_plugin)
-            }
-        };
+        let show_disabled = self.plugin_manager.ui_host.has_gui(&self.clap_plugin);
 
         div()
             .border_1()

@@ -13,7 +13,7 @@ use std::{
 use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui, Window};
 use engine::plugins::{ClapPlugin, ClapPluginId, GuiMessage, GuiMessagePayload};
 use futures::{
-    SinkExt, StreamExt,
+    StreamExt,
     channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
 };
 use windows::{
@@ -23,11 +23,10 @@ use windows::{
         UI::WindowsAndMessaging::{
             AdjustWindowRect, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExA,
             DefWindowProcA, DispatchMessageW, GWL_STYLE, GWLP_USERDATA, GetClientRect, GetMessageW,
-            GetWindowLongPtrA, GetWindowRect, IDC_ARROW, LoadCursorW, MSG, PostThreadMessageA,
-            RegisterClassA, SET_WINDOW_POS_FLAGS, SWP_ASYNCWINDOWPOS, SWP_NOMOVE,
-            SetWindowLongPtrA, SetWindowPos, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
-            WM_DESTROY, WM_SIZE, WM_USER, WNDCLASSA, WS_OVERLAPPEDWINDOW, WS_SIZEBOX,
-            WS_THICKFRAME, WS_VISIBLE,
+            GetWindowLongPtrA, IDC_ARROW, LoadCursorW, MSG, PostThreadMessageA, RegisterClassA,
+            SWP_ASYNCWINDOWPOS, SWP_NOMOVE, SetWindowLongPtrA, SetWindowPos, TranslateMessage,
+            WINDOW_EX_STYLE, WINDOW_STYLE, WM_DESTROY, WM_SIZE, WM_USER, WNDCLASSA,
+            WS_OVERLAPPEDWINDOW, WS_SIZEBOX, WS_THICKFRAME, WS_VISIBLE,
         },
     },
     core::{Error, PCSTR, s},
@@ -359,7 +358,7 @@ impl PluginUiHostThread {
                 } => {
                     let window_handle =
                         WindowHandle(self.create_window(initial_size, can_resize).unwrap());
-                    sender.send(window_handle);
+                    sender.send(window_handle).unwrap();
                 }
             }
         }
