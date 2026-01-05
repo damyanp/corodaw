@@ -37,7 +37,7 @@ struct WindowHandle(HWND);
 
 impl Hash for WindowHandle {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_usize(unsafe { std::mem::transmute(self.0.0) });
+        state.write_usize(self.0.0 as usize);
     }
 }
 
@@ -372,7 +372,7 @@ impl PluginUiHostThread {
         unsafe {
             let mut style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
             if !can_resize {
-                style = style & !WS_THICKFRAME;
+                style &= !WS_THICKFRAME;
             }
 
             let hwnd = CreateWindowExA(

@@ -72,9 +72,8 @@ impl<'a> Corodaw<'a> {
                         let clone = self.this.upgrade().unwrap();
                         self.executor
                             .spawn(async move {
-                                let mut this = clone.borrow_mut();
-                                let manager = this.manager.inner.clone();
-                                this.add_module(manager).await;
+                                let manager = clone.borrow_mut().manager.inner.clone();
+                                clone.borrow_mut().add_module(manager).await;
                             })
                             .detach();
                     }
