@@ -97,8 +97,15 @@ impl PluginUiHost {
                     }
                 }
                 WindowMessage::Destroyed { hwnd } => {
-                    if let Some(plugin) = self.window_to_plugin.borrow_mut().remove(&hwnd) {
-                        self.plugin_to_window.borrow_mut().remove(&plugin.get_id());
+                    if let Some(clap_plugin) = self.window_to_plugin.borrow_mut().remove(&hwnd) {
+                        self.plugin_to_window
+                            .borrow_mut()
+                            .remove(&clap_plugin.get_id());
+
+                        let mut plugin = clap_plugin.plugin.borrow_mut();
+                        let mut handle = plugin.plugin_handle();
+                        let plugin_gui: PluginGui = handle.get_extension().unwrap();
+                        plugin_gui.destroy(&mut handle);
                     }
                 }
             }
