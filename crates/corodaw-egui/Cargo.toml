@@ -11,6 +11,7 @@ eframe = "0.33.3"
 engine = { path = "../engine" }
 futures.workspace = true
 futures-channel.workspace = true
+plugin-ui-host = { path = "../plugin-ui-host" }
 raw-window-handle.workspace = true
 smol = "2.0.2"
 winit = "0.30.12"

@@ -116,7 +116,7 @@ impl PluginUiHost {
         let _ = self.thread.join();
     }
 
-    pub fn has_gui(&self, clap_plugin: &Rc<ClapPlugin>) -> bool {
+    pub fn has_gui(&self, clap_plugin: &ClapPlugin) -> bool {
         self.plugin_to_window
             .borrow()
             .contains_key(&clap_plugin.get_id())

@@ -13,11 +13,9 @@ use engine::{
     },
 };
 use smol::LocalExecutor;
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 
-use crate::{app::App, module::Module, plugins::EguiClapPluginManager};
+use crate::{module::Module, plugins::EguiClapPluginManager};
 
-mod app;
 mod module;
 mod plugins;
 
@@ -25,8 +23,6 @@ struct Corodaw<'a> {
     this: Weak<RefCell<Self>>,
 
     executor: Rc<LocalExecutor<'a>>,
-    #[allow(clippy::type_complexity)]
-    pending_with_active_event_loop_fns: RefCell<Vec<Box<dyn FnOnce(&ActiveEventLoop) + 'a>>>,
 
     found_plugins: Vec<Rc<FoundPlugin>>,
     manager: Rc<EguiClapPluginManager>,
@@ -51,7 +47,6 @@ impl<'a> Corodaw<'a> {
             executor,
             found_plugins: get_plugins(),
             manager,
-            pending_with_active_event_loop_fns: RefCell::default(),
             selected_plugin: None,
             modules: Vec::default(),
             counter: 0,
@@ -96,25 +91,18 @@ impl<'a> Corodaw<'a> {
         });
     }
 
-    fn show_plugin_ui(&self, plugin: Rc<ClapPlugin>) {
-        let this = self.this.upgrade().unwrap();
+    fn show_plugin_ui(&self, clap_plugin: Rc<ClapPlugin>) {
+        let manager = self.manager.clone();
 
-        self.run_with_active_event_loop(move |event_loop: &ActiveEventLoop| {
-            this.borrow().manager.show_plugin_gui(event_loop, plugin);
-        });
+        self.executor
+            .spawn(async move {
+                manager.show_plugin_gui(clap_plugin).await;
+            })
+            .detach();
     }
 
     fn has_plugin_gui(&self, plugin: &ClapPlugin) -> bool {
         self.manager.has_plugin_gui(plugin)
-    }
-
-    fn run_with_active_event_loop<Fn>(&self, f: Fn)
-    where
-        Fn: FnOnce(&ActiveEventLoop) + 'a,
-    {
-        self.pending_with_active_event_loop_fns
-            .borrow_mut()
-            .push(Box::new(f));
     }
 
     async fn add_module(this: &Rc<RefCell<Self>>) {
@@ -146,38 +134,27 @@ fn display_found_plugin(value: &Option<Rc<FoundPlugin>>) -> &str {
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions::default();
 
-    let eventloop = EventLoop::<eframe::UserEvent>::with_user_event()
-        .build()
-        .unwrap();
-    eventloop.set_control_flow(ControlFlow::Wait);
-
-    let executor = Rc::new(LocalExecutor::new());
-    let corodaw = Corodaw::new(executor.clone());
-
-    struct AppProxy<'a> {
+    struct App<'a> {
         corodaw: Rc<RefCell<Corodaw<'a>>>,
+        executor: Rc<LocalExecutor<'a>>,
     }
-    impl eframe::App for AppProxy<'_> {
+    impl eframe::App for App<'_> {
         fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+            while self.executor.try_tick() {}
+
             self.corodaw.borrow_mut().update(ctx);
         }
     }
 
-    let corodaw_for_proxy = corodaw.clone();
-    let eframe = eframe::create_native(
+    let executor = Rc::new(LocalExecutor::new());
+    let corodaw = Corodaw::new(executor.clone());
+
+    eframe::run_native(
         "Corodaw",
         options,
-        Box::new(|_| {
-            Ok(Box::new(AppProxy {
-                corodaw: corodaw_for_proxy,
-            }))
-        }),
-        &eventloop,
-    );
-
-    let mut app = App::new(executor, corodaw, eframe);
-
-    eventloop.run_app(&mut app)?;
+        Box::new(|_| Ok(Box::new(App { executor, corodaw }))),
+    )
+    .unwrap();
 
     println!("[main] exit");
 
