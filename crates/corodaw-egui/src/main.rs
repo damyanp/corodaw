@@ -9,6 +9,7 @@ use engine::{
         discovery::{FoundPlugin, get_plugins},
     },
 };
+use plugin_ui_host::MainThreadSpawn;
 use smol::LocalExecutor;
 
 use crate::{module::Module, plugins::EguiClapPluginManager};
@@ -16,8 +17,8 @@ use crate::{module::Module, plugins::EguiClapPluginManager};
 mod module;
 mod plugins;
 
-struct Corodaw<'a> {
-    executor: Rc<LocalExecutor<'a>>,
+struct Corodaw {
+    executor: Rc<LocalExecutor<'static>>,
 
     found_plugins: Vec<Rc<FoundPlugin>>,
     manager: Rc<EguiClapPluginManager>,
@@ -31,9 +32,9 @@ struct Corodaw<'a> {
     _audio: Audio,
 }
 
-impl<'a> Corodaw<'a> {
-    fn new(executor: Rc<LocalExecutor<'a>>) -> Self {
-        let manager = EguiClapPluginManager::new(&executor);
+impl Corodaw {
+    fn new(executor: Rc<LocalExecutor<'static>>) -> Self {
+        let manager = EguiClapPluginManager::new(executor.clone());
         let (audio_graph, audio_graph_worker) = audio_graph();
         let audio = Audio::new(audio_graph_worker).unwrap();
 
@@ -115,14 +116,21 @@ fn display_found_plugin(value: &Option<Rc<FoundPlugin>>) -> &str {
         .unwrap_or("<none>")
 }
 
+struct Spawner(Rc<LocalExecutor<'static>>);
+impl MainThreadSpawn for Spawner {
+    fn spawn(&self, future: impl Future<Output = ()> + 'static) {
+        self.0.spawn(future).detach();
+    }
+}
+
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions::default();
 
-    struct App<'a> {
-        corodaw: Corodaw<'a>,
-        executor: Rc<LocalExecutor<'a>>,
+    struct App {
+        corodaw: Corodaw,
+        executor: Rc<LocalExecutor<'static>>,
     }
-    impl eframe::App for App<'_> {
+    impl eframe::App for App {
         fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
             while self.executor.try_tick() {}
 

@@ -7,19 +7,18 @@ use engine::{
     audio::Audio,
     audio_graph::{AudioGraph, audio_graph},
     plugins::{
-        ClapPluginManager, GuiMessage,
+        ClapPluginManager,
         discovery::{FoundPlugin, get_plugins},
     },
 };
-use futures::StreamExt;
-use futures_channel::mpsc::{UnboundedReceiver, unbounded};
+use futures_channel::mpsc::unbounded;
 use gpui::*;
 use gpui_component::{
     button::*,
     select::{SearchableVec, Select, SelectItem, SelectState},
     *,
 };
-use plugin_ui_host::PluginUiHost;
+use plugin_ui_host::{MainThreadSpawn, PluginUiHost};
 
 use crate::module::Module;
 
@@ -48,7 +47,15 @@ impl SelectItem for SelectablePlugin {
 
 struct GpuiClapPluginManager {
     inner: Rc<ClapPluginManager>,
-    ui_host: Rc<PluginUiHost>,
+    ui_host: Rc<PluginUiHost<Spawner>>,
+}
+
+struct Spawner(AsyncApp);
+
+impl MainThreadSpawn for Spawner {
+    fn spawn(&self, future: impl Future<Output = ()> + 'static) {
+        self.0.spawn(async move |_| future.await).detach();
+    }
 }
 
 impl GpuiClapPluginManager {
@@ -59,49 +66,17 @@ impl GpuiClapPluginManager {
 
         Self::spawn_message_handler(cx, Rc::downgrade(&inner));
 
-        let manager = Rc::new(GpuiClapPluginManager {
-            inner,
-            ui_host: PluginUiHost::new(),
-        });
-        Self::spawn_gui_message_handler(cx, Rc::downgrade(&manager), gui_receiver);
-        Self::spawn_ui_host_message_handler(cx, manager.ui_host.clone());
+        
 
-        manager
+        Rc::new(GpuiClapPluginManager {
+            inner,
+            ui_host: PluginUiHost::new(Spawner(cx.to_async()), gui_receiver),
+        })
     }
 
     fn spawn_message_handler(cx: &App, manager: Weak<ClapPluginManager>) {
         cx.spawn(async move |_| ClapPluginManager::message_handler(manager).await)
             .detach();
-    }
-
-    fn spawn_gui_message_handler(
-        cx: &App,
-        manager: Weak<Self>,
-        mut receiver: UnboundedReceiver<GuiMessage>,
-    ) {
-        cx.spawn(async move |_| {
-            println!("[gui_message_handler] start");
-            while let Some(GuiMessage { plugin_id, payload }) = receiver.next().await {
-                let Some(manager) = manager.upgrade() else {
-                    break;
-                };
-                manager
-                    .ui_host
-                    .handle_gui_message(GuiMessage { plugin_id, payload });
-            }
-
-            println!("[gui_message_handler] end");
-        })
-        .detach();
-    }
-
-    fn spawn_ui_host_message_handler(cx: &App, plugin_ui_host: Rc<PluginUiHost>) {
-        cx.spawn(async move |_| {
-            println!("[ui_host_message_handler] start");
-            plugin_ui_host.message_handler().await;
-            println!("[ui_host_message_handler] end");
-        })
-        .detach();
     }
 }
 

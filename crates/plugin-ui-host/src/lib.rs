@@ -1,5 +1,5 @@
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     collections::HashMap,
     hash::Hash,
     rc::Rc,
@@ -44,19 +44,26 @@ impl Hash for WindowHandle {
 unsafe impl Send for WindowHandle {}
 unsafe impl Sync for WindowHandle {}
 
-pub struct PluginUiHost {
+pub trait MainThreadSpawn {
+    fn spawn(&self, future: impl Future<Output = ()> + 'static);
+}
+
+pub struct PluginUiHost<SPAWNER: MainThreadSpawn> {
+    spawner: SPAWNER,
     thread: JoinHandle<()>,
     thread_id: u32,
 
     msg_sender: Sender<Message>,
-    window_msg_receiver: Cell<Option<UnboundedReceiver<WindowMessage>>>,
 
     plugin_to_window: RefCell<HashMap<ClapPluginId, WindowHandle>>,
     window_to_plugin: RefCell<HashMap<WindowHandle, Rc<ClapPlugin>>>,
 }
 
-impl PluginUiHost {
-    pub fn new() -> Rc<PluginUiHost> {
+impl<SPAWNER: MainThreadSpawn + 'static> PluginUiHost<SPAWNER> {
+    pub fn new(
+        spawner: SPAWNER,
+        gui_receiver: UnboundedReceiver<GuiMessage>,
+    ) -> Rc<PluginUiHost<SPAWNER>> {
         let thread_id = Arc::new(OnceLock::new());
         let (msg_sender, msg_receiver) = channel();
         let (window_msg_sender, window_msg_receiver) = unbounded();
@@ -70,46 +77,110 @@ impl PluginUiHost {
             PluginUiHostThread::new(msg_receiver, window_msg_sender).run_message_loop();
         });
 
-        Rc::new(Self {
+        let this = Rc::new(Self {
+            spawner,
             thread,
             thread_id: *thread_id.wait(),
             msg_sender,
-            window_msg_receiver: Cell::new(Some(window_msg_receiver)),
             plugin_to_window: RefCell::default(),
             window_to_plugin: RefCell::default(),
-        })
+        });
+
+        this.clone().message_handler(window_msg_receiver);
+        this.clone().gui_message_handler(gui_receiver);
+
+        this
     }
 
-    pub async fn message_handler(self: &Rc<PluginUiHost>) {
-        let this = self.clone();
-        let mut receiver = self.window_msg_receiver.take().unwrap();
+    fn message_handler(
+        self: Rc<PluginUiHost<SPAWNER>>,
+        mut window_msg_receiver: UnboundedReceiver<WindowMessage>,
+    ) {
+        self.clone().spawner.spawn(async move {
+            while let Some(msg) = window_msg_receiver.next().await {
+                match msg {
+                    WindowMessage::Resized { hwnd, size } => {
+                        if let Some(clap_plugin) = self.window_to_plugin.borrow().get(&hwnd) {
+                            let mut plugin = clap_plugin.plugin.borrow_mut();
+                            let mut handle = plugin.plugin_handle();
+                            let plugin_gui: PluginGui = handle.get_extension().unwrap();
+                            if plugin_gui.can_resize(&mut handle) {
+                                plugin_gui.set_size(&mut handle, size).unwrap();
+                            }
+                        }
+                    }
+                    WindowMessage::Destroyed { hwnd } => {
+                        if let Some(clap_plugin) = self.window_to_plugin.borrow_mut().remove(&hwnd)
+                        {
+                            self.plugin_to_window
+                                .borrow_mut()
+                                .remove(&clap_plugin.get_id());
 
-        while let Some(msg) = receiver.next().await {
-            match msg {
-                WindowMessage::Resized { hwnd, size } => {
-                    if let Some(clap_plugin) = this.window_to_plugin.borrow().get(&hwnd) {
-                        let mut plugin = clap_plugin.plugin.borrow_mut();
-                        let mut handle = plugin.plugin_handle();
-                        let plugin_gui: PluginGui = handle.get_extension().unwrap();
-                        if plugin_gui.can_resize(&mut handle) {
-                            plugin_gui.set_size(&mut handle, size).unwrap();
+                            let mut plugin = clap_plugin.plugin.borrow_mut();
+                            let mut handle = plugin.plugin_handle();
+                            let plugin_gui: PluginGui = handle.get_extension().unwrap();
+                            plugin_gui.destroy(&mut handle);
                         }
                     }
                 }
-                WindowMessage::Destroyed { hwnd } => {
-                    if let Some(clap_plugin) = self.window_to_plugin.borrow_mut().remove(&hwnd) {
-                        self.plugin_to_window
-                            .borrow_mut()
-                            .remove(&clap_plugin.get_id());
+            }
+        });
+    }
 
-                        let mut plugin = clap_plugin.plugin.borrow_mut();
-                        let mut handle = plugin.plugin_handle();
-                        let plugin_gui: PluginGui = handle.get_extension().unwrap();
-                        plugin_gui.destroy(&mut handle);
+    fn gui_message_handler(
+        self: Rc<PluginUiHost<SPAWNER>>,
+        mut gui_receiver: UnboundedReceiver<GuiMessage>,
+    ) {
+        self.clone().spawner.spawn(async move {
+            println!("[gui_message_handler] start");
+            while let Some(GuiMessage { plugin_id, payload }) = gui_receiver.next().await {
+                match payload {
+                    GuiMessagePayload::ResizeHintsChanged => {
+                        let hwnd = self.plugin_to_window.borrow().get(&plugin_id).cloned();
+                        let clap_plugin = hwnd
+                            .as_ref()
+                            .and_then(|wnd| self.window_to_plugin.borrow().get(wnd).cloned());
+                        if let Some(hwnd) = hwnd
+                            && let Some(clap_plugin) = clap_plugin
+                        {
+                            let gui: PluginGui = clap_plugin
+                                .plugin
+                                .borrow_mut()
+                                .plugin_handle()
+                                .get_extension()
+                                .unwrap();
+
+                            let is_resizable = gui
+                                .get_resize_hints(
+                                    &mut clap_plugin.plugin.borrow_mut().plugin_handle(),
+                                )
+                                .map(|h| h.can_resize_horizontally && h.can_resize_vertically)
+                                .unwrap_or(false);
+
+                            unsafe {
+                                let old_style =
+                                    WINDOW_STYLE(GetWindowLongPtrA(hwnd.0, GWL_STYLE) as u32);
+                                let new_style = if is_resizable {
+                                    old_style | WS_SIZEBOX
+                                } else {
+                                    old_style & !WS_SIZEBOX
+                                };
+                                if old_style != new_style {
+                                    SetWindowLongPtrA(hwnd.0, GWL_STYLE, new_style.0 as isize);
+                                }
+                            }
+                        }
+                    }
+                    GuiMessagePayload::RequestResize(gui_size) => {
+                        let hwnd = self.plugin_to_window.borrow().get(&plugin_id).cloned();
+                        if let Some(hwnd) = hwnd {
+                            set_window_client_area(hwnd.0, gui_size);
+                        }
                     }
                 }
             }
-        }
+            println!("[gui_message_handler] end");
+        })
     }
 
     pub fn rundown(self) {
@@ -199,58 +270,6 @@ impl PluginUiHost {
             )
             .unwrap()
         };
-    }
-
-    pub fn handle_gui_message(&self, message: GuiMessage) {
-        match message.payload {
-            GuiMessagePayload::ResizeHintsChanged => {
-                let hwnd = self
-                    .plugin_to_window
-                    .borrow()
-                    .get(&message.plugin_id)
-                    .cloned();
-                let clap_plugin = hwnd
-                    .as_ref()
-                    .and_then(|wnd| self.window_to_plugin.borrow().get(wnd).cloned());
-                if let Some(hwnd) = hwnd
-                    && let Some(clap_plugin) = clap_plugin
-                {
-                    let gui: PluginGui = clap_plugin
-                        .plugin
-                        .borrow_mut()
-                        .plugin_handle()
-                        .get_extension()
-                        .unwrap();
-
-                    let is_resizable = gui
-                        .get_resize_hints(&mut clap_plugin.plugin.borrow_mut().plugin_handle())
-                        .map(|h| h.can_resize_horizontally && h.can_resize_vertically)
-                        .unwrap_or(false);
-
-                    unsafe {
-                        let old_style = WINDOW_STYLE(GetWindowLongPtrA(hwnd.0, GWL_STYLE) as u32);
-                        let new_style = if is_resizable {
-                            old_style | WS_SIZEBOX
-                        } else {
-                            old_style & !WS_SIZEBOX
-                        };
-                        if old_style != new_style {
-                            SetWindowLongPtrA(hwnd.0, GWL_STYLE, new_style.0 as isize);
-                        }
-                    }
-                }
-            }
-            GuiMessagePayload::RequestResize(gui_size) => {
-                let hwnd = self
-                    .plugin_to_window
-                    .borrow()
-                    .get(&message.plugin_id)
-                    .cloned();
-                if let Some(hwnd) = hwnd {
-                    set_window_client_area(hwnd.0, gui_size);
-                }
-            }
-        }
     }
 }
 
