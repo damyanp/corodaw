@@ -5,23 +5,21 @@ use engine::{
     audio::Audio,
     audio_graph::{AudioGraph, audio_graph},
     plugins::{
-        ClapPlugin,
+        ClapPlugin, ClapPluginManager, MainThreadSpawn,
         discovery::{FoundPlugin, get_plugins},
     },
 };
-use plugin_ui_host::MainThreadSpawn;
 use smol::LocalExecutor;
 
-use crate::{module::Module, plugins::EguiClapPluginManager};
+use crate::module::Module;
 
 mod module;
-mod plugins;
 
 struct Corodaw {
     executor: Rc<LocalExecutor<'static>>,
 
     found_plugins: Vec<Rc<FoundPlugin>>,
-    manager: Rc<EguiClapPluginManager>,
+    manager: Rc<ClapPluginManager<Spawner>>,
 
     selected_plugin: Option<Rc<FoundPlugin>>,
 
@@ -34,7 +32,7 @@ struct Corodaw {
 
 impl Corodaw {
     fn new(executor: Rc<LocalExecutor<'static>>) -> Self {
-        let manager = EguiClapPluginManager::new(executor.clone());
+        let manager = ClapPluginManager::new(Spawner(executor.clone()));
         let (audio_graph, audio_graph_worker) = audio_graph();
         let audio = Audio::new(audio_graph_worker).unwrap();
 
@@ -82,13 +80,13 @@ impl Corodaw {
 
         self.executor
             .spawn(async move {
-                manager.show_plugin_gui(clap_plugin).await;
+                manager.show_gui(&clap_plugin).await;
             })
             .detach();
     }
 
-    fn has_plugin_gui(&self, plugin: &ClapPlugin) -> bool {
-        self.manager.has_plugin_gui(plugin)
+    fn has_plugin_gui(&self, plugin: &Rc<ClapPlugin>) -> bool {
+        self.manager.has_gui(plugin)
     }
 
     fn add_module(&mut self) {
@@ -98,7 +96,7 @@ impl Corodaw {
 
         let modules = self.modules.clone();
         let audio_graph = self.audio_graph.clone();
-        let manager = self.manager.inner.clone();
+        let manager = self.manager.clone();
 
         self.executor
             .spawn(async move {
@@ -116,7 +114,9 @@ fn display_found_plugin(value: &Option<Rc<FoundPlugin>>) -> &str {
         .unwrap_or("<none>")
 }
 
+#[derive(Clone)]
 struct Spawner(Rc<LocalExecutor<'static>>);
+
 impl MainThreadSpawn for Spawner {
     fn spawn(&self, future: impl Future<Output = ()> + 'static) {
         self.0.spawn(future).detach();

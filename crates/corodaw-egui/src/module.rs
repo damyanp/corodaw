@@ -10,7 +10,7 @@ use engine::{
     plugins::{ClapPlugin, ClapPluginManager, discovery::FoundPlugin},
 };
 
-use crate::Corodaw;
+use crate::{Corodaw, Spawner};
 
 pub struct Module {
     name: String,
@@ -23,7 +23,7 @@ impl Module {
     pub async fn new(
         name: String,
         plugin: Rc<FoundPlugin>,
-        manager: Rc<ClapPluginManager>,
+        manager: Rc<ClapPluginManager<Spawner>>,
         audio_graph: Rc<RefCell<AudioGraph>>,
     ) -> Self {
         let plugin = manager.create_plugin(&plugin).await;

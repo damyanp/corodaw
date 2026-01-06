@@ -19,35 +19,66 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     ffi::CString,
-    rc::{Rc, Weak},
+    rc::Rc,
 };
 
-use crate::plugins::{discovery::FoundPlugin, timers::Timers};
+use crate::plugins::{discovery::FoundPlugin, timers::Timers, ui_host::PluginUiHost};
 
 pub mod discovery;
 mod timers;
+mod ui_host;
 
 #[derive(Debug, Hash, Copy, Clone, Eq, PartialEq)]
 pub struct ClapPluginId(usize);
 
-pub struct ClapPluginManager {
-    plugins: RefCell<HashMap<ClapPluginId, Rc<ClapPlugin>>>,
-    next_id: Cell<ClapPluginId>,
-    receiver: Cell<Option<UnboundedReceiver<Message>>>,
-    sender: UnboundedSender<Message>,
-    gui_sender: UnboundedSender<GuiMessage>,
+pub trait MainThreadSpawn: Clone + 'static {
+    fn spawn(&self, future: impl Future<Output = ()> + 'static);
 }
 
-impl ClapPluginManager {
-    pub fn new(gui_sender: UnboundedSender<GuiMessage>) -> Rc<Self> {
-        let (sender, receiver) = unbounded();
+pub struct ClapPluginManager<SPAWNER: MainThreadSpawn> {
+    spawner: SPAWNER,
+    plugins: RefCell<HashMap<ClapPluginId, Rc<ClapPlugin>>>,
+    next_id: Cell<ClapPluginId>,
+    sender: UnboundedSender<Message>,
+    gui_sender: UnboundedSender<GuiMessage>,
+    plugin_ui_host: Rc<PluginUiHost<SPAWNER>>,
+}
 
-        Rc::new(Self {
+impl<SPAWNER: MainThreadSpawn> ClapPluginManager<SPAWNER> {
+    pub fn new(spawner: SPAWNER) -> Rc<Self> {
+        let (sender, receiver) = unbounded();
+        let (gui_sender, gui_receiver) = unbounded();
+
+        let plugin_ui_host = PluginUiHost::new(spawner.clone(), gui_receiver);
+
+        let this = Rc::new(Self {
+            spawner,
             plugins: RefCell::new(HashMap::new()),
             next_id: Cell::new(ClapPluginId(1)),
-            receiver: Cell::new(Some(receiver)),
             sender,
             gui_sender,
+            plugin_ui_host,
+        });
+
+        this.clone().message_handler(receiver);
+
+        this
+    }
+
+    fn message_handler(self: Rc<Self>, mut receiver: UnboundedReceiver<Message>) {
+        self.clone().spawner.spawn(async move {
+            println!("[message_handler] start");
+
+            while let Some(Message { plugin_id, payload }) = receiver.next().await {
+                let plugin = self.get_plugin(plugin_id);
+
+                match payload {
+                    MessagePayload::RunOnMainThread => {
+                        plugin.plugin.borrow_mut().call_on_main_thread_callback();
+                    }
+                }
+            }
+            println!("[message_handler] end");
         })
     }
 
@@ -67,30 +98,12 @@ impl ClapPluginManager {
         self.plugins.borrow().get(&clap_plugin_id).unwrap().clone()
     }
 
-    pub async fn message_handler(clap_plugin_manager: Weak<ClapPluginManager>) {
-        println!("[message_handler] start");
-        let mut receiver = clap_plugin_manager
-            .upgrade()
-            .unwrap()
-            .receiver
-            .take()
-            .unwrap();
+    pub async fn show_gui(&self, clap_plugin: &Rc<ClapPlugin>) {
+        self.plugin_ui_host.show_gui(clap_plugin).await;
+    }
 
-        while let Some(Message { plugin_id, payload }) = receiver.next().await {
-            let plugin = {
-                let Some(manager) = clap_plugin_manager.upgrade() else {
-                    break;
-                };
-                manager.get_plugin(plugin_id)
-            };
-
-            match payload {
-                MessagePayload::RunOnMainThread => {
-                    plugin.plugin.borrow_mut().call_on_main_thread_callback();
-                }
-            }
-        }
-        println!("[message_handler] end");
+    pub fn has_gui(&self, clap_plugin: &Rc<ClapPlugin>) -> bool {
+        self.plugin_ui_host.has_gui(clap_plugin)
     }
 }
 

@@ -10,8 +10,8 @@ use std::{
     thread::JoinHandle,
 };
 
+use crate::plugins::{ClapPlugin, ClapPluginId, GuiMessage, GuiMessagePayload, MainThreadSpawn};
 use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui, Window};
-use engine::plugins::{ClapPlugin, ClapPluginId, GuiMessage, GuiMessagePayload};
 use futures::{
     StreamExt,
     channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
@@ -44,13 +44,9 @@ impl Hash for WindowHandle {
 unsafe impl Send for WindowHandle {}
 unsafe impl Sync for WindowHandle {}
 
-pub trait MainThreadSpawn {
-    fn spawn(&self, future: impl Future<Output = ()> + 'static);
-}
-
 pub struct PluginUiHost<SPAWNER: MainThreadSpawn> {
     spawner: SPAWNER,
-    thread: JoinHandle<()>,
+    _thread: JoinHandle<()>,
     thread_id: u32,
 
     msg_sender: Sender<Message>,
@@ -59,7 +55,7 @@ pub struct PluginUiHost<SPAWNER: MainThreadSpawn> {
     window_to_plugin: RefCell<HashMap<WindowHandle, Rc<ClapPlugin>>>,
 }
 
-impl<SPAWNER: MainThreadSpawn + 'static> PluginUiHost<SPAWNER> {
+impl<SPAWNER: MainThreadSpawn> PluginUiHost<SPAWNER> {
     pub fn new(
         spawner: SPAWNER,
         gui_receiver: UnboundedReceiver<GuiMessage>,
@@ -79,7 +75,7 @@ impl<SPAWNER: MainThreadSpawn + 'static> PluginUiHost<SPAWNER> {
 
         let this = Rc::new(Self {
             spawner,
-            thread,
+            _thread: thread,
             thread_id: *thread_id.wait(),
             msg_sender,
             plugin_to_window: RefCell::default(),
@@ -181,10 +177,6 @@ impl<SPAWNER: MainThreadSpawn + 'static> PluginUiHost<SPAWNER> {
             }
             println!("[gui_message_handler] end");
         })
-    }
-
-    pub fn rundown(self) {
-        let _ = self.thread.join();
     }
 
     pub fn has_gui(&self, clap_plugin: &ClapPlugin) -> bool {

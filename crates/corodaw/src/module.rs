@@ -13,7 +13,7 @@ use engine::{
     plugins::{ClapPlugin, ClapPluginManager, discovery::FoundPlugin},
 };
 
-use crate::GpuiClapPluginManager;
+use crate::Spawner;
 
 pub struct Module {
     _audio: ModuleAudio,
@@ -29,26 +29,21 @@ struct ModuleUI {
     name: String,
     gain_slider: Entity<SliderState>,
     clap_plugin: Rc<ClapPlugin>,
-    plugin_manager: Rc<GpuiClapPluginManager>,
+    plugin_manager: Rc<ClapPluginManager<Spawner>>,
 }
 
 impl Module {
     pub async fn new(
         name: String,
-        plugin_manager: Rc<GpuiClapPluginManager>,
+        plugin_manager: Rc<ClapPluginManager<Spawner>>,
         plugin: &FoundPlugin,
         audio_graph: Rc<RefCell<AudioGraph>>,
         cx: &mut AsyncApp,
     ) -> Result<Self> {
         let initial_gain = 1.0;
 
-        let audio = ModuleAudio::new(
-            plugin_manager.inner.clone(),
-            plugin,
-            audio_graph,
-            initial_gain,
-        )
-        .await;
+        let audio =
+            ModuleAudio::new(plugin_manager.clone(), plugin, audio_graph, initial_gain).await;
 
         let ui = cx.new(|cx| ModuleUI::new(name, initial_gain, &audio, plugin_manager, cx))?;
 
@@ -62,7 +57,7 @@ impl Module {
 
 impl ModuleAudio {
     async fn new(
-        plugin_manager: Rc<ClapPluginManager>,
+        plugin_manager: Rc<ClapPluginManager<Spawner>>,
         plugin: &FoundPlugin,
         audio_graph: Rc<RefCell<AudioGraph>>,
         initial_gain: f32,
@@ -87,7 +82,7 @@ impl ModuleUI {
         name: impl Into<String>,
         initial_gain: f32,
         module_audio: &ModuleAudio,
-        manager: Rc<GpuiClapPluginManager>,
+        manager: Rc<ClapPluginManager<Spawner>>,
         cx: &mut App,
     ) -> ModuleUI {
         let gain_slider = cx.new(|_| {
@@ -120,7 +115,7 @@ impl ModuleUI {
                 })
                 .unwrap();
 
-            plugin_manager.ui_host.show_gui(&plugin).await;
+            plugin_manager.show_gui(&plugin).await;
         })
         .detach();
     }
@@ -128,7 +123,7 @@ impl ModuleUI {
 
 impl Render for ModuleUI {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let show_disabled = self.plugin_manager.ui_host.has_gui(&self.clap_plugin);
+        let show_disabled = self.plugin_manager.has_gui(&self.clap_plugin);
 
         div()
             .border_1()

@@ -1,24 +1,19 @@
-use std::{
-    cell::RefCell,
-    rc::{Rc, Weak},
-};
+use std::{cell::RefCell, rc::Rc};
 
 use engine::{
     audio::Audio,
     audio_graph::{AudioGraph, audio_graph},
     plugins::{
-        ClapPluginManager,
+        ClapPluginManager, MainThreadSpawn,
         discovery::{FoundPlugin, get_plugins},
     },
 };
-use futures_channel::mpsc::unbounded;
 use gpui::*;
 use gpui_component::{
     button::*,
     select::{SearchableVec, Select, SelectItem, SelectState},
     *,
 };
-use plugin_ui_host::{MainThreadSpawn, PluginUiHost};
 
 use crate::module::Module;
 
@@ -45,11 +40,7 @@ impl SelectItem for SelectablePlugin {
     }
 }
 
-struct GpuiClapPluginManager {
-    inner: Rc<ClapPluginManager>,
-    ui_host: Rc<PluginUiHost<Spawner>>,
-}
-
+#[derive(Clone)]
 struct Spawner(AsyncApp);
 
 impl MainThreadSpawn for Spawner {
@@ -58,30 +49,8 @@ impl MainThreadSpawn for Spawner {
     }
 }
 
-impl GpuiClapPluginManager {
-    pub fn new(cx: &App) -> Rc<Self> {
-        let (gui_sender, gui_receiver) = unbounded();
-
-        let inner = ClapPluginManager::new(gui_sender);
-
-        Self::spawn_message_handler(cx, Rc::downgrade(&inner));
-
-        
-
-        Rc::new(GpuiClapPluginManager {
-            inner,
-            ui_host: PluginUiHost::new(Spawner(cx.to_async()), gui_receiver),
-        })
-    }
-
-    fn spawn_message_handler(cx: &App, manager: Weak<ClapPluginManager>) {
-        cx.spawn(async move |_| ClapPluginManager::message_handler(manager).await)
-            .detach();
-    }
-}
-
 pub struct Corodaw {
-    clap_plugin_manager: Rc<GpuiClapPluginManager>,
+    clap_plugin_manager: Rc<ClapPluginManager<Spawner>>,
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
     modules: Vec<Module>,
     counter: u32,
@@ -94,7 +63,7 @@ impl Corodaw {
         let (audio_graph, audio_graph_worker) = audio_graph();
         let audio = Audio::new(audio_graph_worker).unwrap();
 
-        let clap_plugin_manager = GpuiClapPluginManager::new(cx);
+        let clap_plugin_manager = ClapPluginManager::new(Spawner(cx.to_async()));
 
         let searchable_plugins = SearchableVec::new(
             plugins
