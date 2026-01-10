@@ -98,8 +98,10 @@ impl<SPAWNER: MainThreadSpawn> PluginUiHost<SPAWNER> {
                     WindowMessage::Resized { hwnd, size } => {
                         if let Some(clap_plugin) = self.window_to_plugin.borrow().get(&hwnd) {
                             let mut plugin = clap_plugin.plugin.borrow_mut();
+                            let plugin_gui: PluginGui = plugin.access_shared_handler(|h| {
+                                h.extensions.read().unwrap().plugin_gui.unwrap()
+                            });
                             let mut handle = plugin.plugin_handle();
-                            let plugin_gui: PluginGui = handle.get_extension().unwrap();
                             if plugin_gui.can_resize(&mut handle) {
                                 plugin_gui.set_size(&mut handle, size).unwrap();
                             }
@@ -113,8 +115,10 @@ impl<SPAWNER: MainThreadSpawn> PluginUiHost<SPAWNER> {
                                 .remove(&clap_plugin.get_id());
 
                             let mut plugin = clap_plugin.plugin.borrow_mut();
+                            let plugin_gui: PluginGui = plugin.access_shared_handler(|h| {
+                                h.extensions.read().unwrap().plugin_gui.unwrap()
+                            });
                             let mut handle = plugin.plugin_handle();
-                            let plugin_gui: PluginGui = handle.get_extension().unwrap();
                             plugin_gui.destroy(&mut handle);
                         }
                     }
@@ -139,12 +143,9 @@ impl<SPAWNER: MainThreadSpawn> PluginUiHost<SPAWNER> {
                         if let Some(hwnd) = hwnd
                             && let Some(clap_plugin) = clap_plugin
                         {
-                            let gui: PluginGui = clap_plugin
-                                .plugin
-                                .borrow_mut()
-                                .plugin_handle()
-                                .get_extension()
-                                .unwrap();
+                            let gui = clap_plugin.plugin.borrow().access_shared_handler(|h| {
+                                h.extensions.read().unwrap().plugin_gui.unwrap()
+                            });
 
                             let is_resizable = gui
                                 .get_resize_hints(
@@ -191,12 +192,10 @@ impl<SPAWNER: MainThreadSpawn> PluginUiHost<SPAWNER> {
             todo!("bring the window to the front or something");
         }
 
-        let plugin_gui: PluginGui = clap_plugin
+        let plugin_gui = clap_plugin
             .plugin
-            .borrow_mut()
-            .plugin_handle()
-            .get_extension()
-            .unwrap();
+            .borrow()
+            .access_shared_handler(|h| h.extensions.read().unwrap().plugin_gui.unwrap());
 
         let config = GuiConfiguration {
             api_type: GuiApiType::default_for_current_platform()

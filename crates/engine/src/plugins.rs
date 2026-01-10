@@ -1,6 +1,6 @@
 use clack_extensions::{
     audio_ports::{AudioPortInfoBuffer, PluginAudioPorts},
-    gui::{GuiSize, HostGui, HostGuiImpl},
+    gui::{GuiSize, HostGui, HostGuiImpl, PluginGui},
     log::{HostLog, HostLogImpl},
     params::{HostParams, HostParamsImplMainThread, HostParamsImplShared},
     timer::{HostTimer, PluginTimer},
@@ -20,6 +20,7 @@ use std::{
     collections::HashMap,
     ffi::CString,
     rc::Rc,
+    sync::RwLock,
 };
 
 use crate::plugins::{discovery::FoundPlugin, timers::Timers, ui_host::PluginUiHost};
@@ -135,11 +136,12 @@ impl ClapPlugin {
             channel: sender,
             gui_channel: gui_sender,
             plugin_id: clap_plugin_id,
+            extensions: RwLock::default(),
         };
 
         let (initialized_sender, initialized_receiver) = oneshot::channel::<()>();
 
-        let mut plugin = clack_host::plugin::PluginInstance::new(
+        let plugin = clack_host::plugin::PluginInstance::new(
             move |_| shared,
             move |_| ClapPluginMainThread::new(initialized_sender),
             &bundle,
@@ -150,7 +152,8 @@ impl ClapPlugin {
 
         initialized_receiver.await.unwrap();
 
-        let audio_ports = plugin.plugin_handle().get_extension();
+        let audio_ports = plugin
+            .access_shared_handler(|h: &ClapPluginShared| h.extensions.read().unwrap().audio_ports);
 
         Rc::new(Self {
             clap_plugin_id,
@@ -243,6 +246,13 @@ pub struct ClapPluginShared {
     channel: UnboundedSender<Message>,
     gui_channel: UnboundedSender<GuiMessage>,
     plugin_id: ClapPluginId,
+    extensions: RwLock<Extensions>,
+}
+
+#[derive(Default)]
+pub struct Extensions {
+    plugin_gui: Option<PluginGui>,
+    audio_ports: Option<PluginAudioPorts>,
 }
 
 impl ClapPluginShared {
@@ -318,7 +328,9 @@ unsafe impl Send for ClapPluginShared {}
 
 impl<'a> host::SharedHandler<'a> for ClapPluginShared {
     fn initializing(&self, instance: InitializingPluginHandle<'a>) {
-        let _ = instance.get_extension::<PluginAudioPorts>();
+        let mut extensions = self.extensions.write().unwrap();
+        extensions.audio_ports = instance.get_extension();
+        extensions.plugin_gui = instance.get_extension();
     }
 
     fn request_restart(&self) {
