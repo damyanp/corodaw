@@ -4,7 +4,7 @@ use engine::{
     audio::Audio,
     audio_graph::{AudioGraph, audio_graph},
     plugins::{
-        ClapPluginManager, MainThreadSpawn,
+        ClapPluginManager,
         discovery::{FoundPlugin, get_plugins},
     },
 };
@@ -20,16 +20,16 @@ use crate::module::Module;
 mod module;
 
 #[derive(Clone)]
-struct SelectablePlugin(Rc<FoundPlugin>);
+struct SelectablePlugin(FoundPlugin);
 
 impl SelectablePlugin {
-    fn new(p: Rc<FoundPlugin>) -> Self {
-        SelectablePlugin(p)
+    fn new(p: FoundPlugin) -> Self {
+        Self(p)
     }
 }
 
 impl SelectItem for SelectablePlugin {
-    type Value = Rc<FoundPlugin>;
+    type Value = FoundPlugin;
 
     fn title(&self) -> SharedString {
         SharedString::new(self.0.name.as_str())
@@ -40,17 +40,8 @@ impl SelectItem for SelectablePlugin {
     }
 }
 
-#[derive(Clone)]
-struct Spawner(AsyncApp);
-
-impl MainThreadSpawn for Spawner {
-    fn spawn(&self, future: impl Future<Output = ()> + 'static) {
-        self.0.spawn(async move |_| future.await).detach();
-    }
-}
-
 pub struct Corodaw {
-    clap_plugin_manager: Rc<ClapPluginManager<Spawner>>,
+    clap_plugin_manager: Rc<ClapPluginManager>,
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
     modules: Vec<Module>,
     counter: u32,
@@ -59,11 +50,11 @@ pub struct Corodaw {
 }
 
 impl Corodaw {
-    fn new(plugins: Vec<Rc<FoundPlugin>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(plugins: Vec<FoundPlugin>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (audio_graph, audio_graph_worker) = audio_graph();
         let audio = Audio::new(audio_graph_worker).unwrap();
 
-        let clap_plugin_manager = ClapPluginManager::new(Spawner(cx.to_async()));
+        let clap_plugin_manager = ClapPluginManager::new();
 
         let searchable_plugins = SearchableVec::new(
             plugins

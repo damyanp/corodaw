@@ -8,12 +8,10 @@ use gpui_component::{
 };
 
 use engine::{
-    audio_graph::{AudioGraph, clap_adapter::get_audio_graph_node_desc_for_clap_plugin},
+    audio_graph::AudioGraph,
     builtin::GainControl,
-    plugins::{ClapPlugin, ClapPluginManager, discovery::FoundPlugin},
+    plugins::{ClapPluginId, ClapPluginManager, discovery::FoundPlugin},
 };
-
-use crate::Spawner;
 
 pub struct Module {
     _audio: ModuleAudio,
@@ -21,21 +19,21 @@ pub struct Module {
 }
 
 struct ModuleAudio {
-    plugin: Rc<ClapPlugin>,
+    clap_plugin_id: ClapPluginId,
     gain: Rc<GainControl>,
 }
 
 struct ModuleUI {
     name: String,
     gain_slider: Entity<SliderState>,
-    clap_plugin: Rc<ClapPlugin>,
-    plugin_manager: Rc<ClapPluginManager<Spawner>>,
+    clap_plugin_id: ClapPluginId,
+    plugin_manager: Rc<ClapPluginManager>,
 }
 
 impl Module {
     pub async fn new(
         name: String,
-        plugin_manager: Rc<ClapPluginManager<Spawner>>,
+        plugin_manager: Rc<ClapPluginManager>,
         plugin: &FoundPlugin,
         audio_graph: Rc<RefCell<AudioGraph>>,
         cx: &mut AsyncApp,
@@ -57,23 +55,30 @@ impl Module {
 
 impl ModuleAudio {
     async fn new(
-        plugin_manager: Rc<ClapPluginManager<Spawner>>,
+        plugin_manager: Rc<ClapPluginManager>,
         plugin: &FoundPlugin,
         audio_graph: Rc<RefCell<AudioGraph>>,
         initial_gain: f32,
     ) -> ModuleAudio {
-        let plugin = plugin_manager.create_plugin(plugin).await;
+        let clap_plugin_id = plugin_manager.create_plugin(plugin.clone()).await;
 
         let gain = Rc::new(GainControl::default());
 
+        let plugin_node_desc = plugin_manager
+            .get_audio_graph_node_desc(clap_plugin_id)
+            .await;
+
         let mut audio_graph = audio_graph.borrow_mut();
-        let plugin_id = audio_graph.add_node(get_audio_graph_node_desc_for_clap_plugin(&plugin));
+        let plugin_id = audio_graph.add_node(plugin_node_desc);
         let gain_id = audio_graph.add_node(gain.get_node_desc(initial_gain));
 
         audio_graph.connect(plugin_id, 0, gain_id, 0);
         audio_graph.set_output_node(gain_id, true);
 
-        Self { plugin, gain }
+        Self {
+            clap_plugin_id,
+            gain,
+        }
     }
 }
 
@@ -82,7 +87,7 @@ impl ModuleUI {
         name: impl Into<String>,
         initial_gain: f32,
         module_audio: &ModuleAudio,
-        manager: Rc<ClapPluginManager<Spawner>>,
+        manager: Rc<ClapPluginManager>,
         cx: &mut App,
     ) -> ModuleUI {
         let gain_slider = cx.new(|_| {
@@ -103,27 +108,18 @@ impl ModuleUI {
             name: name.into(),
             gain_slider,
             plugin_manager: manager,
-            clap_plugin: module_audio.plugin.clone(),
+            clap_plugin_id: module_audio.clap_plugin_id,
         }
     }
 
-    fn on_show(&mut self, _e: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        cx.spawn(async |this, cx| {
-            let (plugin_manager, plugin) = this
-                .read_with(cx, |this, _| {
-                    (this.plugin_manager.clone(), this.clap_plugin.clone())
-                })
-                .unwrap();
-
-            plugin_manager.show_gui(&plugin).await;
-        })
-        .detach();
+    fn on_show(&mut self, _e: &ClickEvent, _: &mut Window, _: &mut Context<Self>) {
+        self.plugin_manager.show_gui(self.clap_plugin_id);
     }
 }
 
 impl Render for ModuleUI {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let show_disabled = self.plugin_manager.has_gui(&self.clap_plugin);
+        let show_disabled = false; // TODO
 
         div()
             .border_1()

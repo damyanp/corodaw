@@ -3,29 +3,21 @@ use std::{
     collections::HashMap,
     hash::Hash,
     rc::Rc,
-    sync::{
-        Arc, OnceLock,
-        mpsc::{Receiver, Sender, channel},
-    },
-    thread::JoinHandle,
+    sync::mpsc::{Receiver, Sender, channel},
 };
 
-use crate::plugins::{ClapPlugin, ClapPluginId, GuiMessage, GuiMessagePayload, MainThreadSpawn};
+use crate::plugins::{ClapPlugin, ClapPluginId, GuiMessage, GuiMessagePayload};
 use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui, Window};
-use futures::{
-    StreamExt,
-    channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
-};
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
-        System::{LibraryLoader::GetModuleHandleA, Threading::GetCurrentThreadId},
+        System::LibraryLoader::GetModuleHandleA,
         UI::WindowsAndMessaging::{
             AdjustWindowRect, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExA,
-            DefWindowProcA, DispatchMessageW, GWL_STYLE, GWLP_USERDATA, GetClientRect, GetMessageW,
-            GetWindowLongPtrA, IDC_ARROW, LoadCursorW, MSG, PostThreadMessageA, RegisterClassA,
-            SWP_ASYNCWINDOWPOS, SWP_NOMOVE, SetWindowLongPtrA, SetWindowPos, TranslateMessage,
-            WINDOW_EX_STYLE, WINDOW_STYLE, WM_DESTROY, WM_SIZE, WM_USER, WNDCLASSA,
+            DefWindowProcA, DispatchMessageW, GWL_STYLE, GWLP_USERDATA, GetClientRect,
+            GetWindowLongPtrA, IDC_ARROW, LoadCursorW, MSG, PM_REMOVE, PeekMessageW,
+            RegisterClassA, SWP_ASYNCWINDOWPOS, SWP_NOMOVE, SetWindowLongPtrA, SetWindowPos,
+            TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_DESTROY, WM_SIZE, WNDCLASSA,
             WS_OVERLAPPEDWINDOW, WS_SIZEBOX, WS_THICKFRAME, WS_VISIBLE,
         },
     },
@@ -44,168 +36,149 @@ impl Hash for WindowHandle {
 unsafe impl Send for WindowHandle {}
 unsafe impl Sync for WindowHandle {}
 
-pub struct PluginUiHost<SPAWNER: MainThreadSpawn> {
-    spawner: SPAWNER,
-    _thread: JoinHandle<()>,
-    thread_id: u32,
-
+pub struct PluginUiHost {
     msg_sender: Sender<Message>,
+    window_msg_receiver: Receiver<WindowMessage>,
+    gui_receiver: Receiver<GuiMessage>,
 
     plugin_to_window: RefCell<HashMap<ClapPluginId, WindowHandle>>,
     window_to_plugin: RefCell<HashMap<WindowHandle, Rc<ClapPlugin>>>,
+
+    // TODO: collapse this into this struct
+    plugin_ui_host_thread: PluginUiHostThread,
 }
 
-impl<SPAWNER: MainThreadSpawn> PluginUiHost<SPAWNER> {
-    pub fn new(
-        spawner: SPAWNER,
-        gui_receiver: UnboundedReceiver<GuiMessage>,
-    ) -> Rc<PluginUiHost<SPAWNER>> {
-        let thread_id = Arc::new(OnceLock::new());
+impl PluginUiHost {
+    pub fn new(gui_receiver: Receiver<GuiMessage>) -> Rc<PluginUiHost> {
         let (msg_sender, msg_receiver) = channel();
-        let (window_msg_sender, window_msg_receiver) = unbounded();
+        let (window_msg_sender, window_msg_receiver) = channel();
 
-        let thread_id_clone = thread_id.clone();
-        let thread = std::thread::spawn(move || {
-            thread_id_clone
-                .set(unsafe { GetCurrentThreadId() })
-                .unwrap();
+        
 
-            PluginUiHostThread::new(msg_receiver, window_msg_sender).run_message_loop();
-        });
-
-        let this = Rc::new(Self {
-            spawner,
-            _thread: thread,
-            thread_id: *thread_id.wait(),
+        Rc::new(Self {
             msg_sender,
+            window_msg_receiver,
+            gui_receiver,
+            plugin_ui_host_thread: PluginUiHostThread::new(msg_receiver, window_msg_sender),
             plugin_to_window: RefCell::default(),
             window_to_plugin: RefCell::default(),
-        });
-
-        this.clone().message_handler(window_msg_receiver);
-        this.clone().gui_message_handler(gui_receiver);
-
-        this
-    }
-
-    fn message_handler(
-        self: Rc<PluginUiHost<SPAWNER>>,
-        mut window_msg_receiver: UnboundedReceiver<WindowMessage>,
-    ) {
-        self.clone().spawner.spawn(async move {
-            while let Some(msg) = window_msg_receiver.next().await {
-                match msg {
-                    WindowMessage::Resized { hwnd, size } => {
-                        if let Some(clap_plugin) = self.window_to_plugin.borrow().get(&hwnd) {
-                            let mut plugin = clap_plugin.plugin.borrow_mut();
-                            let plugin_gui: PluginGui = plugin.access_shared_handler(|h| {
-                                h.extensions.read().unwrap().plugin_gui.unwrap()
-                            });
-                            let mut handle = plugin.plugin_handle();
-                            if plugin_gui.can_resize(&mut handle) {
-                                plugin_gui.set_size(&mut handle, size).unwrap();
-                            }
-                        }
-                    }
-                    WindowMessage::Destroyed { hwnd } => {
-                        if let Some(clap_plugin) = self.window_to_plugin.borrow_mut().remove(&hwnd)
-                        {
-                            self.plugin_to_window
-                                .borrow_mut()
-                                .remove(&clap_plugin.get_id());
-
-                            let mut plugin = clap_plugin.plugin.borrow_mut();
-                            let plugin_gui: PluginGui = plugin.access_shared_handler(|h| {
-                                h.extensions.read().unwrap().plugin_gui.unwrap()
-                            });
-                            let mut handle = plugin.plugin_handle();
-                            plugin_gui.destroy(&mut handle);
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    fn gui_message_handler(
-        self: Rc<PluginUiHost<SPAWNER>>,
-        mut gui_receiver: UnboundedReceiver<GuiMessage>,
-    ) {
-        self.clone().spawner.spawn(async move {
-            println!("[gui_message_handler] start");
-            while let Some(GuiMessage { plugin_id, payload }) = gui_receiver.next().await {
-                match payload {
-                    GuiMessagePayload::ResizeHintsChanged => {
-                        let hwnd = self.plugin_to_window.borrow().get(&plugin_id).cloned();
-                        let clap_plugin = hwnd
-                            .as_ref()
-                            .and_then(|wnd| self.window_to_plugin.borrow().get(wnd).cloned());
-                        if let Some(hwnd) = hwnd
-                            && let Some(clap_plugin) = clap_plugin
-                        {
-                            let gui = clap_plugin.plugin.borrow().access_shared_handler(|h| {
-                                h.extensions.read().unwrap().plugin_gui.unwrap()
-                            });
-
-                            let is_resizable = gui
-                                .get_resize_hints(
-                                    &mut clap_plugin.plugin.borrow_mut().plugin_handle(),
-                                )
-                                .map(|h| h.can_resize_horizontally && h.can_resize_vertically)
-                                .unwrap_or(false);
-
-                            unsafe {
-                                let old_style =
-                                    WINDOW_STYLE(GetWindowLongPtrA(hwnd.0, GWL_STYLE) as u32);
-                                let new_style = if is_resizable {
-                                    old_style | WS_SIZEBOX
-                                } else {
-                                    old_style & !WS_SIZEBOX
-                                };
-                                if old_style != new_style {
-                                    SetWindowLongPtrA(hwnd.0, GWL_STYLE, new_style.0 as isize);
-                                }
-                            }
-                        }
-                    }
-                    GuiMessagePayload::RequestResize(gui_size) => {
-                        let hwnd = self.plugin_to_window.borrow().get(&plugin_id).cloned();
-                        if let Some(hwnd) = hwnd {
-                            set_window_client_area(hwnd.0, gui_size);
-                        }
-                    }
-                }
-            }
-            println!("[gui_message_handler] end");
         })
     }
 
-    pub fn has_gui(&self, clap_plugin: &ClapPlugin) -> bool {
+    pub fn run_message_handlers(&self) {
+        self.run_window_message_handler();
+        self.run_gui_message_handler();
+        self.plugin_ui_host_thread.run_message_handlers();
+    }
+
+    fn run_window_message_handler(&self) {
+        for msg in self.window_msg_receiver.try_iter() {
+            match msg {
+                WindowMessage::Resized { hwnd, size } => {
+                    if let Some(clap_plugin) = self.window_to_plugin.borrow().get(&hwnd) {
+                        let mut plugin = clap_plugin.plugin.borrow_mut();
+                        let plugin_gui: PluginGui = plugin.access_shared_handler(|h| {
+                            h.extensions.read().unwrap().plugin_gui.unwrap()
+                        });
+                        let mut handle = plugin.plugin_handle();
+                        if plugin_gui.can_resize(&mut handle) {
+                            plugin_gui.set_size(&mut handle, size).unwrap();
+                        }
+                    }
+                }
+                WindowMessage::Destroyed { hwnd } => {
+                    if let Some(clap_plugin) = self.window_to_plugin.borrow_mut().remove(&hwnd) {
+                        self.plugin_to_window
+                            .borrow_mut()
+                            .remove(&clap_plugin.get_id());
+
+                        let mut plugin = clap_plugin.plugin.borrow_mut();
+                        let plugin_gui: PluginGui = plugin.access_shared_handler(|h| {
+                            h.extensions.read().unwrap().plugin_gui.unwrap()
+                        });
+                        let mut handle = plugin.plugin_handle();
+                        plugin_gui.destroy(&mut handle);
+                    }
+                }
+            }
+        }
+    }
+
+    fn run_gui_message_handler(&self) {
+        for GuiMessage { plugin_id, payload } in self.gui_receiver.try_iter() {
+            match payload {
+                GuiMessagePayload::ResizeHintsChanged => {
+                    let hwnd = self.plugin_to_window.borrow().get(&plugin_id).cloned();
+                    let clap_plugin = hwnd
+                        .as_ref()
+                        .and_then(|wnd| self.window_to_plugin.borrow().get(wnd).cloned());
+                    if let Some(hwnd) = hwnd
+                        && let Some(clap_plugin) = clap_plugin
+                    {
+                        let gui = clap_plugin.plugin.borrow().access_shared_handler(|h| {
+                            h.extensions.read().unwrap().plugin_gui.unwrap()
+                        });
+
+                        let is_resizable = gui
+                            .get_resize_hints(&mut clap_plugin.plugin.borrow_mut().plugin_handle())
+                            .map(|h| h.can_resize_horizontally && h.can_resize_vertically)
+                            .unwrap_or(false);
+
+                        unsafe {
+                            let old_style =
+                                WINDOW_STYLE(GetWindowLongPtrA(hwnd.0, GWL_STYLE) as u32);
+                            let new_style = if is_resizable {
+                                old_style | WS_SIZEBOX
+                            } else {
+                                old_style & !WS_SIZEBOX
+                            };
+                            if old_style != new_style {
+                                SetWindowLongPtrA(hwnd.0, GWL_STYLE, new_style.0 as isize);
+                            }
+                        }
+                    }
+                }
+                GuiMessagePayload::RequestResize(gui_size) => {
+                    let hwnd = self.plugin_to_window.borrow().get(&plugin_id).cloned();
+                    if let Some(hwnd) = hwnd {
+                        set_window_client_area(hwnd.0, gui_size);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn _has_gui(&self, clap_plugin: &ClapPlugin) -> bool {
         self.plugin_to_window
             .borrow()
             .contains_key(&clap_plugin.get_id())
     }
 
     pub async fn show_gui(&self, clap_plugin: &Rc<ClapPlugin>) {
+        dbg!();
         let plugin_id = clap_plugin.get_id();
         if self.plugin_to_window.borrow().contains_key(&plugin_id) {
             todo!("bring the window to the front or something");
         }
 
+        dbg!();
         let plugin_gui = clap_plugin
             .plugin
             .borrow()
             .access_shared_handler(|h| h.extensions.read().unwrap().plugin_gui.unwrap());
 
+        dbg!();
         let config = GuiConfiguration {
             api_type: GuiApiType::default_for_current_platform()
                 .expect("This platform supports UI"),
             is_floating: false,
         };
 
+        dbg!();
         plugin_gui
             .create(&mut clap_plugin.plugin.borrow_mut().plugin_handle(), config)
             .unwrap();
+        dbg!();
 
         let initial_size = plugin_gui
             .get_size(&mut clap_plugin.plugin.borrow_mut().plugin_handle())
@@ -214,19 +187,24 @@ impl<SPAWNER: MainThreadSpawn> PluginUiHost<SPAWNER> {
                 height: 600,
             });
 
+        dbg!();
+
         let size_hints =
             plugin_gui.get_resize_hints(&mut clap_plugin.plugin.borrow_mut().plugin_handle());
         let can_resize = size_hints
             .map(|h| h.can_resize_horizontally && h.can_resize_vertically)
             .unwrap_or(false);
+        dbg!();
 
         let (sender, receiver) = futures::channel::oneshot::channel();
+        println!("sending CreatePluginWindow");
         self.send_message(Message::CreatePluginWindow {
             initial_size,
             sender,
             can_resize,
         });
         let hwnd = receiver.await.unwrap();
+        println!("got window handle: {:?}", hwnd);
 
         set_window_client_area(hwnd.0, initial_size);
 
@@ -249,18 +227,6 @@ impl<SPAWNER: MainThreadSpawn> PluginUiHost<SPAWNER> {
 
     fn send_message(&self, message: Message) {
         self.msg_sender.send(message).unwrap();
-
-        // Post a WM_USER message to wake the thread up so it can receive
-        // mesages from the channel.
-        unsafe {
-            PostThreadMessageA(
-                self.thread_id,
-                WM_USER,
-                WPARAM::default(),
-                LPARAM::default(),
-            )
-            .unwrap()
-        };
     }
 }
 
@@ -305,15 +271,12 @@ enum WindowMessage {
 
 struct PluginUiHostThread {
     msg_receiver: Receiver<Message>,
-    window_msg_sender: Box<UnboundedSender<WindowMessage>>,
+    window_msg_sender: Box<Sender<WindowMessage>>,
     wndclass_name: PCSTR,
 }
 
 impl PluginUiHostThread {
-    fn new(
-        msg_receiver: Receiver<Message>,
-        window_msg_sender: UnboundedSender<WindowMessage>,
-    ) -> Self {
+    fn new(msg_receiver: Receiver<Message>, window_msg_sender: Sender<WindowMessage>) -> Self {
         let wndclass_name = Self::register_window_class();
         Self {
             msg_receiver,
@@ -343,13 +306,18 @@ impl PluginUiHostThread {
         }
     }
 
-    fn run_message_loop(&self) {
+    fn run_message_handlers(&self) {
+        self.handle_messages();
+        self.pump_windows_message_loop();
+    }
+
+    fn pump_windows_message_loop(&self) {
         unsafe {
             loop {
-                self.handle_messages();
-
                 let mut msg = MSG::default();
-                let r = GetMessageW(&mut msg, None, 0, 0);
+
+                // TODO: something needs to block this loop!
+                let r = PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE);
                 if r.0 == 0 {
                     // normal exit
                     break;
@@ -425,9 +393,7 @@ extern "system" fn wndproc(window: HWND, message: u32, wparam: WPARAM, lparam: L
             return DefWindowProcA(window, message, wparam, lparam);
         }
 
-        let sender = (ptr as *mut UnboundedSender<WindowMessage>)
-            .as_mut()
-            .unwrap();
+        let sender = (ptr as *mut Sender<WindowMessage>).as_mut().unwrap();
 
         match message {
             WM_SIZE => {
@@ -436,7 +402,7 @@ extern "system" fn wndproc(window: HWND, message: u32, wparam: WPARAM, lparam: L
                 let size = GuiSize { width, height };
 
                 sender
-                    .unbounded_send(WindowMessage::Resized {
+                    .send(WindowMessage::Resized {
                         hwnd: WindowHandle(window),
                         size,
                     })
@@ -445,7 +411,7 @@ extern "system" fn wndproc(window: HWND, message: u32, wparam: WPARAM, lparam: L
             }
             WM_DESTROY => {
                 sender
-                    .unbounded_send(WindowMessage::Destroyed {
+                    .send(WindowMessage::Destroyed {
                         hwnd: WindowHandle(window),
                     })
                     .unwrap();

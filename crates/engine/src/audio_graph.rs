@@ -1,6 +1,7 @@
 use std::{
     cell::{Ref, RefCell, RefMut},
     collections::HashMap,
+    fmt::Debug,
     sync::mpsc::{Receiver, Sender, channel},
 };
 
@@ -166,6 +167,12 @@ pub struct NodeDesc {
     pub processor: RefCell<Box<dyn Processor>>,
     pub audio_inputs: Vec<AudioPortDesc>,
     pub audio_outputs: Vec<AudioPortDesc>,
+}
+
+impl Debug for NodeDesc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NodeDesc").finish()
+    }
 }
 
 impl Node {

@@ -10,20 +10,24 @@ use clack_host::{
     plugin::{InitializedPluginHandle, InitializingPluginHandle, PluginInstance},
     process::{PluginAudioConfiguration, PluginAudioProcessor},
 };
-use futures::StreamExt;
-use futures_channel::{
-    mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
-    oneshot,
-};
+use futures_channel::oneshot;
+use smol::LocalExecutor;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     ffi::CString,
     rc::Rc,
-    sync::RwLock,
+    sync::{
+        RwLock,
+        mpsc::{Receiver, Sender, TryRecvError, channel},
+    },
+    thread::JoinHandle,
 };
 
-use crate::plugins::{discovery::FoundPlugin, timers::Timers, ui_host::PluginUiHost};
+use crate::{
+    audio_graph::{self, clap_adapter::get_audio_graph_node_desc_for_clap_plugin},
+    plugins::{discovery::FoundPlugin, timers::Timers, ui_host::PluginUiHost},
+};
 
 pub mod discovery;
 mod timers;
@@ -32,79 +36,154 @@ mod ui_host;
 #[derive(Debug, Hash, Copy, Clone, Eq, PartialEq)]
 pub struct ClapPluginId(usize);
 
-pub trait MainThreadSpawn: Clone + 'static {
-    fn spawn(&self, future: impl Future<Output = ()> + 'static);
+pub struct ClapPluginManager {
+    sender: Sender<Message>,
+    _plugin_host: JoinHandle<()>,
 }
 
-pub struct ClapPluginManager<SPAWNER: MainThreadSpawn> {
-    spawner: SPAWNER,
-    plugins: RefCell<HashMap<ClapPluginId, Rc<ClapPlugin>>>,
-    next_id: Cell<ClapPluginId>,
-    sender: UnboundedSender<Message>,
-    gui_sender: UnboundedSender<GuiMessage>,
-    plugin_ui_host: Rc<PluginUiHost<SPAWNER>>,
-}
+impl ClapPluginManager {
+    pub fn new() -> Rc<Self> {
+        let (sender, receiver) = channel();
+        let (gui_sender, gui_receiver) = channel();
 
-impl<SPAWNER: MainThreadSpawn> ClapPluginManager<SPAWNER> {
-    pub fn new(spawner: SPAWNER) -> Rc<Self> {
-        let (sender, receiver) = unbounded();
-        let (gui_sender, gui_receiver) = unbounded();
+        let plugin_host = {
+            let sender = sender.clone();
+            std::thread::spawn(move || {
+                let host = PluginHostThread::new(sender, receiver, gui_sender, gui_receiver);
+                host.run();
+            })
+        };
 
-        let plugin_ui_host = PluginUiHost::new(spawner.clone(), gui_receiver);
-
-        let this = Rc::new(Self {
-            spawner,
-            plugins: RefCell::new(HashMap::new()),
-            next_id: Cell::new(ClapPluginId(1)),
+        Rc::new(Self {
             sender,
-            gui_sender,
-            plugin_ui_host,
-        });
-
-        this.clone().message_handler(receiver);
-
-        this
-    }
-
-    fn message_handler(self: Rc<Self>, mut receiver: UnboundedReceiver<Message>) {
-        self.clone().spawner.spawn(async move {
-            println!("[message_handler] start");
-
-            while let Some(Message { plugin_id, payload }) = receiver.next().await {
-                let plugin = self.get_plugin(plugin_id);
-
-                match payload {
-                    MessagePayload::RunOnMainThread => {
-                        plugin.plugin.borrow_mut().call_on_main_thread_callback();
-                    }
-                }
-            }
-            println!("[message_handler] end");
+            _plugin_host: plugin_host,
         })
     }
 
-    pub async fn create_plugin(&self, plugin: &FoundPlugin) -> Rc<ClapPlugin> {
-        let id = self.next_id.get();
-        self.next_id.set(ClapPluginId(id.0 + 1));
+    pub async fn create_plugin(&self, plugin: FoundPlugin) -> ClapPluginId {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Message::CreatePlugin(plugin, sender))
+            .unwrap();
 
-        let clap_plugin =
-            ClapPlugin::new(id, plugin, self.sender.clone(), self.gui_sender.clone()).await;
-        let old_plugin = self.plugins.borrow_mut().insert(id, clap_plugin.clone());
-        assert!(old_plugin.is_none());
-
-        clap_plugin
+        receiver.await.unwrap()
     }
 
-    pub fn get_plugin(&self, clap_plugin_id: ClapPluginId) -> Rc<ClapPlugin> {
+    pub fn show_gui(&self, clap_plugin_id: ClapPluginId) {
+        self.sender.send(Message::ShowGui(clap_plugin_id)).unwrap();
+    }
+
+    pub async fn has_gui(&self, _clap_plugin_id: ClapPluginId) -> bool {
+        todo!();
+    }
+
+    pub async fn get_audio_graph_node_desc(
+        &self,
+        clap_plugin_id: ClapPluginId,
+    ) -> audio_graph::NodeDesc {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Message::GetAudioGraphNodeDesc(clap_plugin_id, sender))
+            .unwrap();
+        receiver.await.unwrap()
+    }
+}
+
+struct PluginHostThread {
+    executor: LocalExecutor<'static>,
+    plugins: RefCell<HashMap<ClapPluginId, Rc<ClapPlugin>>>,
+    next_id: Cell<ClapPluginId>,
+    sender: Sender<Message>,
+    receiver: Receiver<Message>,
+    gui_sender: Sender<GuiMessage>,
+    plugin_ui_host: Rc<PluginUiHost>,
+}
+
+impl PluginHostThread {
+    fn new(
+        sender: Sender<Message>,
+        receiver: Receiver<Message>,
+        gui_sender: Sender<GuiMessage>,
+        gui_receiver: Receiver<GuiMessage>,
+    ) -> Rc<Self> {
+        Rc::new(Self {
+            executor: LocalExecutor::new(),
+            plugins: RefCell::new(HashMap::new()),
+            next_id: Cell::new(ClapPluginId(1)),
+            sender,
+            receiver,
+            gui_sender,
+            plugin_ui_host: PluginUiHost::new(gui_receiver),
+        })
+    }
+
+    fn run(self: Rc<Self>) {
+        loop {
+            self.message_handler();
+            self.plugin_ui_host.run_message_handlers();
+            while self.executor.try_tick() {}
+        }
+    }
+
+    fn message_handler(self: &Rc<Self>) -> bool {
+        loop {
+            match self.receiver.try_recv() {
+                Err(TryRecvError::Empty) => return true,
+                Err(TryRecvError::Disconnected) => return false,
+                Ok(message) => match message {
+                    Message::CreatePlugin(found_plugin, sender) => {
+                        let this = self.clone();
+                        self.executor
+                            .spawn(async move {
+                                let id = this.next_id.get();
+                                this.next_id.set(ClapPluginId(id.0 + 1));
+
+                                let clap_plugin = ClapPlugin::new(
+                                    id,
+                                    &found_plugin,
+                                    this.sender.clone(),
+                                    this.gui_sender.clone(),
+                                )
+                                .await;
+                                let old_plugin =
+                                    this.plugins.borrow_mut().insert(id, clap_plugin.clone());
+                                assert!(old_plugin.is_none());
+
+                                sender.send(id).unwrap();
+                            })
+                            .detach();
+                    }
+                    Message::GetAudioGraphNodeDesc(clap_plugin_id, sender) => {
+                        let clap_plugin = self.get_plugin(clap_plugin_id);
+                        sender
+                            .send(get_audio_graph_node_desc_for_clap_plugin(&clap_plugin))
+                            .unwrap();
+                    }
+                    Message::RunOnMainThread(clap_plugin_id) => {
+                        let clap_plugin = self.get_plugin(clap_plugin_id);
+                        clap_plugin
+                            .plugin
+                            .borrow_mut()
+                            .call_on_main_thread_callback();
+                    }
+                    Message::ShowGui(clap_plugin_id) => {
+                        let clap_plugin = self.get_plugin(clap_plugin_id);
+
+                        let this = self.clone();
+                        self.executor
+                            .spawn(async move {
+                                println!("show gui!");
+                                this.plugin_ui_host.show_gui(&clap_plugin).await;
+                            })
+                            .detach();
+                    }
+                },
+            }
+        }
+    }
+
+    fn get_plugin(&self, clap_plugin_id: ClapPluginId) -> Rc<ClapPlugin> {
         self.plugins.borrow().get(&clap_plugin_id).unwrap().clone()
-    }
-
-    pub async fn show_gui(&self, clap_plugin: &Rc<ClapPlugin>) {
-        self.plugin_ui_host.show_gui(clap_plugin).await;
-    }
-
-    pub fn has_gui(&self, clap_plugin: &Rc<ClapPlugin>) -> bool {
-        self.plugin_ui_host.has_gui(clap_plugin)
     }
 }
 
@@ -118,8 +197,8 @@ impl ClapPlugin {
     async fn new(
         clap_plugin_id: ClapPluginId,
         plugin: &FoundPlugin,
-        sender: UnboundedSender<Message>,
-        gui_sender: UnboundedSender<GuiMessage>,
+        sender: Sender<Message>,
+        gui_sender: Sender<GuiMessage>,
     ) -> Rc<Self> {
         let bundle = plugin.load_bundle();
         bundle
@@ -204,13 +283,11 @@ impl ClapPlugin {
     }
 }
 
-struct Message {
-    plugin_id: ClapPluginId,
-    payload: MessagePayload,
-}
-
-enum MessagePayload {
-    RunOnMainThread,
+enum Message {
+    CreatePlugin(FoundPlugin, oneshot::Sender<ClapPluginId>),
+    GetAudioGraphNodeDesc(ClapPluginId, oneshot::Sender<audio_graph::NodeDesc>),
+    ShowGui(ClapPluginId),
+    RunOnMainThread(ClapPluginId),
 }
 
 #[derive(Debug)]
@@ -243,8 +320,8 @@ impl HostHandlers for ClapPlugin {
 }
 
 pub struct ClapPluginShared {
-    channel: UnboundedSender<Message>,
-    gui_channel: UnboundedSender<GuiMessage>,
+    channel: Sender<Message>,
+    gui_channel: Sender<GuiMessage>,
     plugin_id: ClapPluginId,
     extensions: RwLock<Extensions>,
 }
@@ -256,18 +333,9 @@ pub struct Extensions {
 }
 
 impl ClapPluginShared {
-    fn send_message(&self, payload: MessagePayload) {
-        self.channel
-            .unbounded_send(Message {
-                plugin_id: self.plugin_id,
-                payload,
-            })
-            .expect("unbounded_send should always succeed");
-    }
-
     fn send_gui_message(&self, payload: GuiMessagePayload) {
         self.gui_channel
-            .unbounded_send(GuiMessage {
+            .send(GuiMessage {
                 plugin_id: self.plugin_id,
                 payload,
             })
@@ -342,7 +410,9 @@ impl<'a> host::SharedHandler<'a> for ClapPluginShared {
     }
 
     fn request_callback(&self) {
-        self.send_message(MessagePayload::RunOnMainThread);
+        self.channel
+            .send(Message::RunOnMainThread(self.plugin_id))
+            .unwrap();
     }
 }
 

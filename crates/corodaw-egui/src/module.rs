@@ -5,16 +5,16 @@ use std::{
 
 use eframe::egui::{self, Color32, Margin, Slider, Stroke};
 use engine::{
-    audio_graph::{AudioGraph, clap_adapter::get_audio_graph_node_desc_for_clap_plugin},
+    audio_graph::AudioGraph,
     builtin::GainControl,
-    plugins::{ClapPlugin, ClapPluginManager, discovery::FoundPlugin},
+    plugins::{ClapPluginId, ClapPluginManager, discovery::FoundPlugin},
 };
 
-use crate::{Corodaw, Spawner};
+use crate::Corodaw;
 
 pub struct Module {
     name: String,
-    plugin: Rc<ClapPlugin>,
+    clap_plugin_id: ClapPluginId,
     gain: Rc<GainControl>,
     gain_value: Cell<f32>,
 }
@@ -22,24 +22,26 @@ pub struct Module {
 impl Module {
     pub async fn new(
         name: String,
-        plugin: Rc<FoundPlugin>,
-        manager: Rc<ClapPluginManager<Spawner>>,
+        plugin: FoundPlugin,
+        manager: Rc<ClapPluginManager>,
         audio_graph: Rc<RefCell<AudioGraph>>,
     ) -> Self {
-        let plugin = manager.create_plugin(&plugin).await;
+        let clap_plugin_id = manager.create_plugin(plugin).await;
 
         let gain_value = 1.0;
         let gain = Rc::new(GainControl::default());
 
+        let plugin_node_desc = manager.get_audio_graph_node_desc(clap_plugin_id).await;
+
         let mut audio_graph = audio_graph.borrow_mut();
-        let plugin_id = audio_graph.add_node(get_audio_graph_node_desc_for_clap_plugin(&plugin));
+        let plugin_id = audio_graph.add_node(plugin_node_desc);
         let gain_id = audio_graph.add_node(gain.get_node_desc(gain_value));
         audio_graph.connect(plugin_id, 0, gain_id, 0);
         audio_graph.set_output_node(gain_id, true);
 
         Self {
             name,
-            plugin,
+            clap_plugin_id,
             gain,
             gain_value: Cell::new(gain_value),
         }
@@ -64,11 +66,12 @@ impl Module {
                         self.gain.set_gain(gain_value);
                     }
 
-                    let has_gui = corodaw.has_plugin_gui(&self.plugin);
+                    // TODO
+                    let has_gui = false;
 
                     ui.add_enabled_ui(!has_gui, |ui| {
                         if ui.button("Show").clicked() {
-                            corodaw.show_plugin_ui(self.plugin.clone());
+                            corodaw.show_plugin_ui(self.clap_plugin_id);
                         }
                     });
                 });

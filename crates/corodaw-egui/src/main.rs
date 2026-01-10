@@ -5,7 +5,7 @@ use engine::{
     audio::Audio,
     audio_graph::{AudioGraph, audio_graph},
     plugins::{
-        ClapPlugin, ClapPluginManager, MainThreadSpawn,
+        ClapPluginId, ClapPluginManager,
         discovery::{FoundPlugin, get_plugins},
     },
 };
@@ -18,10 +18,10 @@ mod module;
 struct Corodaw {
     executor: Rc<LocalExecutor<'static>>,
 
-    found_plugins: Vec<Rc<FoundPlugin>>,
-    manager: Rc<ClapPluginManager<Spawner>>,
+    found_plugins: Vec<FoundPlugin>,
+    manager: Rc<ClapPluginManager>,
 
-    selected_plugin: Option<Rc<FoundPlugin>>,
+    selected_plugin: Option<FoundPlugin>,
 
     modules: Rc<RefCell<Vec<Module>>>,
     counter: u32,
@@ -32,7 +32,7 @@ struct Corodaw {
 
 impl Corodaw {
     fn new(executor: Rc<LocalExecutor<'static>>) -> Self {
-        let manager = ClapPluginManager::new(Spawner(executor.clone()));
+        let manager = ClapPluginManager::new();
         let (audio_graph, audio_graph_worker) = audio_graph();
         let audio = Audio::new(audio_graph_worker).unwrap();
 
@@ -75,23 +75,14 @@ impl Corodaw {
         });
     }
 
-    fn show_plugin_ui(&self, clap_plugin: Rc<ClapPlugin>) {
+    fn show_plugin_ui(&self, clap_plugin_id: ClapPluginId) {
         let manager = self.manager.clone();
-
-        self.executor
-            .spawn(async move {
-                manager.show_gui(&clap_plugin).await;
-            })
-            .detach();
-    }
-
-    fn has_plugin_gui(&self, plugin: &Rc<ClapPlugin>) -> bool {
-        self.manager.has_gui(plugin)
+        manager.show_gui(clap_plugin_id);
     }
 
     fn add_module(&mut self) {
-        let plugin = self.selected_plugin.as_ref().unwrap().clone();
-        let name = format!("Module {}: {}", self.counter, plugin.name);
+        let found_plugin = self.selected_plugin.as_ref().unwrap().clone();
+        let name = format!("Module {}: {}", self.counter, found_plugin.name);
         self.counter += 1;
 
         let modules = self.modules.clone();
@@ -100,27 +91,18 @@ impl Corodaw {
 
         self.executor
             .spawn(async move {
-                let module = Module::new(name, plugin, manager, audio_graph).await;
+                let module = Module::new(name, found_plugin, manager, audio_graph).await;
                 modules.borrow_mut().push(module);
             })
             .detach();
     }
 }
 
-fn display_found_plugin(value: &Option<Rc<FoundPlugin>>) -> &str {
+fn display_found_plugin(value: &Option<FoundPlugin>) -> &str {
     value
         .as_ref()
         .map(|plugin| plugin.name.as_str())
         .unwrap_or("<none>")
-}
-
-#[derive(Clone)]
-struct Spawner(Rc<LocalExecutor<'static>>);
-
-impl MainThreadSpawn for Spawner {
-    fn spawn(&self, future: impl Future<Output = ()> + 'static) {
-        self.0.spawn(future).detach();
-    }
 }
 
 fn main() -> eframe::Result {

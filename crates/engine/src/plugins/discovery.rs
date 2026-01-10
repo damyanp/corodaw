@@ -1,8 +1,6 @@
 use std::{
-    cell::RefCell,
     io::Write,
     path::{Path, PathBuf},
-    rc::Rc,
 };
 
 use clack_host::{bundle::PluginBundle, plugin::PluginDescriptor};
@@ -14,9 +12,6 @@ pub struct FoundPlugin {
     pub id: String,
     pub name: String,
     pub path: PathBuf,
-
-    #[serde(skip)]
-    bundle: Rc<RefCell<Option<PluginBundle>>>,
 }
 
 impl PartialEq for FoundPlugin {
@@ -26,11 +21,7 @@ impl PartialEq for FoundPlugin {
 }
 
 impl FoundPlugin {
-    fn try_from_descriptor(
-        descriptor: &PluginDescriptor,
-        path: PathBuf,
-        bundle: PluginBundle,
-    ) -> Option<Self> {
+    fn try_from_descriptor(descriptor: &PluginDescriptor, path: PathBuf) -> Option<Self> {
         let id = descriptor
             .id()
             .and_then(|id| id.to_str().ok())
@@ -43,31 +34,20 @@ impl FoundPlugin {
         if let Some(id) = id
             && let Some(name) = name
         {
-            Some(Self {
-                id,
-                name,
-                path,
-                bundle: Rc::new(RefCell::new(Some(bundle))),
-            })
+            Some(Self { id, name, path })
         } else {
             None
         }
     }
 
     pub fn load_bundle(&self) -> PluginBundle {
-        if let Some(bundle) = self.bundle.borrow().as_ref() {
-            bundle.clone()
-        } else {
-            println!("Loading bundle from {}", self.path.display());
-            let bundle = unsafe { PluginBundle::load(&self.path) }
-                .expect("Currently no error handling around loading bundles!");
-            self.bundle.replace(Some(bundle.clone()));
-            bundle
-        }
+        println!("Loading bundle from {}", self.path.display());
+        unsafe { PluginBundle::load(&self.path) }
+            .expect("Currently no error handling around loading bundles!")
     }
 }
 
-pub fn get_plugins() -> Vec<Rc<FoundPlugin>> {
+pub fn get_plugins() -> Vec<FoundPlugin> {
     load_plugin_cache()
         .unwrap_or_else(|| {
             let plugins = find_plugins();
@@ -75,7 +55,6 @@ pub fn get_plugins() -> Vec<Rc<FoundPlugin>> {
             plugins
         })
         .into_iter()
-        .map(Rc::new)
         .collect()
 }
 
@@ -142,7 +121,7 @@ fn get_plugins_in_bundle(path: &Path, bundle: &PluginBundle) -> Vec<FoundPlugin>
             factory
                 .plugin_descriptors()
                 .filter_map(|descriptor| {
-                    FoundPlugin::try_from_descriptor(descriptor, path.to_path_buf(), bundle.clone())
+                    FoundPlugin::try_from_descriptor(descriptor, path.to_path_buf())
                 })
                 .collect()
         })
