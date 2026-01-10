@@ -1,6 +1,9 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use eframe::egui::{self, ComboBox};
+use eframe::{
+    UserEvent,
+    egui::{self, ComboBox},
+};
 use engine::{
     audio::Audio,
     audio_graph::{AudioGraph, audio_graph},
@@ -10,6 +13,7 @@ use engine::{
     },
 };
 use smol::LocalExecutor;
+use winit::event_loop::EventLoop;
 
 use crate::module::Module;
 
@@ -53,7 +57,7 @@ impl Corodaw {
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(self.selected_plugin.is_some(), |ui| {
                     if ui.button("Add Module").clicked() {
-                        self.add_module();
+                        self.add_module(ctx.clone());
                     }
                 });
                 ComboBox::from_id_salt("Plugin")
@@ -80,7 +84,7 @@ impl Corodaw {
         manager.show_gui(clap_plugin_id);
     }
 
-    fn add_module(&mut self) {
+    fn add_module(&mut self, ctx: egui::Context) {
         let found_plugin = self.selected_plugin.as_ref().unwrap().clone();
         let name = format!("Module {}: {}", self.counter, found_plugin.name);
         self.counter += 1;
@@ -93,6 +97,7 @@ impl Corodaw {
             .spawn(async move {
                 let module = Module::new(name, found_plugin, manager, audio_graph).await;
                 modules.borrow_mut().push(module);
+                ctx.request_repaint();
             })
             .detach();
     }
@@ -108,29 +113,40 @@ fn display_found_plugin(value: &Option<FoundPlugin>) -> &str {
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions::default();
 
+    let executor = Rc::new(LocalExecutor::new());
+
     struct App {
         corodaw: Corodaw,
-        executor: Rc<LocalExecutor<'static>>,
     }
     impl eframe::App for App {
         fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-            while self.executor.try_tick() {}
-
             self.corodaw.update(ctx);
         }
     }
 
-    eframe::run_native(
+    let mut eventloop = EventLoop::<UserEvent>::with_user_event().build()?;
+
+    let mut app = eframe::create_native(
         "Corodaw",
         options,
         Box::new(|_| {
-            let executor = Rc::new(LocalExecutor::new());
             let corodaw = Corodaw::new(executor.clone());
 
-            Ok(Box::new(App { executor, corodaw }))
+            Ok(Box::new(App { corodaw }))
         }),
-    )
-    .unwrap();
+        &eventloop,
+    );
+
+    loop {
+        while executor.try_tick() {}
+
+        match app.pump_eframe_app(&mut eventloop, Some(Duration::from_millis(16))) {
+            eframe::EframePumpStatus::Continue(_control_flow) => (),
+            eframe::EframePumpStatus::Exit(_) => {
+                break;
+            }
+        }
+    }
 
     println!("[main] exit");
 
