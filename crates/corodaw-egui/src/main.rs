@@ -32,7 +32,7 @@ struct Corodaw {
 
 impl Corodaw {
     fn new(executor: Rc<LocalExecutor<'static>>) -> Self {
-        let manager = ClapPluginManager::new();
+        let manager = Rc::new(ClapPluginManager::new());
         let (audio_graph, audio_graph_worker) = audio_graph();
         let audio = Audio::new(audio_graph_worker).unwrap();
 

@@ -42,8 +42,14 @@ pub struct ClapPluginManager {
     _plugin_host: JoinHandle<()>,
 }
 
+impl Default for ClapPluginManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClapPluginManager {
-    pub fn new() -> Rc<Self> {
+    pub fn new() -> Self {
         let (sender, receiver) = channel();
 
         let plugin_host = {
@@ -54,10 +60,10 @@ impl ClapPluginManager {
             })
         };
 
-        Rc::new(Self {
+        Self {
             sender,
             _plugin_host: plugin_host,
-        })
+        }
     }
 
     pub async fn create_plugin(&self, plugin: FoundPlugin) -> ClapPluginId {

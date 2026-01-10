@@ -54,7 +54,7 @@ impl Corodaw {
         let (audio_graph, audio_graph_worker) = audio_graph();
         let audio = Audio::new(audio_graph_worker).unwrap();
 
-        let clap_plugin_manager = ClapPluginManager::new();
+        let clap_plugin_manager = Rc::new(ClapPluginManager::new());
 
         let searchable_plugins = SearchableVec::new(
             plugins
