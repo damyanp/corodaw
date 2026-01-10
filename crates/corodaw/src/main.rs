@@ -101,6 +101,8 @@ impl Corodaw {
                 corodaw.modules.push(module);
             })
             .unwrap();
+
+            cx.refresh().unwrap();
         })
         .detach();
     }
