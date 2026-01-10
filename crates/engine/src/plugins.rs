@@ -16,6 +16,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     ffi::CString,
+    pin::Pin,
     rc::Rc,
     sync::{
         RwLock,
@@ -96,7 +97,7 @@ struct PluginHostThread {
     sender: Sender<Message>,
     receiver: Receiver<Message>,
     gui_sender: Sender<GuiMessage>,
-    plugin_ui_host: Rc<PluginUiHost>,
+    plugin_ui_host: Pin<Box<PluginUiHost>>,
 }
 
 impl PluginHostThread {
@@ -113,7 +114,7 @@ impl PluginHostThread {
             sender,
             receiver,
             gui_sender,
-            plugin_ui_host: PluginUiHost::new(gui_receiver),
+            plugin_ui_host: Pin::new(Box::new(PluginUiHost::new(gui_receiver))),
         })
     }
 
