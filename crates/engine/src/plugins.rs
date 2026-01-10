@@ -45,12 +45,11 @@ pub struct ClapPluginManager {
 impl ClapPluginManager {
     pub fn new() -> Rc<Self> {
         let (sender, receiver) = channel();
-        let (gui_sender, gui_receiver) = channel();
 
         let plugin_host = {
             let sender = sender.clone();
             std::thread::spawn(move || {
-                let host = PluginHostThread::new(sender, receiver, gui_sender, gui_receiver);
+                let host = PluginHostThread::new(sender, receiver);
                 host.run();
             })
         };
@@ -96,25 +95,18 @@ struct PluginHostThread {
     next_id: Cell<ClapPluginId>,
     sender: Sender<Message>,
     receiver: Receiver<Message>,
-    gui_sender: Sender<GuiMessage>,
     plugin_ui_host: Pin<Box<PluginUiHost>>,
 }
 
 impl PluginHostThread {
-    fn new(
-        sender: Sender<Message>,
-        receiver: Receiver<Message>,
-        gui_sender: Sender<GuiMessage>,
-        gui_receiver: Receiver<GuiMessage>,
-    ) -> Rc<Self> {
+    fn new(sender: Sender<Message>, receiver: Receiver<Message>) -> Rc<Self> {
         Rc::new(Self {
             executor: LocalExecutor::new(),
             plugins: RefCell::new(HashMap::new()),
             next_id: Cell::new(ClapPluginId(1)),
             sender,
             receiver,
-            gui_sender,
-            plugin_ui_host: Pin::new(Box::new(PluginUiHost::new(gui_receiver))),
+            plugin_ui_host: Pin::new(Box::new(PluginUiHost::new())),
         })
     }
 
@@ -139,13 +131,8 @@ impl PluginHostThread {
                                 let id = this.next_id.get();
                                 this.next_id.set(ClapPluginId(id.0 + 1));
 
-                                let clap_plugin = ClapPlugin::new(
-                                    id,
-                                    &found_plugin,
-                                    this.sender.clone(),
-                                    this.gui_sender.clone(),
-                                )
-                                .await;
+                                let clap_plugin =
+                                    ClapPlugin::new(id, &found_plugin, this.sender.clone()).await;
                                 let old_plugin =
                                     this.plugins.borrow_mut().insert(id, clap_plugin.clone());
                                 assert!(old_plugin.is_none());
@@ -178,6 +165,12 @@ impl PluginHostThread {
                             })
                             .detach();
                     }
+                    Message::ResizeHintsChanged(clap_plugin_id) => {
+                        self.plugin_ui_host.resize_hints_changed(clap_plugin_id);
+                    }
+                    Message::RequestResize(clap_plugin_id, gui_size) => {
+                        self.plugin_ui_host.request_resize(clap_plugin_id, gui_size);
+                    }
                 },
             }
         }
@@ -199,7 +192,6 @@ impl ClapPlugin {
         clap_plugin_id: ClapPluginId,
         plugin: &FoundPlugin,
         sender: Sender<Message>,
-        gui_sender: Sender<GuiMessage>,
     ) -> Rc<Self> {
         let bundle = plugin.load_bundle();
         bundle
@@ -214,7 +206,6 @@ impl ClapPlugin {
 
         let shared = ClapPluginShared {
             channel: sender,
-            gui_channel: gui_sender,
             plugin_id: clap_plugin_id,
             extensions: RwLock::default(),
         };
@@ -289,18 +280,8 @@ enum Message {
     GetAudioGraphNodeDesc(ClapPluginId, oneshot::Sender<audio_graph::NodeDesc>),
     ShowGui(ClapPluginId),
     RunOnMainThread(ClapPluginId),
-}
-
-#[derive(Debug)]
-pub struct GuiMessage {
-    pub plugin_id: ClapPluginId,
-    pub payload: GuiMessagePayload,
-}
-
-#[derive(Debug)]
-pub enum GuiMessagePayload {
-    ResizeHintsChanged,
-    RequestResize(GuiSize),
+    ResizeHintsChanged(ClapPluginId),
+    RequestResize(ClapPluginId, GuiSize),
 }
 
 impl HostHandlers for ClapPlugin {
@@ -322,7 +303,6 @@ impl HostHandlers for ClapPlugin {
 
 pub struct ClapPluginShared {
     channel: Sender<Message>,
-    gui_channel: Sender<GuiMessage>,
     plugin_id: ClapPluginId,
     extensions: RwLock<Extensions>,
 }
@@ -333,17 +313,6 @@ pub struct Extensions {
     audio_ports: Option<PluginAudioPorts>,
 }
 
-impl ClapPluginShared {
-    fn send_gui_message(&self, payload: GuiMessagePayload) {
-        self.gui_channel
-            .send(GuiMessage {
-                plugin_id: self.plugin_id,
-                payload,
-            })
-            .expect("unbounded_send should always succeed");
-    }
-}
-
 impl HostLogImpl for ClapPluginShared {
     fn log(&self, severity: clack_extensions::log::LogSeverity, message: &str) {
         println!("[host log] {}: {}", severity, message);
@@ -352,11 +321,14 @@ impl HostLogImpl for ClapPluginShared {
 
 impl HostGuiImpl for ClapPluginShared {
     fn resize_hints_changed(&self) {
-        self.send_gui_message(GuiMessagePayload::ResizeHintsChanged);
+        self.channel
+            .send(Message::ResizeHintsChanged(self.plugin_id))
+            .unwrap();
     }
 
     fn request_resize(&self, new_size: GuiSize) -> Result<(), clack_host::prelude::HostError> {
-        self.send_gui_message(GuiMessagePayload::RequestResize(new_size));
+        self.channel
+            .send(Message::RequestResize(self.plugin_id, new_size))?;
         Ok(())
     }
 

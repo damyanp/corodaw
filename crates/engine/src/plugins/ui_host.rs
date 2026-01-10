@@ -1,8 +1,6 @@
-use std::{
-    cell::RefCell, collections::HashMap, hash::Hash, pin::Pin, rc::Rc, sync::mpsc::Receiver,
-};
+use std::{cell::RefCell, collections::HashMap, hash::Hash, pin::Pin, rc::Rc};
 
-use crate::plugins::{ClapPlugin, ClapPluginId, GuiMessage, GuiMessagePayload};
+use crate::plugins::{ClapPlugin, ClapPluginId};
 use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui, Window};
 use windows::{
     Win32::{
@@ -33,8 +31,6 @@ unsafe impl Send for WindowHandle {}
 unsafe impl Sync for WindowHandle {}
 
 pub struct PluginUiHost {
-    gui_receiver: Receiver<GuiMessage>,
-
     plugin_to_window: RefCell<HashMap<ClapPluginId, WindowHandle>>,
     window_to_plugin: RefCell<HashMap<WindowHandle, Rc<ClapPlugin>>>,
 
@@ -42,9 +38,8 @@ pub struct PluginUiHost {
 }
 
 impl PluginUiHost {
-    pub fn new(gui_receiver: Receiver<GuiMessage>) -> PluginUiHost {
+    pub fn new() -> PluginUiHost {
         Self {
-            gui_receiver,
             plugin_to_window: RefCell::default(),
             window_to_plugin: RefCell::default(),
             wndclass_name: Self::register_window_class(),
@@ -73,7 +68,6 @@ impl PluginUiHost {
     }
 
     pub fn run_message_handlers(&self) {
-        self.run_gui_message_handler();
         self.pump_windows_message_loop();
     }
 
@@ -103,47 +97,42 @@ impl PluginUiHost {
         }
     }
 
-    fn run_gui_message_handler(&self) {
-        for GuiMessage { plugin_id, payload } in self.gui_receiver.try_iter() {
-            match payload {
-                GuiMessagePayload::ResizeHintsChanged => {
-                    let hwnd = self.plugin_to_window.borrow().get(&plugin_id).cloned();
-                    let clap_plugin = hwnd
-                        .as_ref()
-                        .and_then(|wnd| self.window_to_plugin.borrow().get(wnd).cloned());
-                    if let Some(hwnd) = hwnd
-                        && let Some(clap_plugin) = clap_plugin
-                    {
-                        let gui = clap_plugin.plugin.borrow().access_shared_handler(|h| {
-                            h.extensions.read().unwrap().plugin_gui.unwrap()
-                        });
+    pub fn resize_hints_changed(&self, clap_plugin_id: ClapPluginId) {
+        let hwnd = self.plugin_to_window.borrow().get(&clap_plugin_id).cloned();
+        let clap_plugin = hwnd
+            .as_ref()
+            .and_then(|wnd| self.window_to_plugin.borrow().get(wnd).cloned());
+        if let Some(hwnd) = hwnd
+            && let Some(clap_plugin) = clap_plugin
+        {
+            let gui = clap_plugin
+                .plugin
+                .borrow()
+                .access_shared_handler(|h| h.extensions.read().unwrap().plugin_gui.unwrap());
 
-                        let is_resizable = gui
-                            .get_resize_hints(&mut clap_plugin.plugin.borrow_mut().plugin_handle())
-                            .map(|h| h.can_resize_horizontally && h.can_resize_vertically)
-                            .unwrap_or(false);
+            let is_resizable = gui
+                .get_resize_hints(&mut clap_plugin.plugin.borrow_mut().plugin_handle())
+                .map(|h| h.can_resize_horizontally && h.can_resize_vertically)
+                .unwrap_or(false);
 
-                        unsafe {
-                            let old_style =
-                                WINDOW_STYLE(GetWindowLongPtrA(hwnd.0, GWL_STYLE) as u32);
-                            let new_style = if is_resizable {
-                                old_style | WS_SIZEBOX
-                            } else {
-                                old_style & !WS_SIZEBOX
-                            };
-                            if old_style != new_style {
-                                SetWindowLongPtrA(hwnd.0, GWL_STYLE, new_style.0 as isize);
-                            }
-                        }
-                    }
-                }
-                GuiMessagePayload::RequestResize(gui_size) => {
-                    let hwnd = self.plugin_to_window.borrow().get(&plugin_id).cloned();
-                    if let Some(hwnd) = hwnd {
-                        set_window_client_area(hwnd.0, gui_size);
-                    }
+            unsafe {
+                let old_style = WINDOW_STYLE(GetWindowLongPtrA(hwnd.0, GWL_STYLE) as u32);
+                let new_style = if is_resizable {
+                    old_style | WS_SIZEBOX
+                } else {
+                    old_style & !WS_SIZEBOX
+                };
+                if old_style != new_style {
+                    SetWindowLongPtrA(hwnd.0, GWL_STYLE, new_style.0 as isize);
                 }
             }
+        }
+    }
+
+    pub fn request_resize(&self, clap_plugin_id: ClapPluginId, gui_size: GuiSize) {
+        let hwnd = self.plugin_to_window.borrow().get(&clap_plugin_id).cloned();
+        if let Some(hwnd) = hwnd {
+            set_window_client_area(hwnd.0, gui_size);
         }
     }
 
