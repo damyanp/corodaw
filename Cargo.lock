@@ -2038,8 +2038,10 @@ dependencies = [
  "clack-host",
  "cpal",
  "dirs 6.0.0",
+ "fixedbitset",
  "futures",
  "futures-channel",
+ "itertools 0.14.0",
  "serde",
  "serde_json",
  "smol",
@@ -2298,6 +2300,12 @@ name = "find-msvc-tools"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "645cbb3a84e60b7531617d5ae4e57f7e27308f6445f5abf653209ea76dec8dff"
+
+[[package]]
+name = "fixedbitset"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "flate2"

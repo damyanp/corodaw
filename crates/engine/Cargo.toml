@@ -10,8 +10,10 @@ clack-extensions.workspace = true
 clack-host.workspace = true
 cpal.workspace = true
 dirs = "6.0.0"
+fixedbitset = "0.5.7"
 futures.workspace = true
 futures-channel.workspace = true
+itertools = "0.14.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 smol = "2.0.2"
