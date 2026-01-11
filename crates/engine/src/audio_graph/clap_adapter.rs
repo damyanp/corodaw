@@ -22,7 +22,6 @@ impl NodeCreator for ClapPlugin {
         let count_ports = |is_input| {
             self.get_audio_ports(is_input)
                 .into_iter()
-                .map(|port| port)
                 .reduce(|a, b| a + b)
                 .unwrap_or(0)
         };

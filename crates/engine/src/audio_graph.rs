@@ -344,7 +344,7 @@ impl Graph {
                 .map(|node| Some(node.processor))
                 .collect();
 
-            for (id, processor) in (&mut desc.processors).iter_mut().enumerate() {
+            for (id, processor) in desc.processors.iter_mut().enumerate() {
                 if processor.is_none() {
                     std::mem::swap(processor, &mut processors[id]);
                 }
@@ -354,8 +354,7 @@ impl Graph {
         let nodes = desc
             .nodes
             .into_iter()
-            .zip(desc.processors.into_iter())
-            .into_iter()
+            .zip(desc.processors)
             .map(|(n, p)| Node::new(n, p.unwrap()))
             .collect();
 
