@@ -1,8 +1,9 @@
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use engine::{
     audio::Audio,
-    audio_graph::{AudioGraph, audio_graph},
+    audio_graph::{AudioGraph, NodeId},
+    builtin::Summer,
     plugins::{
         ClapPluginManager,
         discovery::{FoundPlugin, get_plugins},
@@ -44,17 +45,20 @@ pub struct Corodaw {
     clap_plugin_manager: Rc<ClapPluginManager>,
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
     modules: Vec<Module>,
+    summer: NodeId,
     counter: u32,
-    audio_graph: Rc<RefCell<AudioGraph>>,
     _audio: Audio,
 }
 
 impl Corodaw {
     fn new(plugins: Vec<FoundPlugin>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let (audio_graph, audio_graph_worker) = audio_graph();
+        let (audio_graph, audio_graph_worker) = AudioGraph::new();
         let audio = Audio::new(audio_graph_worker).unwrap();
 
-        let clap_plugin_manager = Rc::new(ClapPluginManager::new());
+        let summer = audio_graph.add_node(0, 2, Box::new(Summer));
+        audio_graph.set_output_node(summer);
+
+        let clap_plugin_manager = Rc::new(ClapPluginManager::new(audio_graph));
 
         let searchable_plugins = SearchableVec::new(
             plugins
@@ -68,11 +72,25 @@ impl Corodaw {
         Self {
             clap_plugin_manager,
             plugin_selector,
-            modules: Vec::default(), //vec![cx.new(|cx| Module::new(cx, "Master".to_owned()))],
+            modules: Vec::default(),
             counter: 0,
-            audio_graph: Rc::new(RefCell::new(audio_graph)),
             _audio: audio,
+            summer,
         }
+    }
+
+    fn add_module(&mut self, module: Module) {
+        for port in 0..2 {
+            self.clap_plugin_manager.audio_graph.connect_grow_input(
+                self.summer,
+                self.modules.len() * 2 + port,
+                module.get_output_node(),
+                port,
+            );
+        }
+        self.modules.push(module);
+
+        self.clap_plugin_manager.audio_graph.update();
     }
 
     fn on_click(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -86,19 +104,17 @@ impl Corodaw {
         let name = format!("Module {}: {}", self.counter, plugin.name);
         self.counter += 1;
 
-        let audio_graph = self.audio_graph.clone();
-
         cx.spawn(async move |e, cx| {
             let clap_plugin_manager = e
                 .read_with(cx, |corodaw, _| corodaw.clap_plugin_manager.clone())
                 .unwrap();
 
-            let module = Module::new(name, clap_plugin_manager, &plugin, audio_graph, cx).await;
+            let module = Module::new(name, clap_plugin_manager, &plugin, cx).await;
 
             let module = module.expect("TODO: error handling for when module creation fails");
 
             e.update(cx, |corodaw, _| {
-                corodaw.modules.push(module);
+                corodaw.add_module(module);
             })
             .unwrap();
 

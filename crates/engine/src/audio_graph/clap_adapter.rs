@@ -1,4 +1,7 @@
-use std::cell::{Ref, RefCell, RefMut};
+use std::{
+    cell::{RefCell, RefMut},
+    fmt::Debug,
+};
 
 use audio_blocks::AudioBlockSequential;
 use clack_host::{
@@ -10,64 +13,80 @@ use clack_host::{
 };
 
 use crate::{
-    audio_graph::{AudioPortDesc, NodeDesc, Processor},
+    audio_graph::{AudioGraph, Graph, Node, NodeCreator, NodeId, Processor},
     plugins::ClapPlugin,
 };
 
-pub fn get_audio_graph_node_desc_for_clap_plugin(clap_plugin: &ClapPlugin) -> NodeDesc {
-    let collect_ports = |is_input| {
-        clap_plugin
-            .get_audio_ports(is_input)
-            .into_iter()
-            .map(|port| AudioPortDesc {
-                num_channels: port
-                    .try_into()
-                    .expect("There should be no more channels than can fit in a u16"),
-            })
-    };
+impl NodeCreator for ClapPlugin {
+    fn create_node(&self, graph: &AudioGraph) -> NodeId {
+        let count_ports = |is_input| {
+            self.get_audio_ports(is_input)
+                .into_iter()
+                .map(|port| port)
+                .reduce(|a, b| a + b)
+                .unwrap_or(0)
+        };
 
-    NodeDesc {
-        processor: RefCell::new(Box::new(ClapPluginProcessor::new(clap_plugin))),
-        audio_inputs: collect_ports(true).collect(),
-        audio_outputs: collect_ports(false).collect(),
+        let audio_inputs = count_ports(true);
+        let audio_outputs = count_ports(false);
+
+        graph.add_node(
+            audio_inputs as usize,
+            audio_outputs as usize,
+            Box::new(ClapPluginProcessor::new(self)),
+        )
     }
 }
 
-struct ClapPluginProcessor {
-    plugin_audio_processor: PluginAudioProcessor<ClapPlugin>,
-    audio_ports: AudioPorts,
+pub struct ClapPluginProcessor {
+    plugin_audio_processor: RefCell<PluginAudioProcessor<ClapPlugin>>,
+    audio_ports: RefCell<AudioPorts>,
+    num_outputs: usize,
+}
+
+impl Debug for ClapPluginProcessor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClapPluginProcessor").finish()
+    }
 }
 
 impl ClapPluginProcessor {
-    fn new(clap_plugin: &ClapPlugin) -> Self {
+    pub fn new(clap_plugin: &ClapPlugin) -> Self {
         let output_ports = clap_plugin.get_audio_ports(false);
         let total_channel_count = output_ports
             .iter()
             .copied()
             .reduce(|a, b| a + b)
-            .unwrap_or(0);
+            .unwrap_or(0) as usize;
 
-        let audio_ports =
-            AudioPorts::with_capacity(total_channel_count as usize, output_ports.len());
+        let audio_ports = AudioPorts::with_capacity(total_channel_count, output_ports.len());
 
         Self {
-            plugin_audio_processor: clap_plugin.get_audio_processor(),
-            audio_ports,
+            plugin_audio_processor: RefCell::new(clap_plugin.get_audio_processor()),
+            audio_ports: RefCell::new(audio_ports),
+            num_outputs: total_channel_count,
         }
+    }
+
+    pub fn get_total_output_channels(&self) -> usize {
+        self.num_outputs
     }
 }
 
 impl Processor for ClapPluginProcessor {
     fn process(
-        &mut self,
-        _in_audio_buffers: &[Option<Ref<'_, AudioBlockSequential<f32>>>],
+        &self,
+        _: &Graph,
+        _: &Node,
         out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
     ) {
-        let processor = if self.plugin_audio_processor.is_started() {
-            self.plugin_audio_processor.as_started_mut()
+        let mut processor = self.plugin_audio_processor.borrow_mut();
+
+        let processor = if processor.is_started() {
+            processor.as_started_mut()
         } else {
             println!("Starting processor!");
-            self.plugin_audio_processor.start_processing()
+            processor.start_processing()
         }
         .unwrap();
 
@@ -77,12 +96,15 @@ impl Processor for ClapPluginProcessor {
         let steady_time = None;
         let transport = None;
 
+        let mut audio_ports = self.audio_ports.borrow_mut();
+
         let mut audio_outputs =
-            self.audio_ports
-                .with_output_buffers(out_audio_buffers.iter_mut().map(|port| AudioPortBuffer {
+            audio_ports.with_output_buffers(out_audio_buffers.iter_mut().map(|port| {
+                AudioPortBuffer {
                     latency: 0,
                     channels: AudioPortBufferType::f32_output_only(port.channels_mut()),
-                }));
+                }
+            }));
 
         processor
             .process(

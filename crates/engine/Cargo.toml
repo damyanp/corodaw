@@ -9,6 +9,7 @@ audio-blocks = "0.5.0"
 clack-extensions.workspace = true
 clack-host.workspace = true
 cpal.workspace = true
+derivative = "2.2.0"
 dirs = "6.0.0"
 fixedbitset = "0.5.7"
 futures.workspace = true

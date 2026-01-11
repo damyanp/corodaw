@@ -10,6 +10,7 @@ use clack_host::{
     plugin::{InitializedPluginHandle, InitializingPluginHandle, PluginInstance},
     process::{PluginAudioConfiguration, PluginAudioProcessor},
 };
+use derivative::Derivative;
 use futures_channel::oneshot;
 use smol::LocalExecutor;
 use std::{
@@ -19,14 +20,14 @@ use std::{
     pin::Pin,
     rc::Rc,
     sync::{
-        RwLock,
+        Arc, RwLock,
         mpsc::{Receiver, Sender, TryRecvError, channel},
     },
     thread::JoinHandle,
 };
 
 use crate::{
-    audio_graph::{self, clap_adapter::get_audio_graph_node_desc_for_clap_plugin},
+    audio_graph::{AudioGraph, NodeId, Processor, clap_adapter::ClapPluginProcessor},
     plugins::{discovery::FoundPlugin, timers::Timers, ui_host::PluginUiHost},
 };
 
@@ -38,22 +39,18 @@ mod ui_host;
 pub struct ClapPluginId(usize);
 
 pub struct ClapPluginManager {
+    pub audio_graph: AudioGraph,
     sender: Sender<Message>,
     _plugin_host: JoinHandle<()>,
 }
 
-impl Default for ClapPluginManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl ClapPluginManager {
-    pub fn new() -> Self {
+    pub fn new(audio_graph: AudioGraph) -> Self {
         let (sender, receiver) = channel();
 
         let plugin_host = {
             let sender = sender.clone();
+
             std::thread::spawn(move || {
                 let host = PluginHostThread::new(sender, receiver);
                 host.run();
@@ -61,12 +58,13 @@ impl ClapPluginManager {
         };
 
         Self {
+            audio_graph,
             sender,
             _plugin_host: plugin_host,
         }
     }
 
-    pub async fn create_plugin(&self, plugin: FoundPlugin) -> ClapPluginId {
+    pub async fn create_plugin(&self, plugin: FoundPlugin) -> ClapPluginShared {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send(Message::CreatePlugin(plugin, sender))
@@ -81,17 +79,6 @@ impl ClapPluginManager {
 
     pub async fn has_gui(&self, _clap_plugin_id: ClapPluginId) -> bool {
         todo!();
-    }
-
-    pub async fn get_audio_graph_node_desc(
-        &self,
-        clap_plugin_id: ClapPluginId,
-    ) -> audio_graph::NodeDesc {
-        let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Message::GetAudioGraphNodeDesc(clap_plugin_id, sender))
-            .unwrap();
-        receiver.await.unwrap()
     }
 }
 
@@ -137,21 +124,15 @@ impl PluginHostThread {
                                 let id = this.next_id.get();
                                 this.next_id.set(ClapPluginId(id.0 + 1));
 
-                                let clap_plugin =
+                                let (clap_plugin, clap_plugin_shared) =
                                     ClapPlugin::new(id, &found_plugin, this.sender.clone()).await;
                                 let old_plugin =
                                     this.plugins.borrow_mut().insert(id, clap_plugin.clone());
                                 assert!(old_plugin.is_none());
 
-                                sender.send(id).unwrap();
+                                sender.send(clap_plugin_shared).unwrap();
                             })
                             .detach();
-                    }
-                    Message::GetAudioGraphNodeDesc(clap_plugin_id, sender) => {
-                        let clap_plugin = self.get_plugin(clap_plugin_id);
-                        sender
-                            .send(get_audio_graph_node_desc_for_clap_plugin(&clap_plugin))
-                            .unwrap();
                     }
                     Message::RunOnMainThread(clap_plugin_id) => {
                         let clap_plugin = self.get_plugin(clap_plugin_id);
@@ -177,6 +158,15 @@ impl PluginHostThread {
                     Message::RequestResize(clap_plugin_id, gui_size) => {
                         self.plugin_ui_host.request_resize(clap_plugin_id, gui_size);
                     }
+                    Message::CreateProcessor(clap_plugin_id, sender) => {
+                        let clap_plugin = self.get_plugin(clap_plugin_id);
+                        let processor = Box::new(ClapPluginProcessor::new(&clap_plugin));
+
+                        let num_inputs = 0; // TODO: support inputs!
+                        let num_outputs = processor.get_total_output_channels();
+
+                        sender.send((num_inputs, num_outputs, processor)).unwrap();
+                    }
                 },
             }
         }
@@ -198,7 +188,7 @@ impl ClapPlugin {
         clap_plugin_id: ClapPluginId,
         plugin: &FoundPlugin,
         sender: Sender<Message>,
-    ) -> Rc<Self> {
+    ) -> (Rc<Self>, ClapPluginShared) {
         let bundle = plugin.load_bundle();
         bundle
             .get_plugin_factory()
@@ -213,13 +203,14 @@ impl ClapPlugin {
         let shared = ClapPluginShared {
             channel: sender,
             plugin_id: clap_plugin_id,
-            extensions: RwLock::default(),
+            extensions: Arc::default(),
         };
 
         let (initialized_sender, initialized_receiver) = oneshot::channel::<()>();
 
+        let shared_clone = shared.clone();
         let plugin = clack_host::plugin::PluginInstance::new(
-            move |_| shared,
+            move |_| shared_clone,
             move |_| ClapPluginMainThread::new(initialized_sender),
             &bundle,
             plugin_id.as_c_str(),
@@ -232,11 +223,13 @@ impl ClapPlugin {
         let audio_ports = plugin
             .access_shared_handler(|h: &ClapPluginShared| h.extensions.read().unwrap().audio_ports);
 
-        Rc::new(Self {
+        let clap_plugin = Rc::new(Self {
             clap_plugin_id,
             plugin: RefCell::new(plugin),
             plugin_audio_ports: RefCell::new(audio_ports),
-        })
+        });
+
+        (clap_plugin, shared)
     }
 
     pub fn get_audio_ports(&self, is_input: bool) -> Vec<u32> {
@@ -282,12 +275,15 @@ impl ClapPlugin {
 }
 
 enum Message {
-    CreatePlugin(FoundPlugin, oneshot::Sender<ClapPluginId>),
-    GetAudioGraphNodeDesc(ClapPluginId, oneshot::Sender<audio_graph::NodeDesc>),
+    CreatePlugin(FoundPlugin, oneshot::Sender<ClapPluginShared>),
     ShowGui(ClapPluginId),
     RunOnMainThread(ClapPluginId),
     ResizeHintsChanged(ClapPluginId),
     RequestResize(ClapPluginId, GuiSize),
+    CreateProcessor(
+        ClapPluginId,
+        oneshot::Sender<(usize, usize, Box<dyn Processor>)>,
+    ),
 }
 
 impl HostHandlers for ClapPlugin {
@@ -307,16 +303,31 @@ impl HostHandlers for ClapPlugin {
     }
 }
 
+#[derive(Clone, Derivative)]
+#[derivative(Debug)]
 pub struct ClapPluginShared {
     channel: Sender<Message>,
-    plugin_id: ClapPluginId,
-    extensions: RwLock<Extensions>,
+    pub plugin_id: ClapPluginId,
+    #[derivative(Debug = "ignore")]
+    pub extensions: Arc<RwLock<Extensions>>,
 }
 
 #[derive(Default)]
 pub struct Extensions {
-    plugin_gui: Option<PluginGui>,
-    audio_ports: Option<PluginAudioPorts>,
+    pub plugin_gui: Option<PluginGui>,
+    pub audio_ports: Option<PluginAudioPorts>,
+}
+
+impl ClapPluginShared {
+    pub async fn create_audio_graph_node(&self, audio_graph: &AudioGraph) -> NodeId {
+        let (sender, receiver) = oneshot::channel();
+        self.channel
+            .send(Message::CreateProcessor(self.plugin_id, sender))
+            .unwrap();
+        let (num_inputs, num_outputs, processor) = receiver.await.unwrap();
+
+        audio_graph.add_node(num_inputs, num_outputs, processor)
+    }
 }
 
 impl HostLogImpl for ClapPluginShared {

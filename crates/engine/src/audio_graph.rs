@@ -1,227 +1,453 @@
 use std::{
     cell::{Ref, RefCell, RefMut},
-    collections::HashMap,
+    cmp::Reverse,
+    collections::BinaryHeap,
     fmt::Debug,
+    mem::swap,
+    rc::Rc,
     sync::mpsc::{Receiver, Sender, channel},
 };
 
 use audio_blocks::{
     AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, AudioBlockOps, AudioBlockSequential,
 };
+use fixedbitset::FixedBitSet;
 
 pub mod clap_adapter;
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
-pub struct NodeId(usize);
-
-enum Message {
-    AddNode {
-        id: NodeId,
-        desc: NodeDesc,
-    },
-    SetOutputNode(NodeId, bool),
-    Connect {
-        source: NodeId,
-        source_port: u32,
-        dest: NodeId,
-        dest_port: u32,
-    },
-}
-
-pub fn audio_graph() -> (AudioGraph, AudioGraphWorker) {
-    let (sender, receiver) = channel();
-    (AudioGraph::new(sender), AudioGraphWorker::new(receiver))
-}
-
+/// Interface to the audio graph; cheap to clone, but must be kept on the
+/// application main thread.
+#[derive(Clone)]
 pub struct AudioGraph {
-    next_node_id: NodeId,
-    sender: Sender<Message>,
+    inner: Rc<RefCell<AudioGraphInner>>,
+}
+
+struct AudioGraphInner {
+    modified: bool,
+    graph_desc: GraphDesc,
+    sender: Sender<AudioGraphMessage>,
+}
+
+/// This is the part of the audio graph that does audio processing, so it lives
+/// on the audio thread.
+pub struct AudioGraphWorker {
+    receiver: Receiver<AudioGraphMessage>,
+    graph: Option<Graph>,
+}
+
+enum AudioGraphMessage {
+    UpdateGraph(GraphDesc),
 }
 
 impl AudioGraph {
-    fn new(sender: Sender<Message>) -> Self {
+    pub fn new() -> (AudioGraph, AudioGraphWorker) {
+        let (sender, receiver) = channel();
+
+        let audio_graph = AudioGraph {
+            inner: Rc::new(RefCell::new(AudioGraphInner::new(sender))),
+        };
+
+        (audio_graph, AudioGraphWorker::new(receiver))
+    }
+
+    pub fn update(&self) {
+        self.inner.borrow_mut().update();
+    }
+
+    pub fn add_node(
+        &self,
+        num_inputs: usize,
+        num_outputs: usize,
+        processor: Box<dyn Processor>,
+    ) -> NodeId {
+        self.inner
+            .borrow_mut()
+            .add_node(num_inputs, num_outputs, processor)
+    }
+
+    pub fn connect(&self, dest_node: NodeId, dest_port: usize, src_node: NodeId, src_port: usize) {
+        self.inner
+            .borrow_mut()
+            .connect(dest_node, dest_port, src_node, src_port)
+    }
+
+    pub fn connect_grow_input(
+        &self,
+        dest_node: NodeId,
+        dest_port: usize,
+        src_node: NodeId,
+        src_port: usize,
+    ) {
+        self.inner
+            .borrow_mut()
+            .connect_grow_input(dest_node, dest_port, src_node, src_port);
+    }
+
+    pub fn set_output_node(&self, node_id: NodeId) {
+        self.inner.borrow_mut().set_output_node(node_id);
+    }
+}
+
+impl AudioGraphInner {
+    fn new(sender: Sender<AudioGraphMessage>) -> Self {
         Self {
-            next_node_id: NodeId(1),
+            modified: false,
+            graph_desc: GraphDesc::default(),
             sender,
         }
     }
 
-    pub fn add_node(&mut self, desc: NodeDesc) -> NodeId {
-        let id = self.next_node_id;
-        self.next_node_id.0 += 1;
-
-        self.sender
-            .send(Message::AddNode { id, desc })
-            .expect("send should not fail");
-
-        id
+    fn add_node(
+        &mut self,
+        num_inputs: usize,
+        num_outputs: usize,
+        processor: Box<dyn Processor>,
+    ) -> NodeId {
+        self.modified = true;
+        self.graph_desc.add_node(num_inputs, num_outputs, processor)
     }
 
-    pub fn set_output_node(&self, node_id: NodeId, is_output: bool) {
-        self.sender
-            .send(Message::SetOutputNode(node_id, is_output))
-            .expect("send should not fail");
+    fn connect(&mut self, dest_node: NodeId, dest_port: usize, src_node: NodeId, src_port: usize) {
+        self.modified = true;
+        self.graph_desc
+            .connect(dest_node, dest_port, src_node, src_port)
     }
 
-    pub fn connect(&self, source: NodeId, source_port: u32, dest: NodeId, dest_port: u32) {
-        self.sender
-            .send(Message::Connect {
-                source,
-                source_port,
-                dest,
-                dest_port,
-            })
-            .expect("send should not fail");
+    fn connect_grow_input(
+        &mut self,
+        dest_node: NodeId,
+        dest_port: usize,
+        src_node: NodeId,
+        src_port: usize,
+    ) {
+        self.modified = true;
+        self.graph_desc
+            .connect_grow_input(dest_node, dest_port, src_node, src_port)
     }
-}
 
-pub struct AudioGraphWorker {
-    receiver: Receiver<Message>,
-    nodes: HashMap<NodeId, Node>,
-    channels: u16,
-    sample_rate: u32,
+    pub fn set_output_node(&mut self, node_id: NodeId) {
+        self.modified = true;
+        self.graph_desc.set_output_node(node_id);
+    }
+
+    fn update(&mut self) {
+        if self.modified {
+            self.modified = false;
+            self.sender
+                .send(AudioGraphMessage::UpdateGraph(self.graph_desc.send()))
+                .unwrap();
+        }
+    }
 }
 
 impl AudioGraphWorker {
-    fn new(receiver: Receiver<Message>) -> Self {
+    fn new(receiver: Receiver<AudioGraphMessage>) -> Self {
         Self {
             receiver,
-            nodes: HashMap::new(),
-            channels: 0,
-            sample_rate: 0,
+            graph: None,
         }
     }
 
-    pub fn configure(&mut self, channels: u16, sample_rate: u32) {
-        self.channels = channels;
-        self.sample_rate = sample_rate;
-    }
+    pub fn tick(&mut self, channels: u16, data: &mut [f32]) {
+        let mut new_graph_desc = None;
 
-    pub fn process(&mut self, data: &mut [f32]) {
-        self.process_messages();
-
-        let num_frames = data.len() / (self.channels as usize);
-        let mut block = AudioBlockInterleavedViewMut::from_slice(data, self.channels, num_frames);
-
-        // Prepare all the nodes
-        for node in self.nodes.values_mut() {
-            node.prepare_for_processing(num_frames);
-        }
-
-        // Process all the nodes (TODO: do them in the right order!)
-        for node in self.nodes.values() {
-            node.process(self);
-        }
-
-        // Sum all the output from the output nodes
-        block.fill_with(0.0);
-
-        let output_audio_buffers = self
-            .nodes
-            .values()
-            .filter(|node| node.is_output)
-            .map(|node| &node.audio_buffers);
-        for audio_buffers in output_audio_buffers {
-            let port = &audio_buffers.ports[0].borrow();
-            for (dst, src) in block.frames_iter_mut().zip(port.frames_iter()) {
-                assert_eq!(port.num_channels(), port.num_channels());
-                dst.zip(src).for_each(|(dst, src)| *dst += *src);
-            }
-        }
-    }
-
-    fn process_messages(&mut self) {
-        while let Ok(message) = self.receiver.try_recv() {
+        for message in self.receiver.try_iter() {
             match message {
-                Message::AddNode { id, desc } => {
-                    let previous = self.nodes.insert(id, Node::new(desc));
-                    assert!(previous.is_none());
-                }
-                Message::SetOutputNode(node_id, is_output) => {
-                    if let Some(node) = self.nodes.get_mut(&node_id) {
-                        node.is_output = is_output
-                    }
-                }
-                Message::Connect {
-                    source,
-                    source_port,
-                    dest,
-                    dest_port,
-                } => {
-                    let dest = self.nodes.get_mut(&dest).unwrap();
-                    dest.audio_connections[dest_port as usize] = Some((source, source_port));
-                }
+                AudioGraphMessage::UpdateGraph(graph_desc) => new_graph_desc = Some(graph_desc),
             }
+        }
+
+        if let Some(new_graph_desc) = new_graph_desc {
+            self.graph = Some(Graph::new(new_graph_desc, self.graph.take()));
+        }
+
+        let num_frames = data.len() / channels as usize;
+        let mut block = AudioBlockInterleavedViewMut::from_slice(data, channels, num_frames);
+
+        if let Some(graph) = self.graph.as_mut() {
+            let output_node_id = graph.output_node;
+            graph.process(output_node_id, num_frames);
+
+            let output_node = graph.get_node(&output_node_id);
+            let a = output_node.output_buffers.get(0);
+            let b = output_node.output_buffers.get(1);
+
+            assert_eq!(1, a.num_channels());
+            assert_eq!(1, b.num_channels());
+
+            let frames_dest = block.frames_iter_mut();
+            let frames_a = a.frames_iter();
+            let frames_b = b.frames_iter();
+
+            for (mut dest, (mut a, mut b)) in frames_dest.zip(frames_a.zip(frames_b)) {
+                *dest.next().unwrap() = *a.next().unwrap();
+                *dest.next().unwrap() = *b.next().unwrap();
+                assert!(a.next().is_none());
+                assert!(b.next().is_none());
+                assert!(dest.next().is_none());
+            }
+        } else {
+            block.fill_with(0.0);
         }
     }
 }
 
-struct Node {
-    desc: NodeDesc,
-    audio_buffers: AudioBuffers,
-    is_output: bool,
-    audio_connections: Vec<Option<(NodeId, u32)>>,
+pub trait NodeCreator {
+    fn create_node(&self, graph: &AudioGraph) -> NodeId;
 }
 
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
+pub struct NodeId(usize);
+
+#[derive(Default)]
+struct GraphDesc {
+    nodes: Vec<NodeDesc>,
+    processors: Vec<Option<Box<dyn Processor>>>,
+    output_node: Option<NodeId>,
+}
+
+#[derive(Clone)]
 pub struct NodeDesc {
-    pub processor: RefCell<Box<dyn Processor>>,
-    pub audio_inputs: Vec<AudioPortDesc>,
-    pub audio_outputs: Vec<AudioPortDesc>,
+    pub id: NodeId,
+    pub input_nodes: Vec<NodeId>,
+    pub input_connections: Vec<InputConnection>,
+    pub num_outputs: usize,
 }
 
-impl Debug for NodeDesc {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NodeDesc").finish()
+#[derive(Clone, Copy, Debug)]
+pub enum InputConnection {
+    Disconnected,
+    Connected(NodeId, usize),
+}
+
+impl NodeDesc {
+    fn new(id: NodeId, num_inputs: usize, num_outputs: usize) -> Self {
+        let mut input_connections = Vec::default();
+        input_connections.resize(num_inputs, InputConnection::Disconnected);
+
+        Self {
+            id,
+            input_nodes: Vec::default(),
+            input_connections,
+            num_outputs,
+        }
     }
+}
+
+impl GraphDesc {
+    pub fn add_node(
+        &mut self,
+        num_inputs: usize,
+        num_outputs: usize,
+        processor: Box<dyn Processor>,
+    ) -> NodeId {
+        let id = NodeId(self.nodes.len());
+        self.nodes.push(NodeDesc::new(id, num_inputs, num_outputs));
+        self.processors.push(Some(processor));
+        id
+    }
+
+    pub fn connect_grow_input(
+        &mut self,
+        dest_node: NodeId,
+        dest_port: usize,
+        src_node: NodeId,
+        src_port: usize,
+    ) {
+        let dest = &mut self.nodes[dest_node.0];
+        while dest.input_connections.len() <= dest_port {
+            dest.input_connections.push(InputConnection::Disconnected);
+        }
+        self.connect(dest_node, dest_port, src_node, src_port)
+    }
+
+    pub fn connect(
+        &mut self,
+        dest_node: NodeId,
+        dest_port: usize,
+        src_node: NodeId,
+        src_port: usize,
+    ) {
+        assert_ne!(dest_node, src_node);
+
+        let [dest, src] = self
+            .nodes
+            .get_disjoint_mut([dest_node.0, src_node.0])
+            .unwrap();
+
+        assert!(dest_port < dest.input_connections.len());
+        assert!(src_port < src.num_outputs);
+
+        if !dest.input_nodes.contains(&src_node) {
+            dest.input_nodes.push(src_node);
+        }
+
+        dest.input_connections[dest_port] = InputConnection::Connected(src_node, src_port);
+    }
+
+    pub fn set_output_node(&mut self, node_id: NodeId) {
+        self.output_node = Some(node_id);
+    }
+
+    pub fn send(&mut self) -> Self {
+        let mut processors = Vec::new();
+        for _ in 0..self.processors.len() {
+            processors.push(None);
+        }
+
+        swap(&mut processors, &mut self.processors);
+
+        Self {
+            nodes: self.nodes.clone(),
+            processors,
+            output_node: self.output_node,
+        }
+    }
+}
+
+pub struct Node {
+    pub desc: NodeDesc,
+    pub processor: Box<dyn Processor>,
+    pub output_buffers: AudioBuffers,
 }
 
 impl Node {
-    fn new(desc: NodeDesc) -> Self {
-        let audio_buffers = AudioBuffers::new(desc.audio_outputs.as_slice(), 1024);
-        let audio_connections = desc.audio_inputs.iter().map(|_| None).collect();
+    fn new(desc: NodeDesc, processor: Box<dyn Processor>) -> Self {
+        let mut ports = Vec::with_capacity(desc.num_outputs);
+        ports.resize(desc.num_outputs, AudioPortDesc { num_channels: 1 });
 
-        Node {
+        const HARDCODED_NUM_FRAMES: usize = 1024;
+        let output_buffers = AudioBuffers::new(ports.as_slice(), HARDCODED_NUM_FRAMES);
+
+        Self {
             desc,
-            audio_buffers,
-            is_output: false,
-            audio_connections,
+            processor,
+            output_buffers,
         }
-    }
-
-    fn process(&self, audio_graph: &AudioGraphWorker) {
-        let inputs: Vec<_> = self
-            .audio_connections
-            .iter()
-            .map(|connection| {
-                connection.map(|(node_id, port_id)| {
-                    audio_graph.nodes.get(&node_id).unwrap().audio_buffers.ports[port_id as usize]
-                        .borrow()
-                })
-            })
-            .collect();
-
-        let mut borrowed_output_ports: Vec<_> = self
-            .audio_buffers
-            .ports
-            .iter()
-            .map(|port| port.borrow_mut())
-            .collect();
-
-        let processor = &self.desc.processor;
-        processor
-            .borrow_mut()
-            .process(inputs.as_slice(), borrowed_output_ports.as_mut_slice());
-    }
-
-    fn prepare_for_processing(&mut self, num_frames: usize) {
-        self.audio_buffers.prepare_for_processing(num_frames);
     }
 }
 
-pub trait Processor: Send {
+pub struct Graph {
+    nodes: Vec<Node>,
+    output_node: NodeId,
+}
+
+impl Graph {
+    fn new(mut desc: GraphDesc, old_graph: Option<Graph>) -> Self {
+        if let Some(old_graph) = old_graph {
+            // Processor's can't be copied - so we take all the ones from the
+            // old graph and swap them into nodes in the new graph that are
+            // missing processors.
+            let mut processors: Vec<_> = old_graph
+                .nodes
+                .into_iter()
+                .map(|node| Some(node.processor))
+                .collect();
+
+            for (id, processor) in (&mut desc.processors).iter_mut().enumerate() {
+                if processor.is_none() {
+                    std::mem::swap(processor, &mut processors[id]);
+                }
+            }
+        }
+
+        let nodes = desc
+            .nodes
+            .into_iter()
+            .zip(desc.processors.into_iter())
+            .into_iter()
+            .map(|(n, p)| Node::new(n, p.unwrap()))
+            .collect();
+
+        Self {
+            nodes,
+            output_node: desc.output_node.unwrap(),
+        }
+    }
+
+    pub fn get_node(&self, node_id: &NodeId) -> &Node {
+        &self.nodes[node_id.0]
+    }
+
+    fn process(&mut self, node_id: NodeId, num_frames: usize) {
+        let ordered = self.build_breadth_first_traversal(node_id);
+        for node_id in ordered {
+            let node = &self.nodes[node_id.0];
+
+            node.output_buffers.prepare_for_processing(num_frames);
+
+            let mut borrowed_output_ports: Vec<_> = node
+                .output_buffers
+                .ports
+                .iter()
+                .map(|port| port.borrow_mut())
+                .collect();
+
+            node.processor
+                .process(self, node, borrowed_output_ports.as_mut_slice());
+        }
+    }
+
+    fn build_breadth_first_traversal(&self, start_node: NodeId) -> Vec<NodeId> {
+        let reachable = self.get_reachable_nodes(start_node);
+
+        let mut incoming = Vec::default();
+        incoming.resize(self.nodes.len(), 0);
+
+        let mut outputs: Vec<Vec<usize>> = Vec::with_capacity(self.nodes.len());
+        outputs.resize(self.nodes.len(), Vec::new());
+
+        let mut heap: BinaryHeap<Reverse<usize>> = BinaryHeap::with_capacity(self.nodes.len());
+        for id in reachable.ones() {
+            let node = &self.nodes[id];
+            for input in node.desc.input_nodes.iter() {
+                outputs[input.0].push(id);
+            }
+            incoming[id] = node.desc.input_nodes.len();
+            if incoming[id] == 0 {
+                heap.push(Reverse(id));
+            }
+        }
+
+        let mut ordered = Vec::with_capacity(self.nodes.len());
+
+        while let Some(Reverse(node_id)) = heap.pop() {
+            assert_eq!(incoming[node_id], 0);
+            ordered.push(node_id);
+
+            for input in &outputs[node_id] {
+                incoming[*input] -= 1;
+                if incoming[*input] == 0 {
+                    heap.push(Reverse(*input));
+                }
+            }
+        }
+
+        ordered.into_iter().map(NodeId).collect()
+    }
+
+    fn get_reachable_nodes(&self, start_node: NodeId) -> FixedBitSet {
+        let mut reachable = FixedBitSet::with_capacity(self.nodes.len());
+        let mut stack = Vec::with_capacity(self.nodes.len());
+
+        stack.push(start_node);
+        while let Some(node) = stack.pop() {
+            if !reachable.contains(node.0) {
+                reachable.put(node.0);
+                let node = &self.nodes[node.0];
+                stack.extend_from_slice(node.desc.input_nodes.as_slice());
+            }
+        }
+
+        reachable
+    }
+}
+
+pub trait Processor: Send + Debug {
     fn process(
-        &mut self,
-        in_audio_buffers: &[Option<Ref<'_, AudioBlockSequential<f32>>>],
+        &self,
+        graph: &Graph,
+        node: &Node,
         out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
     );
 }
@@ -231,7 +457,7 @@ pub struct AudioPortDesc {
     pub num_channels: u16,
 }
 
-struct AudioBuffers {
+pub struct AudioBuffers {
     ports: Vec<RefCell<AudioBlockSequential<f32>>>,
 }
 
@@ -244,6 +470,10 @@ impl AudioBuffers {
                 .map(RefCell::new)
                 .collect(),
         }
+    }
+
+    pub fn get(&self, channel: u16) -> Ref<'_, AudioBlockSequential<f32>> {
+        self.ports[channel as usize].borrow()
     }
 
     fn prepare_for_processing(&self, num_frames: usize) {
@@ -277,161 +507,7 @@ mod tests {
 
     use super::*;
 
-    #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-    struct NodeId(usize);
-
-    #[derive(Default)]
-    struct GraphDesc {
-        nodes: Vec<NodeDesc>,
-    }
-
-    struct NodeDesc {
-        id: NodeId,
-        processor: Box<dyn Processor>,
-        inputs: Vec<NodeId>,
-        num_outputs: usize,
-    }
-
-    impl NodeDesc {
-        fn new(id: NodeId, num_outputs: usize, processor: Box<dyn Processor>) -> Self {
-            Self {
-                id,
-                processor,
-                inputs: Vec::default(),
-                num_outputs,
-            }
-        }
-    }
-
-    impl GraphDesc {
-        fn add_node(&mut self, num_outputs: usize, processor: Box<dyn Processor>) -> NodeId {
-            let id = NodeId(self.nodes.len());
-            self.nodes.push(NodeDesc::new(id, num_outputs, processor));
-            id
-        }
-
-        fn add_input(&mut self, node: NodeId, new_input: NodeId) {
-            self.nodes[node.0].inputs.push(new_input);
-        }
-    }
-
-    struct Node {
-        desc: NodeDesc,
-        output_buffers: AudioBuffers,
-    }
-
-    impl Node {
-        fn new(desc: NodeDesc) -> Self {
-            let mut ports = Vec::with_capacity(desc.num_outputs);
-            ports.resize(desc.num_outputs, AudioPortDesc { num_channels: 1 });
-
-            const HARDCODED_NUM_FRAMES: usize = 1024;
-            let output_buffers = AudioBuffers::new(ports.as_slice(), HARDCODED_NUM_FRAMES);
-
-            Self {
-                desc,
-                output_buffers,
-            }
-        }
-    }
-
-    struct Graph {
-        nodes: Vec<Node>,
-    }
-
-    impl Graph {
-        fn new(desc: GraphDesc) -> Self {
-            let nodes = desc.nodes.into_iter().map(Node::new).collect();
-
-            Self { nodes }
-        }
-
-        fn process(&mut self, node_id: NodeId, num_frames: usize) {
-            let ordered = self.build_breadth_first_traversal(node_id);
-
-            for node_id in ordered {
-                let node = &self.nodes[node_id.0];
-
-                node.output_buffers.prepare_for_processing(num_frames);
-
-                let mut borrowed_output_ports: Vec<_> = node
-                    .output_buffers
-                    .ports
-                    .iter()
-                    .map(|port| port.borrow_mut())
-                    .collect();
-
-                node.desc
-                    .processor
-                    .process(self, node, borrowed_output_ports.as_mut_slice());
-            }
-        }
-
-        fn build_breadth_first_traversal(&self, start_node: NodeId) -> Vec<NodeId> {
-            let reachable = self.get_reachable_nodes(start_node);
-
-            let mut incoming = Vec::default();
-            incoming.resize(self.nodes.len(), 0);
-
-            let mut outputs: Vec<Vec<usize>> = Vec::with_capacity(self.nodes.len());
-            outputs.resize(self.nodes.len(), Vec::new());
-
-            let mut heap: BinaryHeap<Reverse<usize>> = BinaryHeap::with_capacity(self.nodes.len());
-            for id in reachable.ones() {
-                let node = &self.nodes[id];
-                for input in node.desc.inputs.iter() {
-                    outputs[input.0].push(id);
-                }
-                incoming[id] = node.desc.inputs.len();
-                if incoming[id] == 0 {
-                    heap.push(Reverse(id));
-                }
-            }
-
-            let mut ordered = Vec::with_capacity(self.nodes.len());
-
-            while let Some(Reverse(node_id)) = heap.pop() {
-                assert_eq!(incoming[node_id], 0);
-                ordered.push(node_id);
-
-                let node = &self.nodes[node_id];
-                for input in &outputs[node_id] {
-                    incoming[*input] -= 1;
-                    if incoming[*input] == 0 {
-                        heap.push(Reverse(*input));
-                    }
-                }
-            }
-
-            ordered.into_iter().map(NodeId).collect()
-        }
-
-        fn get_reachable_nodes(&self, start_node: NodeId) -> FixedBitSet {
-            let mut reachable = FixedBitSet::with_capacity(self.nodes.len());
-            let mut stack = Vec::with_capacity(self.nodes.len());
-
-            stack.push(start_node);
-            while let Some(node) = stack.pop() {
-                if !reachable.contains(node.0) {
-                    reachable.put(node.0);
-                    let node = &self.nodes[node.0];
-                    stack.extend_from_slice(node.desc.inputs.as_slice());
-                }
-            }
-
-            reachable
-        }
-    }
-
-    trait Processor: Send {
-        fn process(
-            &self,
-            graph: &Graph,
-            node: &Node,
-            out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
-        );
-    }
-
+    #[derive(Debug)]
     struct Constant(f32);
     impl Processor for Constant {
         fn process(
@@ -444,8 +520,10 @@ mod tests {
         }
     }
 
-    struct AddInputs;
-    impl Processor for AddInputs {
+    #[derive(Debug)]
+    struct SumInputs;
+
+    impl Processor for SumInputs {
         fn process(
             &self,
             graph: &Graph,
@@ -456,7 +534,7 @@ mod tests {
 
             let inputs = node
                 .desc
-                .inputs
+                .input_nodes
                 .iter()
                 .map(|id| &graph.nodes[id.0])
                 .map(|node| node.output_buffers.ports[0].borrow());
@@ -473,6 +551,7 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
     struct LogProcessor {
         log: Arc<RwLock<Vec<NodeId>>>,
     }
@@ -513,12 +592,15 @@ mod tests {
     fn graph_can_be_sent_to_thread() {
         let mut graph = GraphDesc::default();
 
-        let node1 = graph.add_node(1, Box::new(Constant(1.0)));
-        let node2 = graph.add_node(1, Box::new(Constant(2.0)));
+        let node1 = graph.add_node(1, 0, Box::new(Constant(1.0)));
+        let node2 = graph.add_node(0, 1, Box::new(Constant(2.0)));
 
-        graph.add_input(node1, node2);
+        graph.connect(node1, 0, node2, 0);
 
-        let join = std::thread::spawn(move || graph.nodes.len());
+        let join = {
+            let graph = graph.send();
+            std::thread::spawn(move || graph.nodes.len())
+        };
 
         assert_eq!(2, join.join().unwrap());
     }
@@ -528,9 +610,9 @@ mod tests {
         let logger = Logger::new();
 
         let mut graph = GraphDesc::default();
-        let node = graph.add_node(0, logger.make());
+        let node = graph.add_node(0, 0, logger.make());
 
-        let mut graph = Graph::new(graph);
+        let mut graph = Graph::new(graph, None);
         graph.process(node, 1);
 
         assert_eq!([node], logger.get().as_slice());
@@ -544,11 +626,13 @@ mod tests {
         let logger = Logger::new();
 
         let mut graph = GraphDesc::default();
-        let nodes: Vec<NodeId> = (0..5).map(|_| graph.add_node(0, logger.make())).collect();
-        graph.add_input(nodes[0], nodes[1]);
-        graph.add_input(nodes[2], nodes[3]);
+        let nodes: Vec<NodeId> = (0..5)
+            .map(|_| graph.add_node(1, 1, logger.make()))
+            .collect();
+        graph.connect(nodes[0], 0, nodes[1], 0);
+        graph.connect(nodes[2], 0, nodes[3], 0);
 
-        let graph = Graph::new(graph);
+        let graph = Graph::new(graph, None);
 
         itertools::assert_equal(
             graph.get_reachable_nodes(nodes[0]).ones(),
@@ -575,16 +659,16 @@ mod tests {
         let logger = Logger::new();
 
         let mut graph = GraphDesc::default();
-        let a = graph.add_node(0, logger.make());
-        let b = graph.add_node(0, logger.make());
-        let c = graph.add_node(0, logger.make());
-        let d = graph.add_node(0, logger.make());
+        let a = graph.add_node(2, 1, logger.make());
+        let b = graph.add_node(0, 1, logger.make());
+        let c = graph.add_node(0, 1, logger.make());
+        let d = graph.add_node(1, 0, logger.make());
 
-        graph.add_input(d, a);
-        graph.add_input(a, b);
-        graph.add_input(a, c);
+        graph.connect(d, 0, a, 0);
+        graph.connect(a, 0, b, 0);
+        graph.connect(a, 1, c, 0);
 
-        let mut graph = Graph::new(graph);
+        let mut graph = Graph::new(graph, None);
         graph.process(d, 1);
 
         assert_eq!([b, c, a, d], logger.get().as_slice());
@@ -597,14 +681,14 @@ mod tests {
         //   \-> c
 
         let mut graph = GraphDesc::default();
-        let a = graph.add_node(1, Box::new(AddInputs));
-        let b = graph.add_node(1, Box::new(Constant(1.0)));
-        let c = graph.add_node(1, Box::new(Constant(1.0)));
+        let a = graph.add_node(2, 1, Box::new(SumInputs));
+        let b = graph.add_node(0, 1, Box::new(Constant(1.0)));
+        let c = graph.add_node(0, 1, Box::new(Constant(1.0)));
 
-        graph.add_input(a, b);
-        graph.add_input(a, c);
+        graph.connect(a, 0, b, 0);
+        graph.connect(a, 1, c, 0);
 
-        let mut graph = Graph::new(graph);
+        let mut graph = Graph::new(graph, None);
         graph.process(a, 1);
 
         assert_eq!(

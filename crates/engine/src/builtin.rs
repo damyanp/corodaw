@@ -1,74 +1,113 @@
 use std::{
-    cell::{Ref, RefCell, RefMut},
+    cell::{Cell, RefMut},
     sync::mpsc::{Receiver, Sender, channel},
 };
 
 use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockOps, AudioBlockSequential};
 
-use crate::audio_graph::{AudioPortDesc, NodeDesc, Processor};
+use crate::audio_graph::{AudioGraph, Graph, InputConnection, Node, NodeId, Processor};
 
-#[derive(Default)]
 pub struct GainControl {
-    sender: RefCell<Option<Sender<f32>>>,
+    pub node_id: NodeId,
+    sender: Sender<f32>,
 }
 
 impl GainControl {
-    pub fn get_node_desc(&self, initial_gain: f32) -> NodeDesc {
-        assert!(self.sender.borrow().is_none());
-
+    pub fn new(graph: &AudioGraph, initial_gain: f32) -> GainControl {
         let (sender, receiver) = channel();
-        self.sender.replace(Some(sender));
 
-        let processor = GainControlProcessor {
+        let processor = Box::new(GainControlProcessor {
             receiver,
-            gain: initial_gain,
-        };
+            gain: Cell::new(initial_gain),
+        });
 
-        NodeDesc {
-            processor: RefCell::new(Box::new(processor)),
-            audio_inputs: vec![AudioPortDesc { num_channels: 2 }],
-            audio_outputs: vec![AudioPortDesc { num_channels: 2 }],
-        }
+        let node_id = graph.add_node(2, 2, processor);
+
+        GainControl { node_id, sender }
     }
 
     pub fn set_gain(&self, gain: f32) {
-        if let Some(sender) = self.sender.borrow().as_ref() {
-            sender.send(gain).unwrap();
-        }
+        self.sender.send(gain).unwrap();
     }
 }
 
+#[derive(Debug)]
 struct GainControlProcessor {
     receiver: Receiver<f32>,
-    gain: f32,
+    gain: Cell<f32>,
 }
 
 impl Processor for GainControlProcessor {
     fn process(
-        &mut self,
-        in_audio_buffers: &[Option<Ref<'_, AudioBlockSequential<f32>>>],
+        &self,
+        graph: &Graph,
+        node: &Node,
         out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
     ) {
         self.process_messages();
 
-        for (input, output) in in_audio_buffers.iter().zip(out_audio_buffers.iter_mut()) {
-            if let Some(input) = input {
-                for (input, output) in input.channels_iter().zip(output.channels_iter_mut()) {
-                    for (input, output) in input.zip(output) {
-                        *output = input * self.gain;
-                    }
+        let gain = self.gain.get();
+
+        for (channel, output_buffer) in out_audio_buffers.iter_mut().enumerate() {
+            let input_connection = node.desc.input_connections[channel];
+            if let InputConnection::Connected(input_node_id, input_channel) = input_connection {
+                let input_node = graph.get_node(&input_node_id);
+                let input_buffer = input_node.output_buffers.get(input_channel as u16);
+
+                for (input, output) in input_buffer
+                    .channel_iter(0)
+                    .zip(output_buffer.channel_iter_mut(0))
+                {
+                    *output = *input * gain;
                 }
             } else {
-                output.fill_with(0.0);
+                output_buffer.fill_with(0.0);
             }
         }
     }
 }
 
 impl GainControlProcessor {
-    fn process_messages(&mut self) {
+    fn process_messages(&self) {
         if let Ok(gain) = self.receiver.try_recv() {
-            self.gain = gain;
+            self.gain.set(gain);
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Summer;
+impl Processor for Summer {
+    fn process(
+        &self,
+        graph: &Graph,
+        node: &Node,
+        out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
+    ) {
+        for (channel, output_buffer) in out_audio_buffers.iter_mut().enumerate() {
+            output_buffer.fill_with(0.0);
+
+            let inputs = node.desc.input_connections.iter().filter(|c| {
+                if let InputConnection::Connected(_, n) = c {
+                    *n == channel
+                } else {
+                    false
+                }
+            });
+
+            for input in inputs {
+                if let InputConnection::Connected(input_node, input_channel) = input {
+                    let input_node = graph.get_node(input_node);
+                    let input_buffer = input_node.output_buffers.get(*input_channel as u16);
+
+                    for (input, output) in input_buffer
+                        .channel_iter(0)
+                        .zip(output_buffer.channel_iter_mut(0))
+                    {
+                        *output += *input;
+                    }
+                }
+            }
         }
     }
 }

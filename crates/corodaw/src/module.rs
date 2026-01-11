@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use gpui::*;
 use gpui_component::{
@@ -8,18 +8,18 @@ use gpui_component::{
 };
 
 use engine::{
-    audio_graph::AudioGraph,
+    audio_graph::NodeId,
     builtin::GainControl,
-    plugins::{ClapPluginId, ClapPluginManager, discovery::FoundPlugin},
+    plugins::{ClapPluginId, ClapPluginManager, ClapPluginShared, discovery::FoundPlugin},
 };
 
 pub struct Module {
-    _audio: ModuleAudio,
+    audio: ModuleAudio,
     ui: Entity<ModuleUI>,
 }
 
 struct ModuleAudio {
-    clap_plugin_id: ClapPluginId,
+    clap_plugin_shared: ClapPluginShared,
     gain: Rc<GainControl>,
 }
 
@@ -35,21 +35,23 @@ impl Module {
         name: String,
         plugin_manager: Rc<ClapPluginManager>,
         plugin: &FoundPlugin,
-        audio_graph: Rc<RefCell<AudioGraph>>,
         cx: &mut AsyncApp,
     ) -> Result<Self> {
         let initial_gain = 1.0;
 
-        let audio =
-            ModuleAudio::new(plugin_manager.clone(), plugin, audio_graph, initial_gain).await;
+        let audio = ModuleAudio::new(plugin_manager.clone(), plugin, initial_gain).await;
 
         let ui = cx.new(|cx| ModuleUI::new(name, initial_gain, &audio, plugin_manager, cx))?;
 
-        Ok(Self { _audio: audio, ui })
+        Ok(Self { audio, ui })
     }
 
     pub fn get_ui(&self) -> AnyElement {
         self.ui.clone().into_any_element()
+    }
+
+    pub fn get_output_node(&self) -> NodeId {
+        self.audio.gain.node_id
     }
 }
 
@@ -57,26 +59,24 @@ impl ModuleAudio {
     async fn new(
         plugin_manager: Rc<ClapPluginManager>,
         plugin: &FoundPlugin,
-        audio_graph: Rc<RefCell<AudioGraph>>,
         initial_gain: f32,
     ) -> ModuleAudio {
-        let clap_plugin_id = plugin_manager.create_plugin(plugin.clone()).await;
+        let gain = Rc::new(GainControl::new(&plugin_manager.audio_graph, initial_gain));
 
-        let gain = Rc::new(GainControl::default());
-
-        let plugin_node_desc = plugin_manager
-            .get_audio_graph_node_desc(clap_plugin_id)
+        let clap_plugin_shared = plugin_manager.create_plugin(plugin.clone()).await;
+        let plugin_node_id = clap_plugin_shared
+            .create_audio_graph_node(&plugin_manager.audio_graph)
             .await;
 
-        let mut audio_graph = audio_graph.borrow_mut();
-        let plugin_id = audio_graph.add_node(plugin_node_desc);
-        let gain_id = audio_graph.add_node(gain.get_node_desc(initial_gain));
+        let ag = &plugin_manager.audio_graph;
 
-        audio_graph.connect(plugin_id, 0, gain_id, 0);
-        audio_graph.set_output_node(gain_id, true);
+        // TODO: this assumes ports 0 & 1 are the right ones to connect!
+        for port in 0..2 {
+            ag.connect(gain.node_id, port, plugin_node_id, port);
+        }
 
         Self {
-            clap_plugin_id,
+            clap_plugin_shared,
             gain,
         }
     }
@@ -108,7 +108,7 @@ impl ModuleUI {
             name: name.into(),
             gain_slider,
             plugin_manager: manager,
-            clap_plugin_id: module_audio.clap_plugin_id,
+            clap_plugin_id: module_audio.clap_plugin_shared.plugin_id,
         }
     }
 

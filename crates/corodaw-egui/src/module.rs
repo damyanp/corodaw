@@ -1,20 +1,17 @@
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-};
+use std::{cell::Cell, rc::Rc};
 
 use eframe::egui::{self, Color32, Margin, Slider, Stroke};
 use engine::{
-    audio_graph::AudioGraph,
+    audio_graph::NodeId,
     builtin::GainControl,
-    plugins::{ClapPluginId, ClapPluginManager, discovery::FoundPlugin},
+    plugins::{ClapPluginManager, ClapPluginShared, discovery::FoundPlugin},
 };
 
 use crate::Corodaw;
 
 pub struct Module {
     name: String,
-    clap_plugin_id: ClapPluginId,
+    clap_plugin_shared: ClapPluginShared,
     gain: Rc<GainControl>,
     gain_value: Cell<f32>,
 }
@@ -22,29 +19,32 @@ pub struct Module {
 impl Module {
     pub async fn new(
         name: String,
-        plugin: FoundPlugin,
-        manager: Rc<ClapPluginManager>,
-        audio_graph: Rc<RefCell<AudioGraph>>,
+        plugin_manager: Rc<ClapPluginManager>,
+        plugin: &FoundPlugin,
     ) -> Self {
-        let clap_plugin_id = manager.create_plugin(plugin).await;
-
         let gain_value = 1.0;
-        let gain = Rc::new(GainControl::default());
+        let gain = Rc::new(GainControl::new(&plugin_manager.audio_graph, gain_value));
 
-        let plugin_node_desc = manager.get_audio_graph_node_desc(clap_plugin_id).await;
+        let clap_plugin_shared = plugin_manager.create_plugin(plugin.clone()).await;
+        let plugin_node_id = clap_plugin_shared
+            .create_audio_graph_node(&plugin_manager.audio_graph)
+            .await;
 
-        let mut audio_graph = audio_graph.borrow_mut();
-        let plugin_id = audio_graph.add_node(plugin_node_desc);
-        let gain_id = audio_graph.add_node(gain.get_node_desc(gain_value));
-        audio_graph.connect(plugin_id, 0, gain_id, 0);
-        audio_graph.set_output_node(gain_id, true);
+        let ag = &plugin_manager.audio_graph;
+        for port in 0..2 {
+            ag.connect(gain.node_id, port, plugin_node_id, port);
+        }
 
         Self {
             name,
-            clap_plugin_id,
+            clap_plugin_shared,
             gain,
             gain_value: Cell::new(gain_value),
         }
+    }
+
+    pub fn get_output_node(&self) -> NodeId {
+        self.gain.node_id
     }
 
     pub fn add_to_ui(&self, corodaw: &Corodaw, ui: &mut egui::Ui) {
@@ -71,7 +71,7 @@ impl Module {
 
                     ui.add_enabled_ui(!has_gui, |ui| {
                         if ui.button("Show").clicked() {
-                            corodaw.show_plugin_ui(self.clap_plugin_id);
+                            corodaw.show_plugin_ui(self.clap_plugin_shared.plugin_id);
                         }
                     });
                 });

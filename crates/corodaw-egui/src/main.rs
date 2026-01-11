@@ -6,7 +6,8 @@ use eframe::{
 };
 use engine::{
     audio::Audio,
-    audio_graph::{AudioGraph, audio_graph},
+    audio_graph::{AudioGraph, NodeId},
+    builtin::Summer,
     plugins::{
         ClapPluginId, ClapPluginManager,
         discovery::{FoundPlugin, get_plugins},
@@ -30,24 +31,29 @@ struct Corodaw {
     modules: Rc<RefCell<Vec<Module>>>,
     counter: u32,
 
-    audio_graph: Rc<RefCell<AudioGraph>>,
+    summer: NodeId,
+
     _audio: Audio,
 }
 
 impl Corodaw {
     fn new(executor: Rc<LocalExecutor<'static>>) -> Self {
-        let manager = Rc::new(ClapPluginManager::new());
-        let (audio_graph, audio_graph_worker) = audio_graph();
+        let (audio_graph, audio_graph_worker) = AudioGraph::new();
         let audio = Audio::new(audio_graph_worker).unwrap();
+
+        let summer = audio_graph.add_node(0, 2, Box::new(Summer));
+        audio_graph.set_output_node(summer);
+
+        let clap_plugin_manager = Rc::new(ClapPluginManager::new(audio_graph));
 
         Self {
             executor,
             found_plugins: get_plugins(),
-            manager,
+            manager: clap_plugin_manager,
             selected_plugin: None,
             modules: Rc::default(),
             counter: 0,
-            audio_graph: Rc::new(RefCell::new(audio_graph)),
+            summer,
             _audio: audio,
         }
     }
@@ -90,13 +96,25 @@ impl Corodaw {
         self.counter += 1;
 
         let modules = self.modules.clone();
-        let audio_graph = self.audio_graph.clone();
-        let manager = self.manager.clone();
+        let summer = self.summer;
+        let clap_plugin_manager = self.manager.clone();
 
         self.executor
             .spawn(async move {
-                let module = Module::new(name, found_plugin, manager, audio_graph).await;
-                modules.borrow_mut().push(module);
+                let module = Module::new(name, clap_plugin_manager.clone(), &found_plugin).await;
+                let mut modules = modules.borrow_mut();
+
+                for port in 0..2 {
+                    clap_plugin_manager.audio_graph.connect_grow_input(
+                        summer,
+                        modules.len() * 2 + port,
+                        module.get_output_node(),
+                        port,
+                    );
+                }
+                modules.push(module);
+
+                clap_plugin_manager.audio_graph.update();
                 ctx.request_repaint();
             })
             .detach();
