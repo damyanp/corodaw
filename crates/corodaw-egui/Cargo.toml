@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+audio-graph = { path = "../audio-graph" }
 clack-extensions.workspace = true
 cpal.workspace = true
 eframe = "0.33.3"

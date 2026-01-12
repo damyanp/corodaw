@@ -1,0 +1,9 @@
+[package]
+name = "audio-graph"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+audio-blocks.workspace = true
+fixedbitset = "0.5.7"
+itertools = "0.14.0"

@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
+use audio_graph::{AudioGraph, NodeId};
 use engine::{
     audio::Audio,
-    audio_graph::{AudioGraph, NodeId},
     builtin::Summer,
     plugins::{
         ClapPluginManager,

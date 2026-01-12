@@ -4,7 +4,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 
-use crate::audio_graph::AudioGraphWorker;
+use audio_graph::AudioGraphWorker;
 
 pub struct Audio {
     _stream: Stream,

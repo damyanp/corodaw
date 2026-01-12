@@ -677,6 +677,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "audio-graph"
+version = "0.1.0"
+dependencies = [
+ "audio-blocks",
+ "fixedbitset",
+ "itertools 0.14.0",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1492,6 +1501,7 @@ name = "corodaw"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "audio-graph",
  "clack-extensions",
  "cpal",
  "engine",
@@ -1507,6 +1517,7 @@ name = "corodaw-egui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "audio-graph",
  "clack-extensions",
  "cpal",
  "eframe",
@@ -2045,15 +2056,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "audio-blocks",
+ "audio-graph",
  "clack-extensions",
  "clack-host",
  "cpal",
  "derivative",
  "dirs 6.0.0",
- "fixedbitset",
  "futures",
  "futures-channel",
- "itertools 0.14.0",
  "serde",
  "serde_json",
  "smol",

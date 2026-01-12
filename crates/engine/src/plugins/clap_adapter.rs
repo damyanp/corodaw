@@ -9,10 +9,8 @@ use clack_host::{
     process::PluginAudioProcessor,
 };
 
-use crate::{
-    audio_graph::{AudioGraph, Graph, Node, NodeCreator, NodeId, Processor},
-    plugins::ClapPlugin,
-};
+use crate::plugins::ClapPlugin;
+use audio_graph::{AudioGraph, Graph, Node, NodeCreator, NodeId, Processor};
 
 impl NodeCreator for ClapPlugin {
     fn create_node(&self, graph: &AudioGraph) -> NodeId {

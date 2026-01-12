@@ -7,8 +7,8 @@ use gpui_component::{
     *,
 };
 
+use audio_graph::NodeId;
 use engine::{
-    audio_graph::NodeId,
     builtin::GainControl,
     plugins::{ClapPluginId, ClapPluginManager, ClapPluginShared, discovery::FoundPlugin},
 };

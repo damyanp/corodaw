@@ -1,12 +1,12 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
+use audio_graph::{AudioGraph, NodeId};
 use eframe::{
     UserEvent,
     egui::{self, ComboBox},
 };
 use engine::{
     audio::Audio,
-    audio_graph::{AudioGraph, NodeId},
     builtin::Summer,
     plugins::{
         ClapPluginId, ClapPluginManager,

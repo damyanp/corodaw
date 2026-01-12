@@ -5,7 +5,7 @@ use std::{
 
 use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockOps, AudioBlockSequential};
 
-use crate::audio_graph::{AudioGraph, Graph, InputConnection, Node, NodeId, Processor};
+use audio_graph::{AudioGraph, Graph, InputConnection, Node, NodeId, Processor};
 
 pub struct GainControl {
     pub node_id: NodeId,

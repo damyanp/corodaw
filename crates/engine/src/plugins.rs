@@ -1,3 +1,16 @@
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    ffi::CString,
+    pin::Pin,
+    rc::Rc,
+    sync::{
+        Arc, RwLock,
+        mpsc::{Receiver, Sender, TryRecvError, channel},
+    },
+    thread::JoinHandle,
+};
+
 use clack_extensions::{
     audio_ports::{AudioPortInfoBuffer, PluginAudioPorts},
     gui::{GuiSize, HostGui, HostGuiImpl, PluginGui},
@@ -13,24 +26,15 @@ use clack_host::{
 use derivative::Derivative;
 use futures_channel::oneshot;
 use smol::LocalExecutor;
-use std::{
-    cell::{Cell, RefCell},
-    collections::HashMap,
-    ffi::CString,
-    pin::Pin,
-    rc::Rc,
-    sync::{
-        Arc, RwLock,
-        mpsc::{Receiver, Sender, TryRecvError, channel},
-    },
-    thread::JoinHandle,
-};
 
-use crate::{
-    audio_graph::{AudioGraph, NodeId, Processor, clap_adapter::ClapPluginProcessor},
-    plugins::{discovery::FoundPlugin, timers::Timers, ui_host::PluginUiHost},
-};
+use clap_adapter::ClapPluginProcessor;
 
+use audio_graph::{AudioGraph, NodeId, Processor};
+use discovery::FoundPlugin;
+use timers::Timers;
+use ui_host::PluginUiHost;
+
+mod clap_adapter;
 pub mod discovery;
 mod timers;
 mod ui_host;

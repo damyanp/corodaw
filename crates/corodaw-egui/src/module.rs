@@ -1,8 +1,8 @@
 use std::{cell::Cell, rc::Rc};
 
+use audio_graph::NodeId;
 use eframe::egui::{self, Color32, Margin, Slider, Stroke};
 use engine::{
-    audio_graph::NodeId,
     builtin::GainControl,
     plugins::{ClapPluginManager, ClapPluginShared, discovery::FoundPlugin},
 };
