@@ -1,5 +1,5 @@
 use std::{
-    cell::{Ref, RefCell, RefMut},
+    cell::{Ref, RefCell},
     cmp::Reverse,
     collections::BinaryHeap,
     fmt::Debug,
@@ -169,8 +169,9 @@ impl AudioGraphWorker {
             graph.process(output_node_id, num_frames);
 
             let output_node = graph.get_node(&output_node_id);
-            let a = output_node.output_buffers.get(0);
-            let b = output_node.output_buffers.get(1);
+            let output_buffers = output_node.output_buffers.get();
+            let a = &output_buffers[0];
+            let b = &output_buffers[1];
 
             assert_eq!(1, a.num_channels());
             assert_eq!(1, b.num_channels());
@@ -313,11 +314,8 @@ pub struct Node {
 
 impl Node {
     fn new(desc: NodeDesc, processor: Box<dyn Processor>) -> Self {
-        let mut ports = Vec::with_capacity(desc.num_outputs);
-        ports.resize(desc.num_outputs, AudioPortDesc { num_channels: 1 });
-
         const HARDCODED_NUM_FRAMES: usize = 1024;
-        let output_buffers = AudioBuffers::new(ports.as_slice(), HARDCODED_NUM_FRAMES);
+        let output_buffers = AudioBuffers::new(desc.num_outputs as u16, HARDCODED_NUM_FRAMES);
 
         Self {
             desc,
@@ -375,15 +373,11 @@ impl Graph {
 
             node.output_buffers.prepare_for_processing(num_frames);
 
-            let mut borrowed_output_ports: Vec<_> = node
-                .output_buffers
-                .ports
-                .iter()
-                .map(|port| port.borrow_mut())
-                .collect();
-
-            node.processor
-                .process(self, node, borrowed_output_ports.as_mut_slice());
+            node.processor.process(
+                self,
+                node,
+                node.output_buffers.channels.borrow_mut().as_mut_slice(),
+            );
         }
     }
 
@@ -447,45 +441,42 @@ pub trait Processor: Send + Debug {
         &self,
         graph: &Graph,
         node: &Node,
-        out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
+        out_audio_buffers: &mut [AudioBlockSequential<f32>],
     );
 }
 
-#[derive(Clone)]
-pub struct AudioPortDesc {
-    pub num_channels: u16,
-}
-
 pub struct AudioBuffers {
-    ports: Vec<RefCell<AudioBlockSequential<f32>>>,
+    channels: RefCell<Vec<AudioBlockSequential<f32>>>,
 }
 
 impl AudioBuffers {
-    fn new(ports: &[AudioPortDesc], num_frames: usize) -> Self {
+    fn new(num_channels: u16, num_frames: usize) -> Self {
         AudioBuffers {
-            ports: ports
-                .iter()
-                .map(|desc| AudioBlockSequential::new(desc.num_channels, num_frames))
-                .map(RefCell::new)
-                .collect(),
+            channels: RefCell::new(AudioBuffers::build_channels(num_channels, num_frames)),
         }
     }
 
-    pub fn get(&self, channel: u16) -> Ref<'_, AudioBlockSequential<f32>> {
-        self.ports[channel as usize].borrow()
+    fn build_channels(num_channels: u16, num_frames: usize) -> Vec<AudioBlockSequential<f32>> {
+        (0..num_channels)
+            .map(|_| AudioBlockSequential::new(1, num_frames))
+            .collect()
+    }
+
+    pub fn get(&self) -> Ref<'_, Vec<AudioBlockSequential<f32>>> {
+        self.channels.borrow()
     }
 
     fn prepare_for_processing(&self, num_frames: usize) {
-        for port in &self.ports {
-            let mut port_ref = port.borrow_mut();
-            if port_ref.num_frames_allocated() < num_frames {
-                println!("Allocating new audio buffers for {num_frames} frames");
-                let num_channels = port_ref.num_channels();
-                drop(port_ref);
+        let mut channels = self.channels.borrow_mut();
 
-                port.replace(AudioBlockSequential::new(num_channels, num_frames));
-            } else {
-                port_ref.set_active_num_frames(num_frames);
+        if let Some(channel) = channels.first()
+            && channel.num_frames_allocated() < num_frames
+        {
+            println!("Allocating new audio buffers for {num_frames} frames");
+            *channels = AudioBuffers::build_channels(channels.len() as u16, num_frames);
+        } else {
+            for channel in channels.iter_mut() {
+                channel.set_active_num_frames(num_frames);
             }
         }
     }
@@ -513,7 +504,7 @@ mod tests {
             &self,
             graph: &Graph,
             node: &Node,
-            out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
+            out_audio_buffers: &mut [AudioBlockSequential<f32>],
         ) {
             out_audio_buffers[0].channel_mut(0)[0] = self.0;
         }
@@ -527,7 +518,7 @@ mod tests {
             &self,
             graph: &Graph,
             node: &Node,
-            out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
+            out_audio_buffers: &mut [AudioBlockSequential<f32>],
         ) {
             out_audio_buffers[0].channel_mut(0).fill(0.0);
 
@@ -536,13 +527,12 @@ mod tests {
                 .input_nodes
                 .iter()
                 .map(|id| &graph.nodes[id.0])
-                .map(|node| node.output_buffers.ports[0].borrow());
+                .map(|node| node.output_buffers.channels.borrow());
 
             for input in inputs {
-                for (input, mut output) in input
-                    .channel(0)
-                    .iter()
-                    .zip(out_audio_buffers[0].channel_iter_mut(0))
+                let input = input[0].channel(0);
+                for (input, mut output) in
+                    input.iter().zip(out_audio_buffers[0].channel_iter_mut(0))
                 {
                     *output += *input;
                 }
@@ -559,7 +549,7 @@ mod tests {
             &self,
             graph: &Graph,
             node: &Node,
-            out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
+            out_audio_buffers: &mut [AudioBlockSequential<f32>],
         ) {
             self.log.write().unwrap().push(node.desc.id);
         }
@@ -690,9 +680,6 @@ mod tests {
         let mut graph = Graph::new(graph, None);
         graph.process(a, 1);
 
-        assert_eq!(
-            2.0,
-            graph.nodes[a.0].output_buffers.ports[0].borrow().channel(0)[0]
-        );
+        assert_eq!(2.0, graph.nodes[a.0].output_buffers.get()[0].channel(0)[0]);
     }
 }

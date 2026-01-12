@@ -1,5 +1,5 @@
 use std::{
-    cell::{Cell, RefMut},
+    cell::Cell,
     sync::mpsc::{Receiver, Sender, channel},
 };
 
@@ -42,7 +42,7 @@ impl Processor for GainControlProcessor {
         &self,
         graph: &Graph,
         node: &Node,
-        out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
+        out_audio_buffers: &mut [AudioBlockSequential<f32>],
     ) {
         self.process_messages();
 
@@ -52,7 +52,8 @@ impl Processor for GainControlProcessor {
             let input_connection = node.desc.input_connections[channel];
             if let InputConnection::Connected(input_node_id, input_channel) = input_connection {
                 let input_node = graph.get_node(&input_node_id);
-                let input_buffer = input_node.output_buffers.get(input_channel as u16);
+                let input_buffers = input_node.output_buffers.get();
+                let input_buffer = &input_buffers[input_channel];
 
                 for (input, output) in input_buffer
                     .channel_iter(0)
@@ -82,7 +83,7 @@ impl Processor for Summer {
         &self,
         graph: &Graph,
         node: &Node,
-        out_audio_buffers: &mut [RefMut<'_, AudioBlockSequential<f32>>],
+        out_audio_buffers: &mut [AudioBlockSequential<f32>],
     ) {
         for (channel, output_buffer) in out_audio_buffers.iter_mut().enumerate() {
             output_buffer.fill_with(0.0);
@@ -98,7 +99,8 @@ impl Processor for Summer {
             for input in inputs {
                 if let InputConnection::Connected(input_node, input_channel) = input {
                     let input_node = graph.get_node(input_node);
-                    let input_buffer = input_node.output_buffers.get(*input_channel as u16);
+                    let input_buffers = input_node.output_buffers.get();
+                    let input_buffer = &input_buffers[*input_channel];
 
                     for (input, output) in input_buffer
                         .channel_iter(0)
