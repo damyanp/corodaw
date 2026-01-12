@@ -33,6 +33,7 @@ struct AudioGraphInner {
 pub struct AudioGraphWorker {
     receiver: Receiver<AudioGraphMessage>,
     graph: Option<Graph>,
+    output_node_id: Option<NodeId>,
 }
 
 enum AudioGraphMessage {
@@ -145,6 +146,7 @@ impl AudioGraphWorker {
         Self {
             receiver,
             graph: None,
+            output_node_id: None,
         }
     }
 
@@ -153,19 +155,23 @@ impl AudioGraphWorker {
 
         for message in self.receiver.try_iter() {
             match message {
-                AudioGraphMessage::UpdateGraph(graph_desc) => new_graph_desc = Some(graph_desc),
+                AudioGraphMessage::UpdateGraph(graph_desc) => {
+                    new_graph_desc = Some(graph_desc);
+                }
             }
         }
 
         if let Some(new_graph_desc) = new_graph_desc {
+            self.output_node_id = new_graph_desc.output_node_id;
             self.graph = Some(Graph::new(new_graph_desc, self.graph.take()));
         }
 
         let num_frames = data.len() / channels as usize;
         let mut block = AudioBlockInterleavedViewMut::from_slice(data, channels, num_frames);
 
-        if let Some(graph) = self.graph.as_mut() {
-            let output_node_id = graph.output_node;
+        if let Some(graph) = self.graph.as_mut()
+            && let Some(output_node_id) = self.output_node_id
+        {
             graph.process(output_node_id, num_frames);
 
             let output_node = graph.get_node(&output_node_id);
@@ -204,7 +210,7 @@ pub struct NodeId(usize);
 struct GraphDesc {
     nodes: Vec<NodeDesc>,
     processors: Vec<Option<Box<dyn Processor>>>,
-    output_node: Option<NodeId>,
+    output_node_id: Option<NodeId>,
 }
 
 #[derive(Clone)]
@@ -287,7 +293,7 @@ impl GraphDesc {
     }
 
     pub fn set_output_node(&mut self, node_id: NodeId) {
-        self.output_node = Some(node_id);
+        self.output_node_id = Some(node_id);
     }
 
     pub fn send(&mut self) -> Self {
@@ -301,7 +307,7 @@ impl GraphDesc {
         Self {
             nodes: self.nodes.clone(),
             processors,
-            output_node: self.output_node,
+            output_node_id: self.output_node_id,
         }
     }
 }
@@ -327,7 +333,6 @@ impl Node {
 
 pub struct Graph {
     nodes: Vec<Node>,
-    output_node: NodeId,
 }
 
 impl Graph {
@@ -356,10 +361,7 @@ impl Graph {
             .map(|(n, p)| Node::new(n, p.unwrap()))
             .collect();
 
-        Self {
-            nodes,
-            output_node: desc.output_node.unwrap(),
-        }
+        Self { nodes }
     }
 
     pub fn get_node(&self, node_id: &NodeId) -> &Node {
