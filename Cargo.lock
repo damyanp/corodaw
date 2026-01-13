@@ -1499,9 +1499,9 @@ dependencies = [
 name = "corodaw-egui"
 version = "0.1.0"
 dependencies = [
- "audio-graph",
  "eframe",
  "engine",
+ "project",
  "smol",
  "winit",
 ]
@@ -1511,7 +1511,6 @@ name = "corodaw-gpui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "audio-graph",
  "engine",
  "gpui",
  "gpui-component",

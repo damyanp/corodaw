@@ -1,18 +1,11 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use audio_graph::{AudioGraph, NodeId};
 use eframe::{
     UserEvent,
     egui::{self, ComboBox},
 };
-use engine::{
-    audio::Audio,
-    builtin::Summer,
-    plugins::{
-        ClapPluginId, ClapPluginManager,
-        discovery::{FoundPlugin, get_plugins},
-    },
-};
+use engine::plugins::discovery::{FoundPlugin, get_plugins};
+use project::*;
 use smol::LocalExecutor;
 use winit::event_loop::EventLoop;
 
@@ -24,37 +17,21 @@ struct Corodaw {
     executor: Rc<LocalExecutor<'static>>,
 
     found_plugins: Vec<FoundPlugin>,
-    manager: Rc<ClapPluginManager>,
 
     selected_plugin: Option<FoundPlugin>,
 
+    project: Rc<RefCell<model::Project>>,
     modules: Rc<RefCell<Vec<Module>>>,
-    counter: u32,
-
-    summer: NodeId,
-
-    _audio: Audio,
 }
 
 impl Corodaw {
     fn new(executor: Rc<LocalExecutor<'static>>) -> Self {
-        let (audio_graph, audio_graph_worker) = AudioGraph::new();
-        let audio = Audio::new(audio_graph_worker).unwrap();
-
-        let summer = audio_graph.add_node(0, 2, Box::new(Summer));
-        audio_graph.set_output_node(summer);
-
-        let clap_plugin_manager = Rc::new(ClapPluginManager::new(audio_graph));
-
         Self {
             executor,
             found_plugins: get_plugins(),
-            manager: clap_plugin_manager,
             selected_plugin: None,
+            project: Rc::default(),
             modules: Rc::default(),
-            counter: 0,
-            summer,
-            _audio: audio,
         }
     }
 
@@ -85,36 +62,29 @@ impl Corodaw {
         });
     }
 
-    fn show_plugin_ui(&self, clap_plugin_id: ClapPluginId) {
-        let manager = self.manager.clone();
-        manager.show_gui(clap_plugin_id);
-    }
-
     fn add_module(&mut self, ctx: egui::Context) {
         let found_plugin = self.selected_plugin.as_ref().unwrap().clone();
-        let name = format!("Module {}: {}", self.counter, found_plugin.name);
-        self.counter += 1;
 
+        let name = format!(
+            "Module {}: {}",
+            self.modules.borrow().len() + 1,
+            found_plugin.name
+        );
         let modules = self.modules.clone();
-        let summer = self.summer;
-        let clap_plugin_manager = self.manager.clone();
+        let clap_plugin_manager = self.project.borrow().clap_plugin_manager();
+        let project = self.project.clone();
 
         self.executor
             .spawn(async move {
-                let module = Module::new(name, clap_plugin_manager.clone(), &found_plugin).await;
-                let mut modules = modules.borrow_mut();
+                let initial_gain = 1.0;
+                let module =
+                    model::Module::new(name, &clap_plugin_manager, &found_plugin, initial_gain)
+                        .await;
+                let module_id = project.borrow_mut().add_module(module);
 
-                for port in 0..2 {
-                    clap_plugin_manager.audio_graph.connect_grow_inputs(
-                        summer,
-                        modules.len() * 2 + port,
-                        module.get_output_node(),
-                        port,
-                    );
-                }
-                modules.push(module);
+                let module = Module::new(module_id, initial_gain);
+                modules.borrow_mut().push(module);
 
-                clap_plugin_manager.audio_graph.update();
                 ctx.request_repaint();
             })
             .detach();
