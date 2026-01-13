@@ -71,7 +71,7 @@ impl AudioGraph {
             .connect(dest_node, dest_port, src_node, src_port)
     }
 
-    pub fn connect_grow_input(
+    pub fn connect_grow_inputs(
         &self,
         dest_node: NodeId,
         dest_port: usize,

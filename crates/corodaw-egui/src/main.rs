@@ -105,7 +105,7 @@ impl Corodaw {
                 let mut modules = modules.borrow_mut();
 
                 for port in 0..2 {
-                    clap_plugin_manager.audio_graph.connect_grow_input(
+                    clap_plugin_manager.audio_graph.connect_grow_inputs(
                         summer,
                         modules.len() * 2 + port,
                         module.get_output_node(),

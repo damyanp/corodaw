@@ -81,7 +81,7 @@ impl Corodaw {
 
     fn add_module(&mut self, module: Module) {
         for port in 0..2 {
-            self.clap_plugin_manager.audio_graph.connect_grow_input(
+            self.clap_plugin_manager.audio_graph.connect_grow_inputs(
                 self.summer,
                 self.modules.len() * 2 + port,
                 module.get_output_node(),
