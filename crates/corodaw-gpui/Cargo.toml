@@ -6,11 +6,6 @@ edition = "2024"
 [dependencies]
 anyhow.workspace = true
 audio-graph = { path = "../audio-graph" }
-clack-extensions.workspace = true
-cpal.workspace = true
 engine = { path = "../engine" }
-futures.workspace = true
-futures-channel.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
-raw-window-handle.workspace = true

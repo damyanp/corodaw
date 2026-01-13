@@ -1499,15 +1499,9 @@ dependencies = [
 name = "corodaw-egui"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "audio-graph",
- "clack-extensions",
- "cpal",
  "eframe",
  "engine",
- "futures",
- "futures-channel",
- "raw-window-handle",
  "smol",
  "winit",
 ]
@@ -1518,14 +1512,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "audio-graph",
- "clack-extensions",
- "cpal",
  "engine",
- "futures",
- "futures-channel",
  "gpui",
  "gpui-component",
- "raw-window-handle",
 ]
 
 [[package]]
@@ -2061,7 +2050,6 @@ dependencies = [
  "cpal",
  "derivative",
  "dirs 6.0.0",
- "futures",
  "futures-channel",
  "serde",
  "serde_json",

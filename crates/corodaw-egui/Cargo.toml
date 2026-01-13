@@ -4,14 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow.workspace = true
 audio-graph = { path = "../audio-graph" }
-clack-extensions.workspace = true
-cpal.workspace = true
 eframe = "0.33.3"
 engine = { path = "../engine" }
-futures.workspace = true
-futures-channel.workspace = true
-raw-window-handle.workspace = true
 smol.workspace = true
 winit = "0.30.12"
