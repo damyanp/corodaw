@@ -2,11 +2,11 @@
 resolver = "3"
 members = [
   "crates/audio-graph",
-  "crates/corodaw",
   "crates/corodaw-egui",
+  "crates/corodaw-gpui",
   "crates/engine"
 ]
-default-members = ["crates/corodaw"]
+default-members = ["crates/corodaw-gpui"]
 
 [workspace.dependencies]
 anyhow = "1.0.100"
