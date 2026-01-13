@@ -50,23 +50,11 @@ pub mod model {
             self.modules.len()
         }
 
-        pub async fn add_module(
-            &mut self,
-            name: String,
-            plugin: &FoundPlugin,
-            initial_gain: f32,
-        ) -> Id<Module> {
-            let clap_plugin = self.clap_plugin_manager.create_plugin(plugin.clone()).await;
+        pub fn clap_plugin_manager(&self) -> Rc<ClapPluginManager> {
+            self.clap_plugin_manager.clone()
+        }
 
-            let module = Module::new(
-                name,
-                &self.clap_plugin_manager.audio_graph,
-                plugin.id.clone(),
-                clap_plugin,
-                initial_gain,
-            )
-            .await;
-
+        pub fn add_module(&mut self, module: Module) -> Id<Module> {
             let module_id = module.id();
 
             for port in 0..2 {
@@ -115,11 +103,15 @@ pub mod model {
     impl Module {
         pub async fn new(
             name: String,
-            audio_graph: &AudioGraph,
-            plugin_id: String,
-            clap_plugin: ClapPluginShared,
+            clap_plugin_manager: &Rc<ClapPluginManager>,
+            found_plugin: &FoundPlugin,
             gain_value: f32,
         ) -> Module {
+            let clap_plugin = clap_plugin_manager
+                .create_plugin(found_plugin.clone())
+                .await;
+            let audio_graph = &clap_plugin_manager.audio_graph;
+
             let gain_control = GainControl::new(audio_graph, gain_value);
             let plugin_node_id = clap_plugin.create_audio_graph_node(audio_graph).await;
 
@@ -131,7 +123,7 @@ pub mod model {
             Self {
                 id: Id::new(),
                 name,
-                plugin_id,
+                plugin_id: found_plugin.id.clone(),
                 gain_value,
                 clap_plugin: Some(clap_plugin),
                 gain_control: Some(gain_control),
