@@ -10,11 +10,11 @@ audio-graph = { path = "../audio-graph" }
 clack-extensions.workspace = true
 clack-host.workspace = true
 cpal.workspace = true
-derivative = "2.2.0"
+derivative.workspace = true
 dirs = "6.0.0"
 futures-channel.workspace = true
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
+serde.workspace = true
+serde_json.workspace = true
 smol.workspace = true
 walkdir = "2.5.0"
 windows = { version = "*", features = [

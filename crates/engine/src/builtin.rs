@@ -4,9 +4,12 @@ use std::{
 };
 
 use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockOps, AudioBlockSequential};
+use derivative::Derivative;
 
 use audio_graph::{AudioGraph, Graph, InputConnection, Node, NodeId, Processor};
 
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct GainControl {
     pub node_id: NodeId,
     sender: Sender<f32>,

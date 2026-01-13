@@ -1515,6 +1515,7 @@ dependencies = [
  "engine",
  "gpui",
  "gpui-component",
+ "project",
 ]
 
 [[package]]
@@ -5423,6 +5424,18 @@ checksum = "52717f9a02b6965224f95ca2a81e2e0c5c43baacd28ca057577988930b6c3d5b"
 dependencies = [
  "quote",
  "syn 2.0.114",
+]
+
+[[package]]
+name = "project"
+version = "0.1.0"
+dependencies = [
+ "audio-graph",
+ "derivative",
+ "engine",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

@@ -1,12 +1,12 @@
 [package]
-name = "corodaw-gpui"
+name = "project"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow.workspace = true
 audio-graph = { path = "../audio-graph" }
+derivative.workspace = true
 engine = { path = "../engine" }
-gpui.workspace = true
-gpui-component.workspace = true
-project = { path = "../project" }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
