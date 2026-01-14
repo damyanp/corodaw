@@ -43,13 +43,12 @@ mod ui_host;
 pub struct ClapPluginId(usize);
 
 pub struct ClapPluginManager {
-    pub audio_graph: AudioGraph,
     sender: Sender<Message>,
     _plugin_host: JoinHandle<()>,
 }
 
-impl ClapPluginManager {
-    pub fn new(audio_graph: AudioGraph) -> Self {
+impl Default for ClapPluginManager {
+    fn default() -> Self {
         let (sender, receiver) = channel();
 
         let plugin_host = {
@@ -62,12 +61,13 @@ impl ClapPluginManager {
         };
 
         Self {
-            audio_graph,
             sender,
             _plugin_host: plugin_host,
         }
     }
+}
 
+impl ClapPluginManager {
     pub async fn create_plugin(&self, plugin: FoundPlugin) -> ClapPluginShared {
         let (sender, receiver) = oneshot::channel();
         self.sender

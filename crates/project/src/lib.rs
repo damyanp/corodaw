@@ -17,6 +17,9 @@ pub mod model {
         modules: Vec<Module>,
 
         #[serde(skip)]
+        audio_graph: AudioGraph,
+
+        #[serde(skip)]
         clap_plugin_manager: Rc<ClapPluginManager>,
 
         #[serde(skip)]
@@ -34,10 +37,11 @@ pub mod model {
             let summer = audio_graph.add_node(0, 2, Box::new(Summer));
             audio_graph.set_output_node(summer);
 
-            let clap_plugin_manager = Rc::new(ClapPluginManager::new(audio_graph));
+            let clap_plugin_manager = Rc::new(ClapPluginManager::default());
 
             Self {
                 modules: Vec::default(),
+                audio_graph,
                 clap_plugin_manager,
                 summer,
                 _audio: audio,
@@ -50,6 +54,10 @@ pub mod model {
             self.modules.len()
         }
 
+        pub fn audio_graph(&self) -> AudioGraph {
+            self.audio_graph.clone()
+        }
+
         pub fn clap_plugin_manager(&self) -> Rc<ClapPluginManager> {
             self.clap_plugin_manager.clone()
         }
@@ -58,7 +66,7 @@ pub mod model {
             let module_id = module.id();
 
             for port in 0..2 {
-                self.clap_plugin_manager.audio_graph.connect_grow_inputs(
+                self.audio_graph.connect_grow_inputs(
                     self.summer,
                     self.num_modules() * 2 + port,
                     module.output_node(),
@@ -68,7 +76,7 @@ pub mod model {
 
             self.modules.push(module);
 
-            self.clap_plugin_manager.audio_graph.update();
+            self.audio_graph.update();
 
             module_id
         }
@@ -103,6 +111,7 @@ pub mod model {
     impl Module {
         pub async fn new(
             name: String,
+            audio_graph: &AudioGraph,
             clap_plugin_manager: &Rc<ClapPluginManager>,
             found_plugin: &FoundPlugin,
             gain_value: f32,
@@ -110,7 +119,6 @@ pub mod model {
             let clap_plugin = clap_plugin_manager
                 .create_plugin(found_plugin.clone())
                 .await;
-            let audio_graph = &clap_plugin_manager.audio_graph;
 
             let gain_control = GainControl::new(audio_graph, gain_value);
             let plugin_node_id = clap_plugin.create_audio_graph_node(audio_graph).await;

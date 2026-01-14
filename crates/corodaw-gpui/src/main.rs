@@ -46,15 +46,21 @@ impl CorodawProject {
     async fn new_module(name: String, plugin: &FoundPlugin, cx: &AsyncApp) -> Module {
         let initial_gain = 1.0;
 
-        let (project, clap_plugin_manager) = cx
-            .read_global(|project: &CorodawProject, _| {
-                let proj = project.project.clone();
-                let manager = proj.borrow().clap_plugin_manager();
-                (proj, manager)
-            })
+        let project = cx
+            .read_global(|project: &CorodawProject, _| project.project.clone())
             .unwrap();
 
-        let module = model::Module::new(name, &clap_plugin_manager, plugin, initial_gain).await;
+        let audio_graph = project.borrow().audio_graph();
+        let clap_plugin_manager = project.borrow().clap_plugin_manager();
+
+        let module = model::Module::new(
+            name,
+            &audio_graph,
+            &clap_plugin_manager,
+            plugin,
+            initial_gain,
+        )
+        .await;
         let module_id = project.borrow_mut().add_module(module);
 
         cx.update(|cx| Module::new(module_id, initial_gain, cx))

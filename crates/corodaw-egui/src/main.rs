@@ -71,15 +71,21 @@ impl Corodaw {
             found_plugin.name
         );
         let modules = self.modules.clone();
-        let clap_plugin_manager = self.project.borrow().clap_plugin_manager();
         let project = self.project.clone();
 
         self.executor
             .spawn(async move {
+                let audio_graph = project.borrow().audio_graph();
+                let clap_plugin_manager = project.borrow().clap_plugin_manager();
                 let initial_gain = 1.0;
-                let module =
-                    model::Module::new(name, &clap_plugin_manager, &found_plugin, initial_gain)
-                        .await;
+                let module = model::Module::new(
+                    name,
+                    &audio_graph,
+                    &clap_plugin_manager,
+                    &found_plugin,
+                    initial_gain,
+                )
+                .await;
                 let module_id = project.borrow_mut().add_module(module);
 
                 let module = Module::new(module_id, initial_gain);
