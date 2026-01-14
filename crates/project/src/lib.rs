@@ -1,5 +1,5 @@
 pub mod model {
-    use std::{marker::PhantomData, rc::Rc};
+    use std::marker::PhantomData;
 
     use audio_graph::{AudioGraph, NodeId};
     use derivative::Derivative;
@@ -20,7 +20,7 @@ pub mod model {
         audio_graph: AudioGraph,
 
         #[serde(skip)]
-        clap_plugin_manager: Rc<ClapPluginManager>,
+        clap_plugin_manager: ClapPluginManager,
 
         #[serde(skip)]
         summer: NodeId,
@@ -37,7 +37,7 @@ pub mod model {
             let summer = audio_graph.add_node(0, 2, Box::new(Summer));
             audio_graph.set_output_node(summer);
 
-            let clap_plugin_manager = Rc::new(ClapPluginManager::default());
+            let clap_plugin_manager = ClapPluginManager::default();
 
             Self {
                 modules: Vec::default(),
@@ -58,7 +58,7 @@ pub mod model {
             self.audio_graph.clone()
         }
 
-        pub fn clap_plugin_manager(&self) -> Rc<ClapPluginManager> {
+        pub fn clap_plugin_manager(&self) -> ClapPluginManager {
             self.clap_plugin_manager.clone()
         }
 
@@ -112,7 +112,7 @@ pub mod model {
         pub async fn new(
             name: String,
             audio_graph: &AudioGraph,
-            clap_plugin_manager: &Rc<ClapPluginManager>,
+            clap_plugin_manager: &ClapPluginManager,
             found_plugin: &FoundPlugin,
             gain_value: f32,
         ) -> Module {

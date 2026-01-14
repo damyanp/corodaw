@@ -42,12 +42,41 @@ mod ui_host;
 #[derive(Debug, Hash, Copy, Clone, Eq, PartialEq)]
 pub struct ClapPluginId(usize);
 
+#[derive(Default, Clone)]
 pub struct ClapPluginManager {
+    inner: Rc<RefCell<ClapPluginManagerInner>>,
+}
+
+impl ClapPluginManager {
+    pub async fn create_plugin(&self, plugin: FoundPlugin) -> ClapPluginShared {
+        let (sender, receiver) = oneshot::channel();
+        self.inner
+            .borrow()
+            .sender
+            .send(Message::CreatePlugin(plugin, sender))
+            .unwrap();
+        receiver.await.unwrap()
+    }
+
+    pub fn show_gui(&self, clap_plugin_id: ClapPluginId) {
+        self.inner
+            .borrow()
+            .sender
+            .send(Message::ShowGui(clap_plugin_id))
+            .unwrap();
+    }
+
+    pub async fn has_gui(&self, _clap_plugin_id: ClapPluginId) -> bool {
+        todo!();
+    }
+}
+
+struct ClapPluginManagerInner {
     sender: Sender<Message>,
     _plugin_host: JoinHandle<()>,
 }
 
-impl Default for ClapPluginManager {
+impl Default for ClapPluginManagerInner {
     fn default() -> Self {
         let (sender, receiver) = channel();
 
@@ -64,25 +93,6 @@ impl Default for ClapPluginManager {
             sender,
             _plugin_host: plugin_host,
         }
-    }
-}
-
-impl ClapPluginManager {
-    pub async fn create_plugin(&self, plugin: FoundPlugin) -> ClapPluginShared {
-        let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Message::CreatePlugin(plugin, sender))
-            .unwrap();
-
-        receiver.await.unwrap()
-    }
-
-    pub fn show_gui(&self, clap_plugin_id: ClapPluginId) {
-        self.sender.send(Message::ShowGui(clap_plugin_id)).unwrap();
-    }
-
-    pub async fn has_gui(&self, _clap_plugin_id: ClapPluginId) -> bool {
-        todo!();
     }
 }
 
