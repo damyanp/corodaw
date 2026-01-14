@@ -1,4 +1,11 @@
-use std::{cell::RefCell, collections::HashMap, hash::Hash, pin::Pin, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    hash::Hash,
+    pin::Pin,
+    rc::Rc,
+    sync::{Arc, Weak},
+};
 
 use crate::plugins::{ClapPlugin, ClapPluginId};
 use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui, Window};
@@ -30,8 +37,31 @@ impl Hash for WindowHandle {
 unsafe impl Send for WindowHandle {}
 unsafe impl Sync for WindowHandle {}
 
+#[derive(Debug)]
+pub struct GuiHandle(Weak<WindowHandle>);
+
+impl Hash for GuiHandle {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.as_ptr().hash(state);
+    }
+}
+
+impl PartialEq for GuiHandle {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_ptr() == other.0.as_ptr()
+    }
+}
+
+impl Eq for GuiHandle {}
+
+impl GuiHandle {
+    pub fn is_visible(&self) -> bool {
+        self.0.strong_count() > 0
+    }
+}
+
 pub struct PluginUiHost {
-    plugin_to_window: RefCell<HashMap<ClapPluginId, WindowHandle>>,
+    plugin_to_window: RefCell<HashMap<ClapPluginId, Arc<WindowHandle>>>,
     window_to_plugin: RefCell<HashMap<WindowHandle, Rc<ClapPlugin>>>,
 
     wndclass_name: PCSTR,
@@ -136,13 +166,7 @@ impl PluginUiHost {
         }
     }
 
-    pub fn _has_gui(&self, clap_plugin: &ClapPlugin) -> bool {
-        self.plugin_to_window
-            .borrow()
-            .contains_key(&clap_plugin.get_id())
-    }
-
-    pub async fn show_gui(self: &Pin<Box<Self>>, clap_plugin: &Rc<ClapPlugin>) {
+    pub async fn show_gui(self: &Pin<Box<Self>>, clap_plugin: &Rc<ClapPlugin>) -> GuiHandle {
         let plugin_id = clap_plugin.get_id();
         if self.plugin_to_window.borrow().contains_key(&plugin_id) {
             todo!("bring the window to the front or something");
@@ -192,12 +216,17 @@ impl PluginUiHost {
 
         plugin_gui.show(&mut plugin_handle).unwrap();
 
+        let window_handle = Arc::new(WindowHandle(hwnd));
+        let weak_window_handle = Arc::downgrade(&window_handle);
+
         self.plugin_to_window
             .borrow_mut()
-            .insert(plugin_id, WindowHandle(hwnd));
+            .insert(plugin_id, window_handle);
         self.window_to_plugin
             .borrow_mut()
             .insert(WindowHandle(hwnd), clap_plugin.clone());
+
+        GuiHandle(weak_window_handle)
     }
 
     fn pump_windows_message_loop(&self) {

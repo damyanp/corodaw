@@ -42,16 +42,26 @@ impl Module {
 
     fn on_show(&mut self, _e: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let project: &CorodawProject = cx.global();
-        project.project.borrow().show_gui(&self.id);
+        let project = project.project.clone();
+        let id = self.id;
+
+        cx.spawn(async move |_, cx| {
+            let future = project.borrow().show_gui(id);
+            future.await;
+            cx.refresh().unwrap();
+        })
+        .detach();
     }
 }
 
 impl Render for Module {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let show_disabled = false; // TODO
         let project: &CorodawProject = cx.global();
         let project = project.project.borrow();
         let module = project.module(&self.id);
+        let show_disabled = module
+            .map(|module| module.has_gui(&project.clap_plugin_manager()))
+            .unwrap_or(true);
 
         if let Some(module) = module {
             div()

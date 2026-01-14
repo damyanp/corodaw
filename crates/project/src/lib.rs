@@ -89,8 +89,10 @@ pub mod model {
             self.modules.iter_mut().find(|m| m.id == *id)
         }
 
-        pub fn show_gui(&self, id: &Id<Module>) {
-            self.module(id).unwrap().show_gui(&self.clap_plugin_manager);
+        pub fn show_gui(&self, id: Id<Module>) -> impl Future<Output = ()> + 'static {
+            self.module(&id)
+                .unwrap()
+                .show_gui(self.clap_plugin_manager.clone())
         }
     }
 
@@ -161,8 +163,18 @@ pub mod model {
             self.gain_control.as_ref().unwrap().node_id
         }
 
-        pub fn show_gui(&self, clap_plugin_manager: &ClapPluginManager) {
-            clap_plugin_manager.show_gui(self.clap_plugin.as_ref().unwrap().plugin_id);
+        pub fn show_gui(
+            &self,
+            clap_plugin_manager: ClapPluginManager,
+        ) -> impl Future<Output = ()> + 'static {
+            let clap_plugin_id = self.clap_plugin.as_ref().unwrap().plugin_id;
+            async move {
+                clap_plugin_manager.show_gui(clap_plugin_id).await;
+            }
+        }
+
+        pub fn has_gui(&self, clap_plugin_manager: &ClapPluginManager) -> bool {
+            clap_plugin_manager.has_gui(&self.clap_plugin.as_ref().unwrap().plugin_id)
         }
     }
 

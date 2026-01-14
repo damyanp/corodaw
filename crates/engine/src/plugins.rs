@@ -34,6 +34,8 @@ use discovery::FoundPlugin;
 use timers::Timers;
 use ui_host::PluginUiHost;
 
+use crate::plugins::ui_host::GuiHandle;
+
 mod clap_adapter;
 pub mod discovery;
 mod timers;
@@ -58,21 +60,35 @@ impl ClapPluginManager {
         receiver.await.unwrap()
     }
 
-    pub fn show_gui(&self, clap_plugin_id: ClapPluginId) {
+    pub async fn show_gui(&self, clap_plugin_id: ClapPluginId) {
+        let (sender, receiver) = oneshot::channel();
+
         self.inner
             .borrow()
             .sender
-            .send(Message::ShowGui(clap_plugin_id))
+            .send(Message::ShowGui(clap_plugin_id, sender))
             .unwrap();
+
+        let gui_handle = receiver.await.unwrap();
+        self.inner
+            .borrow_mut()
+            .guis
+            .insert(clap_plugin_id, gui_handle);
     }
 
-    pub async fn has_gui(&self, _clap_plugin_id: ClapPluginId) -> bool {
-        todo!();
+    pub fn has_gui(&self, clap_plugin_id: &ClapPluginId) -> bool {
+        self.inner
+            .borrow()
+            .guis
+            .get(clap_plugin_id)
+            .map(|gui_handle| gui_handle.is_visible())
+            .unwrap_or(false)
     }
 }
 
 struct ClapPluginManagerInner {
     sender: Sender<Message>,
+    guis: HashMap<ClapPluginId, GuiHandle>,
     _plugin_host: JoinHandle<()>,
 }
 
@@ -91,6 +107,7 @@ impl Default for ClapPluginManagerInner {
 
         Self {
             sender,
+            guis: HashMap::default(),
             _plugin_host: plugin_host,
         }
     }
@@ -155,14 +172,15 @@ impl PluginHostThread {
                             .borrow_mut()
                             .call_on_main_thread_callback();
                     }
-                    Message::ShowGui(clap_plugin_id) => {
+                    Message::ShowGui(clap_plugin_id, sender) => {
                         let clap_plugin = self.get_plugin(clap_plugin_id);
 
                         let this = self.clone();
                         self.executor
                             .spawn(async move {
                                 println!("show gui!");
-                                this.plugin_ui_host.show_gui(&clap_plugin).await;
+                                let handle = this.plugin_ui_host.show_gui(&clap_plugin).await;
+                                sender.send(handle).unwrap();
                             })
                             .detach();
                     }
@@ -290,7 +308,7 @@ impl ClapPlugin {
 
 enum Message {
     CreatePlugin(FoundPlugin, oneshot::Sender<ClapPluginShared>),
-    ShowGui(ClapPluginId),
+    ShowGui(ClapPluginId, oneshot::Sender<GuiHandle>),
     RunOnMainThread(ClapPluginId),
     ResizeHintsChanged(ClapPluginId),
     RequestResize(ClapPluginId, GuiSize),

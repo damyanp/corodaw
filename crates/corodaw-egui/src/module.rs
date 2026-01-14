@@ -51,12 +51,23 @@ impl Module {
                             .set_gain(gain_value);
                     }
 
-                    // TODO
-                    let has_gui = false;
+                    let has_gui = {
+                        let project = corodaw.project.borrow();
+                        let module = project.module(&self.id).unwrap();
+                        module.has_gui(&project.clap_plugin_manager())
+                    };
 
                     ui.add_enabled_ui(!has_gui, |ui| {
                         if ui.button("Show").clicked() {
-                            corodaw.project.borrow().show_gui(&self.id);
+                            let project = corodaw.project.clone();
+                            let id = self.id;
+                            corodaw
+                                .executor
+                                .spawn(async move {
+                                    let future = project.borrow().show_gui(id);
+                                    future.await;
+                                })
+                                .detach();
                         }
                     });
                 });
