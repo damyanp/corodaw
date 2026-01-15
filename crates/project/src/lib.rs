@@ -89,11 +89,32 @@ pub mod model {
             self.modules.iter_mut().find(|m| m.id == *id)
         }
 
+        pub fn module_control(&mut self, id: &Id<Module>, control: ModuleControl) {
+            self.module_mut(id).unwrap().control(control);
+
+            let has_soloed = self.modules.iter().any(|m| m.is_soloed());
+            for module in self.modules.iter_mut() {
+                let muted = module.is_muted() || (has_soloed && !module.is_soloed());
+                module.update_gain(muted);
+            }
+        }
+
         pub fn show_gui(&self, id: Id<Module>) -> impl Future<Output = ()> + 'static {
             self.module(&id)
                 .unwrap()
                 .show_gui(self.clap_plugin_manager.clone())
         }
+
+        pub fn has_gui(&self, id: &Id<Module>) -> bool {
+            self.module(id).unwrap().has_gui(&self.clap_plugin_manager)
+        }
+    }
+
+    pub enum ModuleControl {
+        SetGain(f32),
+        ToggleMute,
+        ToggleSolo,
+        ToggleArmed,
     }
 
     #[derive(Serialize, Deserialize, Debug)]
@@ -102,6 +123,9 @@ pub mod model {
         name: String,
         plugin_id: String,
         gain_value: f32,
+        muted: bool,
+        soloed: bool,
+        armed: bool,
 
         #[serde(skip)]
         clap_plugin: Option<ClapPluginShared>,
@@ -135,6 +159,9 @@ pub mod model {
                 name,
                 plugin_id: found_plugin.id.clone(),
                 gain_value,
+                muted: false,
+                soloed: false,
+                armed: false,
                 clap_plugin: Some(clap_plugin),
                 gain_control: Some(gain_control),
             }
@@ -148,22 +175,30 @@ pub mod model {
             self.id
         }
 
-        pub fn gain(&self) -> f32 {
-            self.gain_value
+        fn control(&mut self, control: ModuleControl) {
+            match control {
+                ModuleControl::SetGain(gain) => self.gain_value = gain,
+                ModuleControl::ToggleMute => self.muted = !self.muted,
+                ModuleControl::ToggleSolo => self.soloed = !self.soloed,
+                ModuleControl::ToggleArmed => self.armed = !self.armed,
+            }
         }
 
-        pub fn set_gain(&mut self, gain: f32) {
-            self.gain_value = gain;
+        fn update_gain(&self, muted: bool) {
             if let Some(gain_control) = &self.gain_control {
-                gain_control.set_gain(gain);
+                gain_control.set_gain(if muted { 0.0 } else { self.gain_value });
             }
+        }
+
+        pub fn gain(&self) -> f32 {
+            self.gain_value
         }
 
         pub fn output_node(&self) -> NodeId {
             self.gain_control.as_ref().unwrap().node_id
         }
 
-        pub fn show_gui(
+        fn show_gui(
             &self,
             clap_plugin_manager: ClapPluginManager,
         ) -> impl Future<Output = ()> + 'static {
@@ -173,8 +208,20 @@ pub mod model {
             }
         }
 
-        pub fn has_gui(&self, clap_plugin_manager: &ClapPluginManager) -> bool {
+        fn has_gui(&self, clap_plugin_manager: &ClapPluginManager) -> bool {
             clap_plugin_manager.has_gui(&self.clap_plugin.as_ref().unwrap().plugin_id)
+        }
+
+        pub fn is_muted(&self) -> bool {
+            self.muted
+        }
+
+        pub fn is_soloed(&self) -> bool {
+            self.soloed
+        }
+
+        pub fn is_armed(&self) -> bool {
+            self.armed
         }
     }
 

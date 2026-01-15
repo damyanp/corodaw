@@ -5,7 +5,7 @@ use gpui_component::{
     *,
 };
 
-use project::*;
+use project::{model::ModuleControl, *};
 
 use crate::CorodawProject;
 
@@ -30,9 +30,7 @@ impl Module {
                 project
                     .project
                     .borrow_mut()
-                    .module_mut(&id)
-                    .unwrap()
-                    .set_gain(slider_value.start());
+                    .module_control(&id, model::ModuleControl::SetGain(slider_value.start()));
             }
         })
         .detach();
@@ -40,9 +38,35 @@ impl Module {
         Self { id, gain_slider }
     }
 
+    fn on_toggle_muted(&mut self, _e: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        CorodawProject::update_global(cx, |corodaw_project, _| {
+            corodaw_project
+                .project
+                .borrow_mut()
+                .module_control(&self.id, ModuleControl::ToggleMute);
+        })
+    }
+
+    fn on_toggle_soloed(&mut self, _e: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        CorodawProject::update_global(cx, |corodaw_project, _| {
+            corodaw_project
+                .project
+                .borrow_mut()
+                .module_control(&self.id, ModuleControl::ToggleSolo);
+        })
+    }
+
+    fn on_toggle_armed(&mut self, _e: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        CorodawProject::update_global(cx, |corodaw_project, _| {
+            corodaw_project
+                .project
+                .borrow_mut()
+                .module_control(&self.id, ModuleControl::ToggleArmed);
+        })
+    }
+
     fn on_show(&mut self, _e: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let project: &CorodawProject = cx.global();
-        let project = project.project.clone();
+        let project = CorodawProject::global(cx).project.clone();
         let id = self.id;
 
         cx.spawn(async move |_, cx| {
@@ -56,12 +80,8 @@ impl Module {
 
 impl Render for Module {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let project: &CorodawProject = cx.global();
-        let project = project.project.borrow();
+        let project = CorodawProject::global(cx).project.borrow();
         let module = project.module(&self.id);
-        let show_disabled = module
-            .map(|module| module.has_gui(&project.clap_plugin_manager()))
-            .unwrap_or(true);
 
         if let Some(module) = module {
             div()
@@ -71,12 +91,39 @@ impl Render for Module {
                 .child(
                     h_flex()
                         .gap_2()
+                        .child(
+                            ButtonGroup::new("controls")
+                                .small()
+                                .outline()
+                                .child(
+                                    Button::new("m")
+                                        .label("M")
+                                        .warning()
+                                        .selected(module.is_muted())
+                                        .on_click(cx.listener(Self::on_toggle_muted)),
+                                )
+                                .child(
+                                    Button::new("s")
+                                        .label("S")
+                                        .success()
+                                        .selected(module.is_soloed())
+                                        .on_click(cx.listener(Self::on_toggle_soloed)),
+                                )
+                                .child(
+                                    Button::new("r")
+                                        .label("R")
+                                        .danger()
+                                        .selected(module.is_armed())
+                                        .on_click(cx.listener(Self::on_toggle_armed)),
+                                ),
+                        )
+                        .gap_2()
                         .child(module.name().to_owned())
                         .child(Slider::new(&self.gain_slider).min_w_128())
                         .child(
                             Button::new("show")
                                 .label("Show")
-                                .disabled(show_disabled)
+                                .disabled(project.has_gui(&self.id))
                                 .on_click(cx.listener(Self::on_show)),
                         ),
                 )
