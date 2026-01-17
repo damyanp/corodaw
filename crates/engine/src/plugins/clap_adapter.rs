@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fmt::Debug, time::Duration};
+use std::{fmt::Debug, time::Duration};
 
 use audio_blocks::AudioBlockSequential;
 use clack_host::{
@@ -33,8 +33,8 @@ impl NodeCreator for ClapPlugin {
 }
 
 pub struct ClapPluginProcessor {
-    plugin_audio_processor: RefCell<PluginAudioProcessor<ClapPlugin>>,
-    audio_ports: RefCell<AudioPorts>,
+    plugin_audio_processor: PluginAudioProcessor<ClapPlugin>,
+    audio_ports: AudioPorts,
     num_outputs: usize,
 }
 
@@ -56,8 +56,8 @@ impl ClapPluginProcessor {
         let audio_ports = AudioPorts::with_capacity(total_channel_count, output_ports.len());
 
         Self {
-            plugin_audio_processor: RefCell::new(clap_plugin.get_audio_processor()),
-            audio_ports: RefCell::new(audio_ports),
+            plugin_audio_processor: clap_plugin.get_audio_processor(),
+            audio_ports,
             num_outputs: total_channel_count,
         }
     }
@@ -69,19 +69,17 @@ impl ClapPluginProcessor {
 
 impl Processor for ClapPluginProcessor {
     fn process(
-        &self,
+        &mut self,
         _: &Graph,
         _: &Node,
         _: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
     ) {
-        let mut processor = self.plugin_audio_processor.borrow_mut();
-
-        let processor = if processor.is_started() {
-            processor.as_started_mut()
+        let processor = if self.plugin_audio_processor.is_started() {
+            self.plugin_audio_processor.as_started_mut()
         } else {
             println!("Starting processor!");
-            processor.start_processing()
+            self.plugin_audio_processor.start_processing()
         }
         .unwrap();
 
@@ -91,15 +89,12 @@ impl Processor for ClapPluginProcessor {
         let steady_time = None;
         let transport = None;
 
-        let mut audio_ports = self.audio_ports.borrow_mut();
-
         let mut audio_outputs =
-            audio_ports.with_output_buffers(out_audio_buffers.iter_mut().map(|port| {
-                AudioPortBuffer {
+            self.audio_ports
+                .with_output_buffers(out_audio_buffers.iter_mut().map(|port| AudioPortBuffer {
                     latency: 0,
                     channels: AudioPortBufferType::f32_output_only(port.channels_mut()),
-                }
-            }));
+                }));
 
         processor
             .process(

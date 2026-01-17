@@ -1,5 +1,4 @@
 use std::{
-    cell::Cell,
     sync::mpsc::{Receiver, Sender, channel},
     time::Duration,
 };
@@ -22,7 +21,7 @@ impl GainControl {
 
         let processor = Box::new(GainControlProcessor {
             receiver,
-            gain: Cell::new(initial_gain),
+            gain: initial_gain,
         });
 
         let node_id = graph.add_node(2, 2, processor);
@@ -38,20 +37,18 @@ impl GainControl {
 #[derive(Debug)]
 struct GainControlProcessor {
     receiver: Receiver<f32>,
-    gain: Cell<f32>,
+    gain: f32,
 }
 
 impl Processor for GainControlProcessor {
     fn process(
-        &self,
+        &mut self,
         graph: &Graph,
         node: &Node,
         _: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
     ) {
         self.process_messages();
-
-        let gain = self.gain.get();
 
         for (channel, output_buffer) in out_audio_buffers.iter_mut().enumerate() {
             let input_connection = node.desc.input_connections[channel];
@@ -64,7 +61,7 @@ impl Processor for GainControlProcessor {
                     .channel_iter(0)
                     .zip(output_buffer.channel_iter_mut(0))
                 {
-                    *output = *input * gain;
+                    *output = *input * self.gain;
                 }
             } else {
                 output_buffer.fill_with(0.0);
@@ -74,9 +71,9 @@ impl Processor for GainControlProcessor {
 }
 
 impl GainControlProcessor {
-    fn process_messages(&self) {
+    fn process_messages(&mut self) {
         if let Ok(gain) = self.receiver.try_recv() {
-            self.gain.set(gain);
+            self.gain = gain;
         }
     }
 }

@@ -13,7 +13,7 @@ use crate::desc::{GraphDesc, NodeDesc, NodeId};
 
 pub trait Processor: Send + Debug {
     fn process(
-        &self,
+        &mut self,
         graph: &Graph,
         node: &Node,
         timestamp: &Duration,
@@ -23,7 +23,7 @@ pub trait Processor: Send + Debug {
 
 pub struct Node {
     pub desc: NodeDesc,
-    pub processor: Box<dyn Processor>,
+    pub processor: RefCell<Box<dyn Processor>>,
     pub output_buffers: AudioBuffers,
 }
 
@@ -34,7 +34,7 @@ impl Node {
 
         Self {
             desc,
-            processor,
+            processor: RefCell::new(processor),
             output_buffers,
         }
     }
@@ -53,7 +53,7 @@ impl Graph {
             let mut processors: Vec<_> = old_graph
                 .nodes
                 .into_iter()
-                .map(|node| Some(node.processor))
+                .map(|node| Some(node.processor.into_inner()))
                 .collect();
 
             for (id, processor) in desc.processors.iter_mut().enumerate() {
@@ -84,12 +84,12 @@ impl Graph {
 
             node.output_buffers.prepare_for_processing(num_frames);
 
-            node.processor.process(
-                self,
-                node,
-                timestamp,
-                node.output_buffers.channels.borrow_mut().as_mut_slice(),
-            );
+            let mut out_audio_buffers = node.output_buffers.channels.borrow_mut();
+            let out_audio_buffers = out_audio_buffers.as_mut_slice();
+
+            node.processor
+                .borrow_mut()
+                .process(self, node, timestamp, out_audio_buffers);
         }
     }
 

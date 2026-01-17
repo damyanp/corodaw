@@ -20,7 +20,7 @@ use super::*;
 struct Constant(f32);
 impl Processor for Constant {
     fn process(
-        &self,
+        &mut self,
         graph: &Graph,
         node: &Node,
         _: &Duration,
@@ -35,7 +35,7 @@ struct SumInputs;
 
 impl Processor for SumInputs {
     fn process(
-        &self,
+        &mut self,
         graph: &Graph,
         node: &Node,
         _: &Duration,
@@ -65,7 +65,7 @@ struct LogProcessor {
 }
 impl Processor for LogProcessor {
     fn process(
-        &self,
+        &mut self,
         graph: &Graph,
         node: &Node,
         _: &Duration,

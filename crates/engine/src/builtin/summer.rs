@@ -8,7 +8,7 @@ use audio_graph::{Graph, InputConnection, Node, Processor};
 pub struct Summer;
 impl Processor for Summer {
     fn process(
-        &self,
+        &mut self,
         graph: &Graph,
         node: &Node,
         _: &Duration,
