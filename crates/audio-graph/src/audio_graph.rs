@@ -11,10 +11,6 @@ use std::{
     time::Duration,
 };
 
-pub trait NodeCreator {
-    fn create_node(&self, graph: &AudioGraph) -> NodeId;
-}
-
 /// Interface to the audio graph; cheap to clone, but must be kept on the
 /// application main thread.
 #[derive(Clone)]

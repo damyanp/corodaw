@@ -10,26 +10,7 @@ use clack_host::{
 };
 
 use crate::plugins::ClapPlugin;
-use audio_graph::{AudioGraph, Graph, Node, NodeCreator, NodeDescBuilder, NodeId, Processor};
-
-impl NodeCreator for ClapPlugin {
-    fn create_node(&self, graph: &AudioGraph) -> NodeId {
-        let count_ports = |is_input| {
-            self.get_audio_ports(is_input)
-                .into_iter()
-                .reduce(|a, b| a + b)
-                .unwrap_or(0)
-        };
-
-        let audio_inputs = count_ports(true);
-        let audio_outputs = count_ports(false);
-
-        graph.add_node(
-            NodeDescBuilder::default().audio(audio_inputs as usize, audio_outputs as usize),
-            Box::new(ClapPluginProcessor::new(self)),
-        )
-    }
-}
+use audio_graph::{Graph, Node, Processor};
 
 pub struct ClapPluginProcessor {
     plugin_audio_processor: PluginAudioProcessor<ClapPlugin>,
