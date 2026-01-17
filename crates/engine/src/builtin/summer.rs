@@ -17,7 +17,7 @@ impl Processor for Summer {
         for (channel, output_buffer) in out_audio_buffers.iter_mut().enumerate() {
             output_buffer.fill_with(0.0);
 
-            let inputs = node.desc.input_connections.iter().filter(|c| {
+            let inputs = node.desc.audio_input_connections.iter().filter(|c| {
                 if let InputConnection::Connected(_, n) = c {
                     *n == channel
                 } else {

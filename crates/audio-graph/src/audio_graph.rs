@@ -1,7 +1,7 @@
 use audio_blocks::{AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, AudioBlockOps};
 
 use crate::{
-    desc::{GraphDesc, NodeId},
+    desc::{GraphDesc, NodeDescBuilder, NodeId},
     worker::{Graph, Processor},
 };
 use std::{
@@ -57,13 +57,12 @@ impl AudioGraph {
 
     pub fn add_node(
         &self,
-        num_inputs: usize,
-        num_outputs: usize,
+        node_desc_builder: NodeDescBuilder,
         processor: Box<dyn Processor>,
     ) -> NodeId {
         self.inner
             .borrow_mut()
-            .add_node(num_inputs, num_outputs, processor)
+            .add_node(node_desc_builder, processor)
     }
 
     pub fn connect(&self, dest_node: NodeId, dest_port: usize, src_node: NodeId, src_port: usize) {
@@ -104,12 +103,11 @@ impl AudioGraphInner {
 
     fn add_node(
         &mut self,
-        num_inputs: usize,
-        num_outputs: usize,
+        node_desc_builder: NodeDescBuilder,
         processor: Box<dyn Processor>,
     ) -> NodeId {
         self.modified = true;
-        self.graph_desc.add_node(num_inputs, num_outputs, processor)
+        self.graph_desc.add_node(node_desc_builder, processor)
     }
 
     fn connect(&mut self, dest_node: NodeId, dest_port: usize, src_node: NodeId, src_port: usize) {

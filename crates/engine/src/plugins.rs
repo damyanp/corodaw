@@ -29,7 +29,7 @@ use smol::LocalExecutor;
 
 use clap_adapter::ClapPluginProcessor;
 
-use audio_graph::{AudioGraph, NodeId, Processor};
+use audio_graph::{AudioGraph, NodeDescBuilder, NodeId, Processor};
 use discovery::FoundPlugin;
 use timers::Timers;
 use ui_host::PluginUiHost;
@@ -358,7 +358,10 @@ impl ClapPluginShared {
             .unwrap();
         let (num_inputs, num_outputs, processor) = receiver.await.unwrap();
 
-        audio_graph.add_node(num_inputs, num_outputs, processor)
+        audio_graph.add_node(
+            NodeDescBuilder::default().audio(num_inputs, num_outputs),
+            processor,
+        )
     }
 }
 

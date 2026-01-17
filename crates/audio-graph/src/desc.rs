@@ -14,8 +14,10 @@ pub struct GraphDesc {
 pub struct NodeDesc {
     pub id: NodeId,
     pub input_nodes: Vec<NodeId>,
-    pub input_connections: Vec<InputConnection>,
-    pub num_outputs: usize,
+    pub audio_input_connections: Vec<InputConnection>,
+    pub event_input_connections: Vec<InputConnection>,
+    pub num_audio_outputs: usize,
+    pub num_event_outputs: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -25,15 +27,28 @@ pub enum InputConnection {
 }
 
 impl NodeDesc {
-    fn new(id: NodeId, num_inputs: usize, num_outputs: usize) -> Self {
-        let mut input_connections = Vec::default();
-        input_connections.resize(num_inputs, InputConnection::Disconnected);
+    fn new(id: NodeId, node_desc_builder: NodeDescBuilder) -> Self {
+        let mut audio_input_connections = Vec::default();
+        audio_input_connections.resize(
+            node_desc_builder.num_audio_inputs,
+            InputConnection::Disconnected,
+        );
+        let num_audio_outputs = node_desc_builder.num_audio_outputs;
+
+        let mut event_input_connections = Vec::default();
+        event_input_connections.resize(
+            node_desc_builder.num_event_inputs,
+            InputConnection::Disconnected,
+        );
+        let num_event_outputs = node_desc_builder.num_event_outputs;
 
         Self {
             id,
             input_nodes: Vec::default(),
-            input_connections,
-            num_outputs,
+            audio_input_connections,
+            event_input_connections,
+            num_audio_outputs,
+            num_event_outputs,
         }
     }
 
@@ -44,15 +59,40 @@ impl NodeDesc {
     }
 }
 
+#[derive(Default)]
+pub struct NodeDescBuilder {
+    num_audio_inputs: usize,
+    num_audio_outputs: usize,
+    num_event_inputs: usize,
+    num_event_outputs: usize,
+}
+
+impl NodeDescBuilder {
+    pub fn audio(self, num_audio_inputs: usize, num_audio_outputs: usize) -> Self {
+        Self {
+            num_audio_inputs,
+            num_audio_outputs,
+            ..self
+        }
+    }
+
+    pub fn event(self, num_event_inputs: usize, num_event_outputs: usize) -> Self {
+        Self {
+            num_event_inputs,
+            num_event_outputs,
+            ..self
+        }
+    }
+}
+
 impl GraphDesc {
     pub fn add_node(
         &mut self,
-        num_inputs: usize,
-        num_outputs: usize,
+        node_desc_builder: NodeDescBuilder,
         processor: Box<dyn Processor>,
     ) -> NodeId {
         let id = NodeId(self.nodes.len());
-        self.nodes.push(NodeDesc::new(id, num_inputs, num_outputs));
+        self.nodes.push(NodeDesc::new(id, node_desc_builder));
         self.processors.push(Some(processor));
         id
     }
@@ -65,8 +105,9 @@ impl GraphDesc {
         src_port: usize,
     ) {
         let dest = &mut self.nodes[dest_node.0];
-        while dest.input_connections.len() <= dest_port {
-            dest.input_connections.push(InputConnection::Disconnected);
+        while dest.audio_input_connections.len() <= dest_port {
+            dest.audio_input_connections
+                .push(InputConnection::Disconnected);
         }
         self.connect(dest_node, dest_port, src_node, src_port)
     }
@@ -85,12 +126,12 @@ impl GraphDesc {
             .get_disjoint_mut([dest_node.0, src_node.0])
             .unwrap();
 
-        assert!(dest_port < dest.input_connections.len());
-        assert!(src_port < src.num_outputs);
+        assert!(dest_port < dest.audio_input_connections.len());
+        assert!(src_port < src.num_audio_outputs);
 
         dest.add_input_node(&src_node);
 
-        dest.input_connections[dest_port] = InputConnection::Connected(src_node, src_port);
+        dest.audio_input_connections[dest_port] = InputConnection::Connected(src_node, src_port);
     }
 
     pub fn add_input_node(&mut self, dest_node: NodeId, src_node: NodeId) {

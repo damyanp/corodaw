@@ -30,7 +30,7 @@ pub struct Node {
 impl Node {
     fn new(desc: NodeDesc, processor: Box<dyn Processor>) -> Self {
         const HARDCODED_NUM_FRAMES: usize = 1024;
-        let output_buffers = AudioBuffers::new(desc.num_outputs as u16, HARDCODED_NUM_FRAMES);
+        let output_buffers = AudioBuffers::new(desc.num_audio_outputs as u16, HARDCODED_NUM_FRAMES);
 
         Self {
             desc,

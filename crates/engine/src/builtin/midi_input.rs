@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, time::Duration};
 
 use audio_blocks::AudioBlockSequential;
-use audio_graph::{AudioGraph, Event, Graph, Node, NodeId, Processor};
+use audio_graph::{AudioGraph, Event, Graph, Node, NodeDescBuilder, NodeId, Processor};
 use derivative::Derivative;
 
 use crate::midi::MidiReceiver;
@@ -15,7 +15,7 @@ impl MidiInputNode {
     pub fn new(graph: &AudioGraph) -> Self {
         let processor = Box::new(MidiInputProcessor::default());
 
-        let node_id = graph.add_node(0, 0, processor);
+        let node_id = graph.add_node(NodeDescBuilder::default().event(0, 1), processor);
         MidiInputNode { node_id }
     }
 }

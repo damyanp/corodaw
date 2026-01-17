@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use audio_graph::{AudioGraph, NodeId};
+use audio_graph::{AudioGraph, NodeDescBuilder, NodeId};
 use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -38,7 +38,7 @@ impl Default for Project {
 
         let midi_input = MidiInputNode::new(&audio_graph);
 
-        let summer = audio_graph.add_node(0, 2, Box::new(Summer));
+        let summer = audio_graph.add_node(NodeDescBuilder::default().audio(0, 2), Box::new(Summer));
         audio_graph.set_output_node(summer);
 
         audio_graph.add_input_node(summer, midi_input.node_id);

@@ -12,7 +12,7 @@ use std::{
 use audio_blocks::{AudioBlockMut, AudioBlockSequential};
 use fixedbitset::FixedBitSet;
 
-use crate::desc::GraphDesc;
+use crate::desc::{GraphDesc, NodeDescBuilder};
 
 use super::*;
 
@@ -101,8 +101,14 @@ impl Logger {
 fn graph_can_be_sent_to_thread() {
     let mut graph = GraphDesc::default();
 
-    let node1 = graph.add_node(1, 0, Box::new(Constant(1.0)));
-    let node2 = graph.add_node(0, 1, Box::new(Constant(2.0)));
+    let node1 = graph.add_node(
+        NodeDescBuilder::default().audio(1, 0),
+        Box::new(Constant(1.0)),
+    );
+    let node2 = graph.add_node(
+        NodeDescBuilder::default().audio(0, 1),
+        Box::new(Constant(2.0)),
+    );
 
     graph.connect(node1, 0, node2, 0);
 
@@ -119,7 +125,7 @@ fn single_node_process() {
     let logger = Logger::new();
 
     let mut graph = GraphDesc::default();
-    let node = graph.add_node(0, 0, logger.make());
+    let node = graph.add_node(NodeDescBuilder::default(), logger.make());
 
     let mut graph = Graph::new(graph, None);
     graph.process(node, 1, &Duration::default());
@@ -136,7 +142,7 @@ fn reachable_nodes() {
 
     let mut graph = GraphDesc::default();
     let nodes: Vec<NodeId> = (0..5)
-        .map(|_| graph.add_node(1, 1, logger.make()))
+        .map(|_| graph.add_node(NodeDescBuilder::default().audio(1, 1), logger.make()))
         .collect();
     graph.connect(nodes[0], 0, nodes[1], 0);
     graph.connect(nodes[2], 0, nodes[3], 0);
@@ -168,10 +174,10 @@ fn multiple_node_process_order() {
     let logger = Logger::new();
 
     let mut graph = GraphDesc::default();
-    let a = graph.add_node(2, 1, logger.make());
-    let b = graph.add_node(0, 1, logger.make());
-    let c = graph.add_node(0, 1, logger.make());
-    let d = graph.add_node(1, 0, logger.make());
+    let a = graph.add_node(NodeDescBuilder::default().audio(2, 1), logger.make());
+    let b = graph.add_node(NodeDescBuilder::default().audio(0, 1), logger.make());
+    let c = graph.add_node(NodeDescBuilder::default().audio(0, 1), logger.make());
+    let d = graph.add_node(NodeDescBuilder::default().audio(1, 0), logger.make());
 
     graph.connect(d, 0, a, 0);
     graph.connect(a, 0, b, 0);
@@ -190,9 +196,15 @@ fn node_processing() {
     //   \-> c
 
     let mut graph = GraphDesc::default();
-    let a = graph.add_node(2, 1, Box::new(SumInputs));
-    let b = graph.add_node(0, 1, Box::new(Constant(1.0)));
-    let c = graph.add_node(0, 1, Box::new(Constant(1.0)));
+    let a = graph.add_node(NodeDescBuilder::default().audio(2, 1), Box::new(SumInputs));
+    let b = graph.add_node(
+        NodeDescBuilder::default().audio(0, 1),
+        Box::new(Constant(1.0)),
+    );
+    let c = graph.add_node(
+        NodeDescBuilder::default().audio(0, 1),
+        Box::new(Constant(1.0)),
+    );
 
     graph.connect(a, 0, b, 0);
     graph.connect(a, 1, c, 0);

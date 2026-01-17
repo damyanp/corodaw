@@ -6,7 +6,7 @@ use std::{
 use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockOps, AudioBlockSequential};
 use derivative::Derivative;
 
-use audio_graph::{AudioGraph, Graph, InputConnection, Node, NodeId, Processor};
+use audio_graph::{AudioGraph, Graph, InputConnection, Node, NodeDescBuilder, NodeId, Processor};
 
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -24,7 +24,7 @@ impl GainControl {
             gain: initial_gain,
         });
 
-        let node_id = graph.add_node(2, 2, processor);
+        let node_id = graph.add_node(NodeDescBuilder::default().audio(2, 2), processor);
 
         GainControl { node_id, sender }
     }
@@ -51,7 +51,7 @@ impl Processor for GainControlProcessor {
         self.process_messages();
 
         for (channel, output_buffer) in out_audio_buffers.iter_mut().enumerate() {
-            let input_connection = node.desc.input_connections[channel];
+            let input_connection = node.desc.audio_input_connections[channel];
             if let InputConnection::Connected(input_node_id, input_channel) = input_connection {
                 let input_node = graph.get_node(&input_node_id);
                 let input_buffers = input_node.output_buffers.get();
