@@ -8,6 +8,7 @@ use std::{
     cell::RefCell,
     rc::Rc,
     sync::mpsc::{Receiver, Sender, channel},
+    time::Duration,
 };
 
 pub trait NodeCreator {
@@ -86,6 +87,10 @@ impl AudioGraph {
     pub fn set_output_node(&self, node_id: NodeId) {
         self.inner.borrow_mut().set_output_node(node_id);
     }
+
+    pub fn add_input_node(&self, summer: NodeId, midi_input: NodeId) {
+        self.inner.borrow_mut().add_input_node(summer, midi_input)
+    }
 }
 
 impl AudioGraphInner {
@@ -125,6 +130,11 @@ impl AudioGraphInner {
             .connect_grow_input(dest_node, dest_port, src_node, src_port)
     }
 
+    pub fn add_input_node(&mut self, dest_node: NodeId, src_node: NodeId) {
+        self.modified = true;
+        self.graph_desc.add_input_node(dest_node, src_node);
+    }
+
     pub fn set_output_node(&mut self, node_id: NodeId) {
         self.modified = true;
         self.graph_desc.set_output_node(node_id);
@@ -149,7 +159,7 @@ impl AudioGraphWorker {
         }
     }
 
-    pub fn tick(&mut self, channels: u16, data: &mut [f32]) {
+    pub fn tick(&mut self, channels: u16, data: &mut [f32], timestamp: Duration) {
         let mut new_graph_desc = None;
 
         for message in self.receiver.try_iter() {
@@ -171,7 +181,7 @@ impl AudioGraphWorker {
         if let Some(graph) = self.graph.as_mut()
             && let Some(output_node_id) = self.output_node_id
         {
-            graph.process(output_node_id, num_frames);
+            graph.process(output_node_id, num_frames, &timestamp);
 
             let output_node = graph.get_node(&output_node_id);
             let output_buffers = output_node.output_buffers.get();

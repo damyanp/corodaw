@@ -6,6 +6,7 @@ use std::{
     pin::Pin,
     rc::Rc,
     sync::{Arc, RwLock, RwLockReadGuard},
+    time::Duration,
 };
 
 use audio_blocks::{AudioBlockMut, AudioBlockSequential};
@@ -22,6 +23,7 @@ impl Processor for Constant {
         &self,
         graph: &Graph,
         node: &Node,
+        _: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
     ) {
         out_audio_buffers[0].channel_mut(0)[0] = self.0;
@@ -36,6 +38,7 @@ impl Processor for SumInputs {
         &self,
         graph: &Graph,
         node: &Node,
+        _: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
     ) {
         out_audio_buffers[0].channel_mut(0).fill(0.0);
@@ -65,6 +68,7 @@ impl Processor for LogProcessor {
         &self,
         graph: &Graph,
         node: &Node,
+        _: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
     ) {
         self.log.write().unwrap().push(node.desc.id);
@@ -118,7 +122,7 @@ fn single_node_process() {
     let node = graph.add_node(0, 0, logger.make());
 
     let mut graph = Graph::new(graph, None);
-    graph.process(node, 1);
+    graph.process(node, 1, &Duration::default());
 
     assert_eq!([node], logger.get().as_slice());
 }
@@ -174,7 +178,7 @@ fn multiple_node_process_order() {
     graph.connect(a, 1, c, 0);
 
     let mut graph = Graph::new(graph, None);
-    graph.process(d, 1);
+    graph.process(d, 1, &Duration::default());
 
     assert_eq!([b, c, a, d], logger.get().as_slice());
 }
@@ -194,7 +198,7 @@ fn node_processing() {
     graph.connect(a, 1, c, 0);
 
     let mut graph = Graph::new(graph, None);
-    graph.process(a, 1);
+    graph.process(a, 1, &Duration::default());
 
     assert_eq!(2.0, graph.nodes[a.0].output_buffers.get()[0].channel(0)[0]);
 }

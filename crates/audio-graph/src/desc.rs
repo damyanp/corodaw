@@ -36,6 +36,12 @@ impl NodeDesc {
             num_outputs,
         }
     }
+
+    fn add_input_node(&mut self, node: &NodeId) {
+        if !self.input_nodes.contains(node) {
+            self.input_nodes.push(*node);
+        }
+    }
 }
 
 impl GraphDesc {
@@ -82,11 +88,14 @@ impl GraphDesc {
         assert!(dest_port < dest.input_connections.len());
         assert!(src_port < src.num_outputs);
 
-        if !dest.input_nodes.contains(&src_node) {
-            dest.input_nodes.push(src_node);
-        }
+        dest.add_input_node(&src_node);
 
         dest.input_connections[dest_port] = InputConnection::Connected(src_node, src_port);
+    }
+
+    pub fn add_input_node(&mut self, dest_node: NodeId, src_node: NodeId) {
+        let dest = self.nodes.get_mut(dest_node.0).unwrap();
+        dest.add_input_node(&src_node);
     }
 
     pub fn set_output_node(&mut self, node_id: NodeId) {

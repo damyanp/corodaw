@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use engine::{
     audio::Audio,
-    builtin::{GainControl, Summer},
+    builtin::{GainControl, MidiInputNode, Summer},
     plugins::{ClapPluginManager, ClapPluginShared, discovery::FoundPlugin},
 };
 
@@ -22,6 +22,9 @@ pub struct Project {
     clap_plugin_manager: ClapPluginManager,
 
     #[serde(skip)]
+    _midi_input: MidiInputNode,
+
+    #[serde(skip)]
     summer: NodeId,
 
     #[serde(skip)]
@@ -33,8 +36,14 @@ impl Default for Project {
         let (audio_graph, audio_graph_worker) = AudioGraph::new();
         let audio = Audio::new(audio_graph_worker).unwrap();
 
+        let midi_input = MidiInputNode::new(&audio_graph);
+
         let summer = audio_graph.add_node(0, 2, Box::new(Summer));
         audio_graph.set_output_node(summer);
+
+        audio_graph.add_input_node(summer, midi_input.node_id);
+
+        audio_graph.update();
 
         let clap_plugin_manager = ClapPluginManager::default();
 
@@ -42,6 +51,7 @@ impl Default for Project {
             modules: Vec::default(),
             audio_graph,
             clap_plugin_manager,
+            _midi_input: midi_input,
             summer,
             _audio: audio,
         }

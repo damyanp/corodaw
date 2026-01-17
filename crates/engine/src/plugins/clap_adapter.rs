@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fmt::Debug};
+use std::{cell::RefCell, fmt::Debug, time::Duration};
 
 use audio_blocks::AudioBlockSequential;
 use clack_host::{
@@ -68,7 +68,13 @@ impl ClapPluginProcessor {
 }
 
 impl Processor for ClapPluginProcessor {
-    fn process(&self, _: &Graph, _: &Node, out_audio_buffers: &mut [AudioBlockSequential<f32>]) {
+    fn process(
+        &self,
+        _: &Graph,
+        _: &Node,
+        _: &Duration,
+        out_audio_buffers: &mut [AudioBlockSequential<f32>],
+    ) {
         let mut processor = self.plugin_audio_processor.borrow_mut();
 
         let processor = if processor.is_started() {

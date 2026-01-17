@@ -1,6 +1,6 @@
 use anyhow::Error;
 use cpal::{
-    BufferSize, OutputCallbackInfo, Stream, StreamConfig,
+    BufferSize, OutputCallbackInfo, Stream, StreamConfig, StreamInstant,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 
@@ -27,6 +27,7 @@ impl Audio {
             audio_graph_worker,
             channels: config.channels,
             _sample_rate: config.sample_rate,
+            first_playback: None,
         };
 
         let stream = device.build_output_stream(
@@ -48,10 +49,24 @@ struct AudioThread {
     audio_graph_worker: AudioGraphWorker,
     channels: u16,
     _sample_rate: u32,
+    first_playback: Option<StreamInstant>,
 }
 
 impl AudioThread {
-    fn data_callback(&mut self, data: &mut [f32], _info: &OutputCallbackInfo) {
-        self.audio_graph_worker.tick(self.channels, data);
+    fn data_callback(&mut self, data: &mut [f32], info: &OutputCallbackInfo) {
+        let playback_time = info.timestamp().playback;
+        let first_playback = self.first_playback.get_or_insert(playback_time);
+
+        // Sometimes (or, at least the second time the callback is called) the
+        // playback time is before the previous playback time.
+        if *first_playback > playback_time {
+            *first_playback = playback_time;
+        }
+
+        self.audio_graph_worker.tick(
+            self.channels,
+            data,
+            playback_time.duration_since(first_playback).unwrap(),
+        );
     }
 }

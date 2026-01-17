@@ -3,6 +3,7 @@ use std::{
     cmp::Reverse,
     collections::BinaryHeap,
     fmt::Debug,
+    time::Duration,
 };
 
 use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockSequential};
@@ -15,6 +16,7 @@ pub trait Processor: Send + Debug {
         &self,
         graph: &Graph,
         node: &Node,
+        timestamp: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
     );
 }
@@ -75,7 +77,7 @@ impl Graph {
         &self.nodes[node_id.0]
     }
 
-    pub fn process(&mut self, node_id: NodeId, num_frames: usize) {
+    pub fn process(&mut self, node_id: NodeId, num_frames: usize, timestamp: &Duration) {
         let ordered = self.build_breadth_first_traversal(node_id);
         for node_id in ordered {
             let node = &self.nodes[node_id.0];
@@ -85,6 +87,7 @@ impl Graph {
             node.processor.process(
                 self,
                 node,
+                timestamp,
                 node.output_buffers.channels.borrow_mut().as_mut_slice(),
             );
         }
