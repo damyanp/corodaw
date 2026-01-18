@@ -11,7 +11,7 @@ pub struct Audio {
 }
 
 impl Audio {
-    pub fn new(audio_graph_worker: AudioGraphWorker) -> Result<Audio, Error> {
+    pub fn new(mut audio_graph_worker: AudioGraphWorker) -> Result<Audio, Error> {
         let cpal = cpal::default_host();
         let device = cpal.default_output_device().unwrap();
 
@@ -21,12 +21,10 @@ impl Audio {
             buffer_size: BufferSize::Fixed(4096),
         };
 
-        //audio_graph_worker.configure(config.channels, config.sample_rate);
+        audio_graph_worker.configure(config.channels, config.sample_rate);
 
         let mut audio_thread = AudioThread {
             audio_graph_worker,
-            channels: config.channels,
-            _sample_rate: config.sample_rate,
             first_playback: None,
         };
 
@@ -47,8 +45,6 @@ impl Audio {
 
 struct AudioThread {
     audio_graph_worker: AudioGraphWorker,
-    channels: u16,
-    _sample_rate: u32,
     first_playback: Option<StreamInstant>,
 }
 
@@ -63,10 +59,7 @@ impl AudioThread {
             *first_playback = playback_time;
         }
 
-        self.audio_graph_worker.tick(
-            self.channels,
-            data,
-            playback_time.duration_since(first_playback).unwrap(),
-        );
+        self.audio_graph_worker
+            .tick(data, playback_time.duration_since(first_playback).unwrap());
     }
 }

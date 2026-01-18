@@ -11,6 +11,7 @@ impl Processor for Summer {
         &mut self,
         graph: &Graph,
         node: &Node,
+        _: usize,
         _: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
         _: &mut [Vec<Event>],

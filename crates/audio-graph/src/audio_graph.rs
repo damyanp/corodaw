@@ -28,6 +28,8 @@ struct AudioGraphInner {
 /// on the audio thread.
 pub struct AudioGraphWorker {
     receiver: Receiver<AudioGraphMessage>,
+    num_channels: u16,
+    sample_rate: u32,
     graph: Option<Graph>,
     output_node_id: Option<NodeId>,
 }
@@ -197,10 +199,17 @@ impl AudioGraphWorker {
             receiver,
             graph: None,
             output_node_id: None,
+            num_channels: 0,
+            sample_rate: 0,
         }
     }
 
-    pub fn tick(&mut self, channels: u16, data: &mut [f32], timestamp: Duration) {
+    pub fn configure(&mut self, channels: u16, sample_rate: u32) {
+        self.num_channels = channels;
+        self.sample_rate = sample_rate;
+    }
+
+    pub fn tick(&mut self, data: &mut [f32], timestamp: Duration) {
         let mut new_graph_desc = None;
 
         for message in self.receiver.try_iter() {
@@ -216,8 +225,9 @@ impl AudioGraphWorker {
             self.graph = Some(Graph::new(new_graph_desc, self.graph.take()));
         }
 
-        let num_frames = data.len() / channels as usize;
-        let mut block = AudioBlockInterleavedViewMut::from_slice(data, channels, num_frames);
+        let num_frames = data.len() / self.num_channels as usize;
+        let mut block =
+            AudioBlockInterleavedViewMut::from_slice(data, self.num_channels, num_frames);
 
         if let Some(graph) = self.graph.as_mut()
             && let Some(output_node_id) = self.output_node_id

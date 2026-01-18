@@ -5,7 +5,7 @@ use clack_host::{
     events::event_types::MidiEvent,
     prelude::{
         AudioPortBuffer, AudioPortBufferType, AudioPorts, EventBuffer, InputAudioBuffers,
-        InputEvents, OutputEvents,
+        OutputEvents,
     },
     process::PluginAudioProcessor,
 };
@@ -55,6 +55,7 @@ impl Processor for ClapPluginProcessor {
         &mut self,
         graph: &Graph,
         node: &Node,
+        _: usize,
         timestamp: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
         _: &mut [Vec<Event>],

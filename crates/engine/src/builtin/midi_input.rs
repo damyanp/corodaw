@@ -47,6 +47,7 @@ impl Processor for MidiInputProcessor {
         &mut self,
         _: &Graph,
         _: &Node,
+        _: usize,
         timestamp: &Duration,
         _: &mut [AudioBlockSequential<f32>],
         out_event_buffers: &mut [Vec<Event>],

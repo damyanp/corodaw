@@ -19,6 +19,7 @@ pub trait Processor: Send + Debug {
         &mut self,
         graph: &Graph,
         node: &Node,
+        num_frames: usize,
         timestamp: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
         out_event_buffers: &mut [Vec<Event>],
@@ -103,6 +104,7 @@ impl Graph {
             node.processor.borrow_mut().process(
                 self,
                 node,
+                num_frames,
                 timestamp,
                 out_audio_buffers,
                 out_event_buffers,
