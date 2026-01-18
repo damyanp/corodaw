@@ -22,7 +22,7 @@ pub struct Project {
     clap_plugin_manager: ClapPluginManager,
 
     #[serde(skip)]
-    _midi_input: MidiInputNode,
+    midi_input: MidiInputNode,
 
     #[serde(skip)]
     summer: NodeId,
@@ -51,7 +51,7 @@ impl Default for Project {
             modules: Vec::default(),
             audio_graph,
             clap_plugin_manager,
-            _midi_input: midi_input,
+            midi_input,
             summer,
             _audio: audio,
         }
@@ -105,7 +105,16 @@ impl Project {
         for module in self.modules.iter_mut() {
             let muted = module.is_muted() || (has_soloed && !module.is_soloed());
             module.update_gain(muted);
+
+            if module.is_armed() {
+                self.audio_graph
+                    .connect_event(module.input_node(), 0, self.midi_input.node_id, 0);
+            } else {
+                self.audio_graph.disconnect_event(module.input_node(), 0);
+            }
         }
+
+        self.audio_graph().update();
     }
 
     pub fn show_gui(&self, id: Id<Module>) -> impl Future<Output = ()> + 'static {
@@ -140,6 +149,9 @@ pub struct Module {
     clap_plugin: Option<ClapPluginShared>,
 
     #[serde(skip)]
+    plugin_node_id: Option<NodeId>,
+
+    #[serde(skip)]
     gain_control: Option<GainControl>,
 }
 
@@ -172,6 +184,7 @@ impl Module {
             soloed: false,
             armed: false,
             clap_plugin: Some(clap_plugin),
+            plugin_node_id: Some(plugin_node_id),
             gain_control: Some(gain_control),
         }
     }
@@ -201,6 +214,10 @@ impl Module {
 
     pub fn gain(&self) -> f32 {
         self.gain_value
+    }
+
+    pub fn input_node(&self) -> NodeId {
+        self.plugin_node_id.unwrap()
     }
 
     pub fn output_node(&self) -> NodeId {

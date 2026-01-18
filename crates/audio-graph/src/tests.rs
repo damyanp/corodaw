@@ -11,6 +11,7 @@ use std::{
 
 use audio_blocks::{AudioBlockMut, AudioBlockSequential};
 use fixedbitset::FixedBitSet;
+use wmidi::{Channel, MidiMessage, Note, U7};
 
 use crate::desc::{GraphDesc, NodeDescBuilder};
 
@@ -25,6 +26,7 @@ impl Processor for Constant {
         node: &Node,
         _: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        _: &mut [Vec<Event>],
     ) {
         out_audio_buffers[0].channel_mut(0)[0] = self.0;
     }
@@ -40,6 +42,7 @@ impl Processor for SumInputs {
         node: &Node,
         _: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        _: &mut [Vec<Event>],
     ) {
         out_audio_buffers[0].channel_mut(0).fill(0.0);
 
@@ -48,7 +51,7 @@ impl Processor for SumInputs {
             .input_nodes
             .iter()
             .map(|id| &graph.nodes[id.0])
-            .map(|node| node.output_buffers.channels.borrow());
+            .map(|node| node.output_audio_buffers.channels.borrow());
 
         for input in inputs {
             let input = input[0].channel(0);
@@ -70,6 +73,7 @@ impl Processor for LogProcessor {
         node: &Node,
         _: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        _: &mut [Vec<Event>],
     ) {
         self.log.write().unwrap().push(node.desc.id);
     }
@@ -212,5 +216,102 @@ fn node_processing() {
     let mut graph = Graph::new(graph, None);
     graph.process(a, 1, &Duration::default());
 
-    assert_eq!(2.0, graph.nodes[a.0].output_buffers.get()[0].channel(0)[0]);
+    assert_eq!(
+        2.0,
+        graph.nodes[a.0].output_audio_buffers.get()[0].channel(0)[0]
+    );
+}
+
+#[derive(Debug)]
+struct EventSource {
+    events: VecDeque<Event>,
+}
+impl Processor for EventSource {
+    fn process(
+        &mut self,
+        graph: &Graph,
+        node: &Node,
+        timestamp: &Duration,
+        out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        out_event_buffers: &mut [Vec<Event>],
+    ) {
+        out_event_buffers[0].extend(self.events.iter().cloned());
+    }
+}
+
+#[derive(Debug)]
+struct EventSink {
+    events: Arc<RwLock<VecDeque<Event>>>,
+}
+impl Processor for EventSink {
+    fn process(
+        &mut self,
+        graph: &Graph,
+        node: &Node,
+        timestamp: &Duration,
+        out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        _: &mut [Vec<Event>],
+    ) {
+        let input_connection = &node.desc.event_input_connections[0];
+        let InputConnection::Connected(input_node, input_port) = input_connection else {
+            return;
+        };
+
+        let input_node = graph.get_node(input_node);
+        let input_events = &input_node.output_event_buffers.get()[0];
+
+        self.events
+            .write()
+            .unwrap()
+            .extend(input_events.iter().cloned());
+    }
+}
+
+fn new_test_midi_message(n: u8) -> MidiMessage<'static> {
+    MidiMessage::Reserved(n)
+}
+
+#[test]
+fn events_output_to_single_input() {
+    let events = vec![
+        Event {
+            timestamp: Duration::from_micros(1),
+            midi: new_test_midi_message(1),
+        },
+        Event {
+            timestamp: Duration::from_micros(2),
+            midi: new_test_midi_message(2),
+        },
+    ];
+
+    let events_sink: Arc<RwLock<VecDeque<Event>>> = Arc::default();
+
+    let mut graph = GraphDesc::default();
+    let source = graph.add_node(
+        NodeDescBuilder::default().event(0, 1),
+        Box::new(EventSource {
+            events: VecDeque::from_iter(events.iter().cloned()),
+        }),
+    );
+    let sink = graph.add_node(
+        NodeDescBuilder::default().event(1, 0),
+        Box::new(EventSink {
+            events: events_sink.clone(),
+        }),
+    );
+
+    graph.connect_event(sink, 0, source, 0);
+
+    let mut graph = Graph::new(graph, None);
+    graph.process(sink, 1, &Duration::default());
+
+    assert_eq!(
+        events_sink
+            .read()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        events
+    );
 }

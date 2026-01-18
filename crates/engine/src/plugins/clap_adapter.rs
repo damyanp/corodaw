@@ -2,19 +2,21 @@ use std::{fmt::Debug, time::Duration};
 
 use audio_blocks::AudioBlockSequential;
 use clack_host::{
+    events::event_types::MidiEvent,
     prelude::{
-        AudioPortBuffer, AudioPortBufferType, AudioPorts, InputAudioBuffers, InputEvents,
-        OutputEvents,
+        AudioPortBuffer, AudioPortBufferType, AudioPorts, EventBuffer, InputAudioBuffers,
+        InputEvents, OutputEvents,
     },
     process::PluginAudioProcessor,
 };
 
 use crate::plugins::ClapPlugin;
-use audio_graph::{Graph, Node, Processor};
+use audio_graph::{Event, Graph, InputConnection, Node, Processor};
 
 pub struct ClapPluginProcessor {
     plugin_audio_processor: PluginAudioProcessor<ClapPlugin>,
     audio_ports: AudioPorts,
+    input_events: EventBuffer,
     num_outputs: usize,
 }
 
@@ -38,6 +40,7 @@ impl ClapPluginProcessor {
         Self {
             plugin_audio_processor: clap_plugin.get_audio_processor(),
             audio_ports,
+            input_events: EventBuffer::new(),
             num_outputs: total_channel_count,
         }
     }
@@ -50,11 +53,14 @@ impl ClapPluginProcessor {
 impl Processor for ClapPluginProcessor {
     fn process(
         &mut self,
-        _: &Graph,
-        _: &Node,
-        _: &Duration,
+        graph: &Graph,
+        node: &Node,
+        timestamp: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        _: &mut [Vec<Event>],
     ) {
+        self.update_input_events(graph, node, timestamp);
+
         let processor = if self.plugin_audio_processor.is_started() {
             self.plugin_audio_processor.as_started_mut()
         } else {
@@ -64,7 +70,7 @@ impl Processor for ClapPluginProcessor {
         .unwrap();
 
         let audio_inputs = InputAudioBuffers::empty();
-        let input_events = InputEvents::empty();
+        let input_events = self.input_events.as_input();
         let mut output_events = OutputEvents::void();
         let steady_time = None;
         let transport = None;
@@ -86,5 +92,32 @@ impl Processor for ClapPluginProcessor {
                 transport,
             )
             .unwrap();
+    }
+}
+
+impl ClapPluginProcessor {
+    fn update_input_events(&mut self, graph: &Graph, node: &Node, timestamp: &Duration) {
+        self.input_events.clear();
+
+        if node.desc.event_input_connections.is_empty() {
+            return;
+        }
+
+        let InputConnection::Connected(input_node, input_port) =
+            node.desc.event_input_connections[0]
+        else {
+            return;
+        };
+
+        let events = &graph.get_node(&input_node).output_event_buffers.get()[input_port];
+
+        for event in events {
+            let mut data: [u8; 3] = Default::default();
+            event.midi.copy_to_slice(&mut data).unwrap();
+
+            let me = MidiEvent::new(0, 0, data);
+
+            self.input_events.push(&me);
+        }
     }
 }

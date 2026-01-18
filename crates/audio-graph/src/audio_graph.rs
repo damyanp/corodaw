@@ -85,6 +85,24 @@ impl AudioGraph {
             .connect_audio_grow_inputs(dest_node, dest_port, src_node, src_port);
     }
 
+    pub fn connect_event(
+        &self,
+        dest_node: NodeId,
+        dest_port: usize,
+        src_node: NodeId,
+        src_port: usize,
+    ) {
+        self.inner
+            .borrow_mut()
+            .connect_event(dest_node, dest_port, src_node, src_port);
+    }
+
+    pub fn disconnect_event(&self, dest_node: NodeId, dest_port: usize) {
+        self.inner
+            .borrow_mut()
+            .disconnect_event(dest_node, dest_port);
+    }
+
     pub fn set_output_node(&self, node_id: NodeId) {
         self.inner.borrow_mut().set_output_node(node_id);
     }
@@ -136,12 +154,29 @@ impl AudioGraphInner {
             .connect_audio_grow_inputs(dest_node, dest_port, src_node, src_port)
     }
 
-    pub fn add_input_node(&mut self, dest_node: NodeId, src_node: NodeId) {
+    fn connect_event(
+        &mut self,
+        dest_node: NodeId,
+        dest_port: usize,
+        src_node: NodeId,
+        src_port: usize,
+    ) {
+        self.modified = true;
+        self.graph_desc
+            .connect_event(dest_node, dest_port, src_node, src_port);
+    }
+
+    fn disconnect_event(&mut self, dest_node: NodeId, dest_port: usize) {
+        self.modified = true;
+        self.graph_desc.disconnect_event(dest_node, dest_port);
+    }
+
+    fn add_input_node(&mut self, dest_node: NodeId, src_node: NodeId) {
         self.modified = true;
         self.graph_desc.add_input_node(dest_node, src_node);
     }
 
-    pub fn set_output_node(&mut self, node_id: NodeId) {
+    fn set_output_node(&mut self, node_id: NodeId) {
         self.modified = true;
         self.graph_desc.set_output_node(node_id);
     }
@@ -190,7 +225,7 @@ impl AudioGraphWorker {
             graph.process(output_node_id, num_frames, &timestamp);
 
             let output_node = graph.get_node(&output_node_id);
-            let output_buffers = output_node.output_buffers.get();
+            let output_buffers = output_node.output_audio_buffers.get();
             let a = &output_buffers[0];
             let b = &output_buffers[1];
 

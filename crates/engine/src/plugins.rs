@@ -359,7 +359,9 @@ impl ClapPluginShared {
         let (num_inputs, num_outputs, processor) = receiver.await.unwrap();
 
         audio_graph.add_node(
-            NodeDescBuilder::default().audio(num_inputs, num_outputs),
+            NodeDescBuilder::default()
+                .audio(num_inputs, num_outputs)
+                .event(1, 0),
             processor,
         )
     }

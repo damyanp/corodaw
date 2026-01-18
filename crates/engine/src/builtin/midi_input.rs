@@ -49,12 +49,10 @@ impl Processor for MidiInputProcessor {
         _: &Node,
         timestamp: &Duration,
         _: &mut [AudioBlockSequential<f32>],
+        out_event_buffers: &mut [Vec<Event>],
     ) {
         self.receive_midi_events(timestamp);
-
-        for event in self.events.iter() {
-            println!("{:?}: {:?}", event.timestamp, event.midi);
-        }
+        out_event_buffers[0].extend(self.events.iter().cloned());
         self.events.clear();
     }
 }

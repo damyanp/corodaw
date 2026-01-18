@@ -1,6 +1,6 @@
 use crate::worker::Processor;
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, PartialOrd, Ord)]
 pub struct NodeId(pub(crate) usize);
 
 #[derive(Default)]
@@ -10,7 +10,7 @@ pub struct GraphDesc {
     pub(crate) output_node_id: Option<NodeId>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NodeDesc {
     pub id: NodeId,
     pub input_nodes: Vec<NodeId>,
@@ -56,6 +56,24 @@ impl NodeDesc {
         if !self.input_nodes.contains(node) {
             self.input_nodes.push(*node);
         }
+    }
+
+    fn update_input_nodes(&mut self) {
+        let mut nodes: Vec<_> = self
+            .audio_input_connections
+            .iter()
+            .chain(self.event_input_connections.iter())
+            .filter_map(|c| {
+                if let InputConnection::Connected(node, _) = c {
+                    Some(*node)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        nodes.sort();
+        nodes.dedup();
+        self.input_nodes = nodes;
     }
 }
 
@@ -132,6 +150,34 @@ impl GraphDesc {
         dest.add_input_node(&src_node);
 
         dest.audio_input_connections[dest_port] = InputConnection::Connected(src_node, src_port);
+    }
+
+    pub fn connect_event(
+        &mut self,
+        dest_node: NodeId,
+        dest_port: usize,
+        src_node: NodeId,
+        src_port: usize,
+    ) {
+        assert_ne!(dest_node, src_node);
+
+        let [dest, src] = self
+            .nodes
+            .get_disjoint_mut([dest_node.0, src_node.0])
+            .unwrap();
+
+        assert!(dest_port < dest.event_input_connections.len());
+        assert!(src_port < src.num_event_outputs);
+
+        dest.add_input_node(&src_node);
+
+        dest.event_input_connections[dest_port] = InputConnection::Connected(src_node, src_port);
+    }
+
+    pub fn disconnect_event(&mut self, dest_node: NodeId, dest_port: usize) {
+        let dest = self.nodes.get_mut(dest_node.0).unwrap();
+        dest.event_input_connections[dest_port] = InputConnection::Disconnected;
+        dest.update_input_nodes();
     }
 
     pub fn add_input_node(&mut self, dest_node: NodeId, src_node: NodeId) {

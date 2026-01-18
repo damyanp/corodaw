@@ -9,7 +9,10 @@ use std::{
 use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockSequential};
 use fixedbitset::FixedBitSet;
 
-use crate::desc::{GraphDesc, NodeDesc, NodeId};
+use crate::{
+    Event,
+    desc::{GraphDesc, NodeDesc, NodeId},
+};
 
 pub trait Processor: Send + Debug {
     fn process(
@@ -18,24 +21,29 @@ pub trait Processor: Send + Debug {
         node: &Node,
         timestamp: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        out_event_buffers: &mut [Vec<Event>],
     );
 }
 
 pub struct Node {
     pub desc: NodeDesc,
     pub processor: RefCell<Box<dyn Processor>>,
-    pub output_buffers: AudioBuffers,
+    pub output_audio_buffers: AudioBuffers,
+    pub output_event_buffers: EventBuffers,
 }
 
 impl Node {
     fn new(desc: NodeDesc, processor: Box<dyn Processor>) -> Self {
         const HARDCODED_NUM_FRAMES: usize = 1024;
-        let output_buffers = AudioBuffers::new(desc.num_audio_outputs as u16, HARDCODED_NUM_FRAMES);
+        let output_audio_buffers =
+            AudioBuffers::new(desc.num_audio_outputs as u16, HARDCODED_NUM_FRAMES);
+        let output_event_buffers = EventBuffers::new(desc.num_event_outputs as usize);
 
         Self {
             desc,
             processor: RefCell::new(processor),
-            output_buffers,
+            output_audio_buffers,
+            output_event_buffers,
         }
     }
 }
@@ -82,14 +90,23 @@ impl Graph {
         for node_id in ordered {
             let node = &self.nodes[node_id.0];
 
-            node.output_buffers.prepare_for_processing(num_frames);
+            node.output_audio_buffers.prepare_for_processing(num_frames);
 
-            let mut out_audio_buffers = node.output_buffers.channels.borrow_mut();
+            let mut out_audio_buffers = node.output_audio_buffers.channels.borrow_mut();
             let out_audio_buffers = out_audio_buffers.as_mut_slice();
 
-            node.processor
-                .borrow_mut()
-                .process(self, node, timestamp, out_audio_buffers);
+            node.output_event_buffers.prepare_for_processing();
+
+            let mut out_event_buffers = node.output_event_buffers.ports.borrow_mut();
+            let out_event_buffers = out_event_buffers.as_mut_slice();
+
+            node.processor.borrow_mut().process(
+                self,
+                node,
+                timestamp,
+                out_audio_buffers,
+                out_event_buffers,
+            );
         }
     }
 
@@ -181,6 +198,28 @@ impl AudioBuffers {
             for channel in channels.iter_mut() {
                 channel.set_active_num_frames(num_frames);
             }
+        }
+    }
+}
+
+pub struct EventBuffers {
+    pub(crate) ports: RefCell<Vec<Vec<Event>>>,
+}
+
+impl EventBuffers {
+    fn new(num_ports: usize) -> Self {
+        EventBuffers {
+            ports: RefCell::new((0..num_ports).map(|_| Vec::new()).collect()),
+        }
+    }
+
+    pub fn get(&self) -> Ref<'_, Vec<Vec<Event>>> {
+        self.ports.borrow()
+    }
+
+    fn prepare_for_processing(&self) {
+        for port in self.ports.borrow_mut().iter_mut() {
+            port.clear();
         }
     }
 }
