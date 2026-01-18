@@ -77,6 +77,8 @@ impl MidiInputProcessor {
             let since_midi_start = Duration::from_micros(micros_since_midi_start);
             let session_time = start_session_time + since_midi_start;
 
+            let session_time = session_time.max(*timestamp);
+
             self.events.push_back(Event {
                 timestamp: session_time,
                 midi: event.midi_event,

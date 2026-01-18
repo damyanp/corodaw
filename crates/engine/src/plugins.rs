@@ -285,9 +285,9 @@ impl ClapPlugin {
             .unwrap_or_default()
     }
 
-    pub fn get_audio_processor(&self) -> PluginAudioProcessor<ClapPlugin> {
+    pub fn get_audio_processor(&self, sample_rate: f64) -> PluginAudioProcessor<ClapPlugin> {
         let configuration = PluginAudioConfiguration {
-            sample_rate: 48_000.0,
+            sample_rate,
             min_frames_count: 1,
             max_frames_count: 100_000,
         };

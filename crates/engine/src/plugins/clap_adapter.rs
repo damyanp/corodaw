@@ -15,6 +15,7 @@ use audio_graph::{Event, Graph, InputConnection, Node, Processor};
 
 pub struct ClapPluginProcessor {
     plugin_audio_processor: PluginAudioProcessor<ClapPlugin>,
+    sample_rate: u32,
     audio_ports: AudioPorts,
     input_events: EventBuffer,
     num_outputs: usize,
@@ -37,8 +38,11 @@ impl ClapPluginProcessor {
 
         let audio_ports = AudioPorts::with_capacity(total_channel_count, output_ports.len());
 
+        let sample_rate = 48_000;
+
         Self {
-            plugin_audio_processor: clap_plugin.get_audio_processor(),
+            plugin_audio_processor: clap_plugin.get_audio_processor(sample_rate as f64),
+            sample_rate,
             audio_ports,
             input_events: EventBuffer::new(),
             num_outputs: total_channel_count,
@@ -116,7 +120,21 @@ impl ClapPluginProcessor {
             let mut data: [u8; 3] = Default::default();
             event.midi.copy_to_slice(&mut data).unwrap();
 
-            let me = MidiEvent::new(0, 0, data);
+            assert!(event.timestamp >= *timestamp);
+
+            const NS_PER_SECOND: u128 = 1_000_000_000u128;
+            // sample_rate = samples / seconds
+            // samples = sample_rate * seconds
+            // samples = sample_rate * (nanoseconds / NS_PER_SECOND)
+            let timediff = event.timestamp - *timestamp;
+            let nanoseconds = timediff.as_nanos();
+            let samples = (self.sample_rate as u128)
+                .saturating_mul(nanoseconds)
+                .saturating_div(NS_PER_SECOND);
+
+            debug_assert!(samples <= (u32::MAX as u128));
+
+            let me = MidiEvent::new(samples as u32, 0, data);
 
             self.input_events.push(&me);
         }
