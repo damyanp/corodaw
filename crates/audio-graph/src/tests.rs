@@ -110,7 +110,7 @@ fn graph_can_be_sent_to_thread() {
         Box::new(Constant(2.0)),
     );
 
-    graph.connect(node1, 0, node2, 0);
+    graph.connect_audio(node1, 0, node2, 0);
 
     let join = {
         let graph = graph.send();
@@ -144,8 +144,8 @@ fn reachable_nodes() {
     let nodes: Vec<NodeId> = (0..5)
         .map(|_| graph.add_node(NodeDescBuilder::default().audio(1, 1), logger.make()))
         .collect();
-    graph.connect(nodes[0], 0, nodes[1], 0);
-    graph.connect(nodes[2], 0, nodes[3], 0);
+    graph.connect_audio(nodes[0], 0, nodes[1], 0);
+    graph.connect_audio(nodes[2], 0, nodes[3], 0);
 
     let graph = Graph::new(graph, None);
 
@@ -179,9 +179,9 @@ fn multiple_node_process_order() {
     let c = graph.add_node(NodeDescBuilder::default().audio(0, 1), logger.make());
     let d = graph.add_node(NodeDescBuilder::default().audio(1, 0), logger.make());
 
-    graph.connect(d, 0, a, 0);
-    graph.connect(a, 0, b, 0);
-    graph.connect(a, 1, c, 0);
+    graph.connect_audio(d, 0, a, 0);
+    graph.connect_audio(a, 0, b, 0);
+    graph.connect_audio(a, 1, c, 0);
 
     let mut graph = Graph::new(graph, None);
     graph.process(d, 1, &Duration::default());
@@ -206,8 +206,8 @@ fn node_processing() {
         Box::new(Constant(1.0)),
     );
 
-    graph.connect(a, 0, b, 0);
-    graph.connect(a, 1, c, 0);
+    graph.connect_audio(a, 0, b, 0);
+    graph.connect_audio(a, 1, c, 0);
 
     let mut graph = Graph::new(graph, None);
     graph.process(a, 1, &Duration::default());

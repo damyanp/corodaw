@@ -75,7 +75,7 @@ impl Project {
         let module_id = module.id();
 
         for port in 0..2 {
-            self.audio_graph.connect_grow_inputs(
+            self.audio_graph.connect_audio_grow_inputs(
                 self.summer,
                 self.num_modules() * 2 + port,
                 module.output_node(),
@@ -160,7 +160,7 @@ impl Module {
 
         // TODO: this assumes ports 0 & 1 are the right ones to connect!
         for port in 0..2 {
-            audio_graph.connect(gain_control.node_id, port, plugin_node_id, port);
+            audio_graph.connect_audio(gain_control.node_id, port, plugin_node_id, port);
         }
 
         Self {

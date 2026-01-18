@@ -97,7 +97,7 @@ impl GraphDesc {
         id
     }
 
-    pub fn connect_grow_input(
+    pub fn connect_audio_grow_inputs(
         &mut self,
         dest_node: NodeId,
         dest_port: usize,
@@ -109,10 +109,10 @@ impl GraphDesc {
             dest.audio_input_connections
                 .push(InputConnection::Disconnected);
         }
-        self.connect(dest_node, dest_port, src_node, src_port)
+        self.connect_audio(dest_node, dest_port, src_node, src_port)
     }
 
-    pub fn connect(
+    pub fn connect_audio(
         &mut self,
         dest_node: NodeId,
         dest_port: usize,

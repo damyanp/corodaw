@@ -61,13 +61,7 @@ impl AudioGraph {
             .add_node(node_desc_builder, processor)
     }
 
-    pub fn connect(&self, dest_node: NodeId, dest_port: usize, src_node: NodeId, src_port: usize) {
-        self.inner
-            .borrow_mut()
-            .connect(dest_node, dest_port, src_node, src_port)
-    }
-
-    pub fn connect_grow_inputs(
+    pub fn connect_audio(
         &self,
         dest_node: NodeId,
         dest_port: usize,
@@ -76,7 +70,19 @@ impl AudioGraph {
     ) {
         self.inner
             .borrow_mut()
-            .connect_grow_input(dest_node, dest_port, src_node, src_port);
+            .connect_audio(dest_node, dest_port, src_node, src_port)
+    }
+
+    pub fn connect_audio_grow_inputs(
+        &self,
+        dest_node: NodeId,
+        dest_port: usize,
+        src_node: NodeId,
+        src_port: usize,
+    ) {
+        self.inner
+            .borrow_mut()
+            .connect_audio_grow_inputs(dest_node, dest_port, src_node, src_port);
     }
 
     pub fn set_output_node(&self, node_id: NodeId) {
@@ -106,13 +112,7 @@ impl AudioGraphInner {
         self.graph_desc.add_node(node_desc_builder, processor)
     }
 
-    fn connect(&mut self, dest_node: NodeId, dest_port: usize, src_node: NodeId, src_port: usize) {
-        self.modified = true;
-        self.graph_desc
-            .connect(dest_node, dest_port, src_node, src_port)
-    }
-
-    fn connect_grow_input(
+    fn connect_audio(
         &mut self,
         dest_node: NodeId,
         dest_port: usize,
@@ -121,7 +121,19 @@ impl AudioGraphInner {
     ) {
         self.modified = true;
         self.graph_desc
-            .connect_grow_input(dest_node, dest_port, src_node, src_port)
+            .connect_audio(dest_node, dest_port, src_node, src_port)
+    }
+
+    fn connect_audio_grow_inputs(
+        &mut self,
+        dest_node: NodeId,
+        dest_port: usize,
+        src_node: NodeId,
+        src_port: usize,
+    ) {
+        self.modified = true;
+        self.graph_desc
+            .connect_audio_grow_inputs(dest_node, dest_port, src_node, src_port)
     }
 
     pub fn add_input_node(&mut self, dest_node: NodeId, src_node: NodeId) {
