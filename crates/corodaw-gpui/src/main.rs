@@ -53,7 +53,7 @@ impl CorodawProject {
         let audio_graph = project.borrow().audio_graph();
         let clap_plugin_manager = project.borrow().clap_plugin_manager();
 
-        let module = model::Module::new(
+        let module = model::Channel::new(
             name,
             &audio_graph,
             &clap_plugin_manager,
@@ -61,7 +61,7 @@ impl CorodawProject {
             initial_gain,
         )
         .await;
-        let module_id = project.borrow_mut().add_module(module);
+        let module_id = project.borrow_mut().add_channel(module);
 
         cx.update(|cx| Module::new(module_id, initial_gain, cx))
             .unwrap()

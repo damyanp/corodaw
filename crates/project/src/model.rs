@@ -13,7 +13,7 @@ use engine::{
 
 #[derive(Serialize)]
 pub struct Project {
-    modules: Vec<Module>,
+    channels: Vec<Channel>,
 
     #[serde(skip)]
     audio_graph: AudioGraph,
@@ -52,7 +52,7 @@ impl Default for Project {
         let clap_plugin_manager = ClapPluginManager::default();
 
         Self {
-            modules: Vec::default(),
+            channels: Vec::default(),
             audio_graph,
             clap_plugin_manager,
             midi_input,
@@ -63,8 +63,8 @@ impl Default for Project {
 }
 
 impl Project {
-    pub fn num_modules(&self) -> usize {
-        self.modules.len()
+    pub fn num_channels(&self) -> usize {
+        self.channels.len()
     }
 
     pub fn audio_graph(&self) -> AudioGraph {
@@ -75,50 +75,50 @@ impl Project {
         self.clap_plugin_manager.clone()
     }
 
-    pub fn add_module(&mut self, module: Module) -> Id<Module> {
-        let module_id = module.id();
+    pub fn add_channel(&mut self, channel: Channel) -> Id<Channel> {
+        let channel_id = channel.id();
 
         for port in 0..2 {
             self.audio_graph
                 .connect_audio_grow_inputs(
                     self.summer,
-                    self.num_modules() * 2 + port,
-                    module.output_node(),
+                    self.num_channels() * 2 + port,
+                    channel.output_node(),
                     port,
                 )
                 .unwrap();
         }
 
-        self.modules.push(module);
+        self.channels.push(channel);
 
         self.audio_graph.update();
 
-        module_id
+        channel_id
     }
 
-    pub fn module(&self, id: &Id<Module>) -> Option<&Module> {
-        self.modules.iter().find(|m| m.id == *id)
+    pub fn channel(&self, id: &Id<Channel>) -> Option<&Channel> {
+        self.channels.iter().find(|m| m.id == *id)
     }
 
-    pub fn module_mut(&mut self, id: &Id<Module>) -> Option<&mut Module> {
-        self.modules.iter_mut().find(|m| m.id == *id)
+    pub fn channel_mut(&mut self, id: &Id<Channel>) -> Option<&mut Channel> {
+        self.channels.iter_mut().find(|m| m.id == *id)
     }
 
-    pub fn module_control(&mut self, id: &Id<Module>, control: ModuleControl) {
-        self.module_mut(id).unwrap().control(control);
+    pub fn channel_control(&mut self, id: &Id<Channel>, control: ChannelControl) {
+        self.channel_mut(id).unwrap().control(control);
 
-        let has_soloed = self.modules.iter().any(|m| m.is_soloed());
-        for module in self.modules.iter_mut() {
-            let muted = module.is_muted() || (has_soloed && !module.is_soloed());
-            module.update_gain(muted);
+        let has_soloed = self.channels.iter().any(|m| m.is_soloed());
+        for channel in self.channels.iter_mut() {
+            let muted = channel.is_muted() || (has_soloed && !channel.is_soloed());
+            channel.update_gain(muted);
 
-            if module.is_armed() {
+            if channel.is_armed() {
                 self.audio_graph
-                    .connect_event(module.input_node(), 0, self.midi_input.node_id, 0)
+                    .connect_event(channel.input_node(), 0, self.midi_input.node_id, 0)
                     .unwrap();
             } else {
                 self.audio_graph
-                    .disconnect_event(module.input_node(), 0)
+                    .disconnect_event(channel.input_node(), 0)
                     .unwrap();
             }
         }
@@ -126,18 +126,18 @@ impl Project {
         self.audio_graph().update();
     }
 
-    pub fn show_gui(&self, id: Id<Module>) -> impl Future<Output = ()> + 'static {
-        self.module(&id)
+    pub fn show_gui(&self, id: Id<Channel>) -> impl Future<Output = ()> + 'static {
+        self.channel(&id)
             .unwrap()
             .show_gui(self.clap_plugin_manager.clone())
     }
 
-    pub fn has_gui(&self, id: &Id<Module>) -> bool {
-        self.module(id).unwrap().has_gui(&self.clap_plugin_manager)
+    pub fn has_gui(&self, id: &Id<Channel>) -> bool {
+        self.channel(id).unwrap().has_gui(&self.clap_plugin_manager)
     }
 }
 
-pub enum ModuleControl {
+pub enum ChannelControl {
     SetGain(f32),
     ToggleMute,
     ToggleSolo,
@@ -145,8 +145,8 @@ pub enum ModuleControl {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Module {
-    id: Id<Module>,
+pub struct Channel {
+    id: Id<Channel>,
     name: String,
     plugin_id: String,
     gain_value: f32,
@@ -164,14 +164,14 @@ pub struct Module {
     gain_control: Option<GainControl>,
 }
 
-impl Module {
+impl Channel {
     pub async fn new(
         name: String,
         audio_graph: &AudioGraph,
         clap_plugin_manager: &ClapPluginManager,
         found_plugin: &FoundPlugin,
         gain_value: f32,
-    ) -> Module {
+    ) -> Channel {
         let clap_plugin = clap_plugin_manager
             .create_plugin(found_plugin.clone())
             .await;
@@ -204,16 +204,16 @@ impl Module {
         self.name.as_str()
     }
 
-    pub fn id(&self) -> Id<Module> {
+    pub fn id(&self) -> Id<Channel> {
         self.id
     }
 
-    fn control(&mut self, control: ModuleControl) {
+    fn control(&mut self, control: ChannelControl) {
         match control {
-            ModuleControl::SetGain(gain) => self.gain_value = gain,
-            ModuleControl::ToggleMute => self.muted = !self.muted,
-            ModuleControl::ToggleSolo => self.soloed = !self.soloed,
-            ModuleControl::ToggleArmed => self.armed = !self.armed,
+            ChannelControl::SetGain(gain) => self.gain_value = gain,
+            ChannelControl::ToggleMute => self.muted = !self.muted,
+            ChannelControl::ToggleSolo => self.soloed = !self.soloed,
+            ChannelControl::ToggleArmed => self.armed = !self.armed,
         }
     }
 

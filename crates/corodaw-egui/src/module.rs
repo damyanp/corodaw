@@ -1,17 +1,17 @@
 use std::cell::Cell;
 
 use eframe::egui::{self, Button, Color32, Margin, RichText, Slider, Stroke};
-use project::{model::ModuleControl, *};
+use project::{model::ChannelControl, *};
 
 use crate::Corodaw;
 
 pub struct Module {
-    id: model::Id<model::Module>,
+    id: model::Id<model::Channel>,
     gain_value: Cell<f32>,
 }
 
 impl Module {
-    pub fn new(id: model::Id<model::Module>, initial_gain: f32) -> Self {
+    pub fn new(id: model::Id<model::Channel>, initial_gain: f32) -> Self {
         Self {
             id,
             gain_value: Cell::new(initial_gain),
@@ -21,7 +21,7 @@ impl Module {
     pub fn add_to_ui(&self, corodaw: &Corodaw, ui: &mut egui::Ui) {
         let (name, muted, soloed, armed) = {
             let project = corodaw.project.borrow();
-            let module = project.module(&self.id).unwrap();
+            let module = project.channel(&self.id).unwrap();
             (
                 module.name().to_owned(),
                 module.is_muted(),
@@ -39,7 +39,7 @@ impl Module {
                     ui.take_available_width();
 
                     let mut control_button =
-                        |label: &str, color: Color32, selected: bool, control: ModuleControl| {
+                        |label: &str, color: Color32, selected: bool, control: ChannelControl| {
                             let color = if selected {
                                 color
                             } else {
@@ -57,13 +57,13 @@ impl Module {
                                 corodaw
                                     .project
                                     .borrow_mut()
-                                    .module_control(&self.id, control);
+                                    .channel_control(&self.id, control);
                             }
                         };
 
-                    control_button("M", Color32::ORANGE, muted, ModuleControl::ToggleMute);
-                    control_button("S", Color32::GREEN, soloed, ModuleControl::ToggleSolo);
-                    control_button("R", Color32::DARK_RED, armed, ModuleControl::ToggleArmed);
+                    control_button("M", Color32::ORANGE, muted, ChannelControl::ToggleMute);
+                    control_button("S", Color32::GREEN, soloed, ChannelControl::ToggleSolo);
+                    control_button("R", Color32::DARK_RED, armed, ChannelControl::ToggleArmed);
 
                     ui.add_space(1.0);
                     ui.label(name);
@@ -78,7 +78,7 @@ impl Module {
                         corodaw
                             .project
                             .borrow_mut()
-                            .module_control(&self.id, model::ModuleControl::SetGain(gain_value));
+                            .channel_control(&self.id, model::ChannelControl::SetGain(gain_value));
                     }
 
                     let has_gui = { corodaw.project.borrow().has_gui(&self.id) };

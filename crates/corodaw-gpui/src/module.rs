@@ -5,17 +5,17 @@ use gpui_component::{
     *,
 };
 
-use project::{model::ModuleControl, *};
+use project::{model::ChannelControl, *};
 
 use crate::CorodawProject;
 
 pub struct Module {
-    id: model::Id<model::Module>,
+    id: model::Id<model::Channel>,
     gain_slider: Entity<SliderState>,
 }
 
 impl Module {
-    pub fn new(id: model::Id<model::Module>, initial_gain: f32, cx: &mut App) -> Self {
+    pub fn new(id: model::Id<model::Channel>, initial_gain: f32, cx: &mut App) -> Self {
         let gain_slider = cx.new(|_| {
             SliderState::new()
                 .default_value(initial_gain)
@@ -30,7 +30,7 @@ impl Module {
                 project
                     .project
                     .borrow_mut()
-                    .module_control(&id, model::ModuleControl::SetGain(slider_value.start()));
+                    .channel_control(&id, model::ChannelControl::SetGain(slider_value.start()));
             }
         })
         .detach();
@@ -43,7 +43,7 @@ impl Module {
             corodaw_project
                 .project
                 .borrow_mut()
-                .module_control(&self.id, ModuleControl::ToggleMute);
+                .channel_control(&self.id, ChannelControl::ToggleMute);
         })
     }
 
@@ -52,7 +52,7 @@ impl Module {
             corodaw_project
                 .project
                 .borrow_mut()
-                .module_control(&self.id, ModuleControl::ToggleSolo);
+                .channel_control(&self.id, ChannelControl::ToggleSolo);
         })
     }
 
@@ -61,7 +61,7 @@ impl Module {
             corodaw_project
                 .project
                 .borrow_mut()
-                .module_control(&self.id, ModuleControl::ToggleArmed);
+                .channel_control(&self.id, ChannelControl::ToggleArmed);
         })
     }
 
@@ -81,7 +81,7 @@ impl Module {
 impl Render for Module {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let project = CorodawProject::global(cx).project.borrow();
-        let module = project.module(&self.id);
+        let module = project.channel(&self.id);
 
         if let Some(module) = module {
             div()
