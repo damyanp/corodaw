@@ -39,9 +39,13 @@ impl Default for Project {
         let midi_input = MidiInputNode::new(&audio_graph);
 
         let summer = audio_graph.add_node(NodeDescBuilder::default().audio(0, 2), Box::new(Summer));
-        audio_graph.set_output_node(summer);
+        audio_graph
+            .set_output_node(summer)
+            .expect("output node was just created and must be valid");
 
-        audio_graph.add_input_node(summer, midi_input.node_id);
+        audio_graph
+            .add_input_node(summer, midi_input.node_id)
+            .expect("nodes were just created and must be valid");
 
         audio_graph.update();
 
@@ -75,12 +79,14 @@ impl Project {
         let module_id = module.id();
 
         for port in 0..2 {
-            self.audio_graph.connect_audio_grow_inputs(
-                self.summer,
-                self.num_modules() * 2 + port,
-                module.output_node(),
-                port,
-            );
+            self.audio_graph
+                .connect_audio_grow_inputs(
+                    self.summer,
+                    self.num_modules() * 2 + port,
+                    module.output_node(),
+                    port,
+                )
+                .unwrap();
         }
 
         self.modules.push(module);
@@ -108,9 +114,12 @@ impl Project {
 
             if module.is_armed() {
                 self.audio_graph
-                    .connect_event(module.input_node(), 0, self.midi_input.node_id, 0);
+                    .connect_event(module.input_node(), 0, self.midi_input.node_id, 0)
+                    .unwrap();
             } else {
-                self.audio_graph.disconnect_event(module.input_node(), 0);
+                self.audio_graph
+                    .disconnect_event(module.input_node(), 0)
+                    .unwrap();
             }
         }
 
@@ -172,7 +181,9 @@ impl Module {
 
         // TODO: this assumes ports 0 & 1 are the right ones to connect!
         for port in 0..2 {
-            audio_graph.connect_audio(gain_control.node_id, port, plugin_node_id, port);
+            audio_graph
+                .connect_audio(gain_control.node_id, port, plugin_node_id, port)
+                .unwrap();
         }
 
         Self {

@@ -7,4 +7,5 @@ edition = "2024"
 audio-blocks.workspace = true
 fixedbitset = "0.5.7"
 itertools = "0.14.0"
+thiserror.workspace = true
 wmidi.workspace = true

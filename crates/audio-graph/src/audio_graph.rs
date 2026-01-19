@@ -1,7 +1,7 @@
 use audio_blocks::{AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, AudioBlockOps};
 
 use crate::{
-    desc::{GraphDesc, NodeDescBuilder, NodeId},
+    desc::{AudioGraphDescError, GraphDesc, NodeDescBuilder, NodeId},
     worker::{Graph, Processor},
 };
 use std::{
@@ -69,7 +69,7 @@ impl AudioGraph {
         dest_port: usize,
         src_node: NodeId,
         src_port: usize,
-    ) {
+    ) -> Result<(), AudioGraphDescError> {
         self.inner
             .borrow_mut()
             .connect_audio(dest_node, dest_port, src_node, src_port)
@@ -81,10 +81,10 @@ impl AudioGraph {
         dest_port: usize,
         src_node: NodeId,
         src_port: usize,
-    ) {
+    ) -> Result<(), AudioGraphDescError> {
         self.inner
             .borrow_mut()
-            .connect_audio_grow_inputs(dest_node, dest_port, src_node, src_port);
+            .connect_audio_grow_inputs(dest_node, dest_port, src_node, src_port)
     }
 
     pub fn connect_event(
@@ -93,23 +93,31 @@ impl AudioGraph {
         dest_port: usize,
         src_node: NodeId,
         src_port: usize,
-    ) {
+    ) -> Result<(), AudioGraphDescError> {
         self.inner
             .borrow_mut()
-            .connect_event(dest_node, dest_port, src_node, src_port);
+            .connect_event(dest_node, dest_port, src_node, src_port)
     }
 
-    pub fn disconnect_event(&self, dest_node: NodeId, dest_port: usize) {
+    pub fn disconnect_event(
+        &self,
+        dest_node: NodeId,
+        dest_port: usize,
+    ) -> Result<(), AudioGraphDescError> {
         self.inner
             .borrow_mut()
-            .disconnect_event(dest_node, dest_port);
+            .disconnect_event(dest_node, dest_port)
     }
 
-    pub fn set_output_node(&self, node_id: NodeId) {
-        self.inner.borrow_mut().set_output_node(node_id);
+    pub fn set_output_node(&self, node_id: NodeId) -> Result<(), AudioGraphDescError> {
+        self.inner.borrow_mut().set_output_node(node_id)
     }
 
-    pub fn add_input_node(&self, summer: NodeId, midi_input: NodeId) {
+    pub fn add_input_node(
+        &self,
+        summer: NodeId,
+        midi_input: NodeId,
+    ) -> Result<(), AudioGraphDescError> {
         self.inner.borrow_mut().add_input_node(summer, midi_input)
     }
 }
@@ -138,7 +146,7 @@ impl AudioGraphInner {
         dest_port: usize,
         src_node: NodeId,
         src_port: usize,
-    ) {
+    ) -> Result<(), AudioGraphDescError> {
         self.modified = true;
         self.graph_desc
             .connect_audio(dest_node, dest_port, src_node, src_port)
@@ -150,7 +158,7 @@ impl AudioGraphInner {
         dest_port: usize,
         src_node: NodeId,
         src_port: usize,
-    ) {
+    ) -> Result<(), AudioGraphDescError> {
         self.modified = true;
         self.graph_desc
             .connect_audio_grow_inputs(dest_node, dest_port, src_node, src_port)
@@ -162,25 +170,33 @@ impl AudioGraphInner {
         dest_port: usize,
         src_node: NodeId,
         src_port: usize,
-    ) {
+    ) -> Result<(), AudioGraphDescError> {
         self.modified = true;
         self.graph_desc
-            .connect_event(dest_node, dest_port, src_node, src_port);
+            .connect_event(dest_node, dest_port, src_node, src_port)
     }
 
-    fn disconnect_event(&mut self, dest_node: NodeId, dest_port: usize) {
+    fn disconnect_event(
+        &mut self,
+        dest_node: NodeId,
+        dest_port: usize,
+    ) -> Result<(), AudioGraphDescError> {
         self.modified = true;
-        self.graph_desc.disconnect_event(dest_node, dest_port);
+        self.graph_desc.disconnect_event(dest_node, dest_port)
     }
 
-    fn add_input_node(&mut self, dest_node: NodeId, src_node: NodeId) {
+    fn add_input_node(
+        &mut self,
+        dest_node: NodeId,
+        src_node: NodeId,
+    ) -> Result<(), AudioGraphDescError> {
         self.modified = true;
-        self.graph_desc.add_input_node(dest_node, src_node);
+        self.graph_desc.add_input_node(dest_node, src_node)
     }
 
-    fn set_output_node(&mut self, node_id: NodeId) {
+    fn set_output_node(&mut self, node_id: NodeId) -> Result<(), AudioGraphDescError> {
         self.modified = true;
-        self.graph_desc.set_output_node(node_id);
+        self.graph_desc.set_output_node(node_id)
     }
 
     fn update(&mut self) {
