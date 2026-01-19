@@ -75,7 +75,7 @@ impl Project {
         self.clap_plugin_manager.clone()
     }
 
-    pub fn add_channel(&mut self, channel: Channel) -> Id<Channel> {
+    pub fn add_channel(&mut self, channel: Channel) -> ChannelId {
         let channel_id = channel.id();
 
         for port in 0..2 {
@@ -96,15 +96,15 @@ impl Project {
         channel_id
     }
 
-    pub fn channel(&self, id: &Id<Channel>) -> Option<&Channel> {
+    pub fn channel(&self, id: &ChannelId) -> Option<&Channel> {
         self.channels.iter().find(|m| m.id == *id)
     }
 
-    pub fn channel_mut(&mut self, id: &Id<Channel>) -> Option<&mut Channel> {
+    pub fn channel_mut(&mut self, id: &ChannelId) -> Option<&mut Channel> {
         self.channels.iter_mut().find(|m| m.id == *id)
     }
 
-    pub fn channel_control(&mut self, id: &Id<Channel>, control: ChannelControl) {
+    pub fn channel_control(&mut self, id: &ChannelId, control: ChannelControl) {
         self.channel_mut(id).unwrap().control(control);
 
         let has_soloed = self.channels.iter().any(|m| m.is_soloed());
@@ -126,13 +126,13 @@ impl Project {
         self.audio_graph().update();
     }
 
-    pub fn show_gui(&self, id: Id<Channel>) -> impl Future<Output = ()> + 'static {
+    pub fn show_gui(&self, id: ChannelId) -> impl Future<Output = ()> + 'static {
         self.channel(&id)
             .unwrap()
             .show_gui(self.clap_plugin_manager.clone())
     }
 
-    pub fn has_gui(&self, id: &Id<Channel>) -> bool {
+    pub fn has_gui(&self, id: &ChannelId) -> bool {
         self.channel(id).unwrap().has_gui(&self.clap_plugin_manager)
     }
 }
@@ -144,9 +144,11 @@ pub enum ChannelControl {
     ToggleArmed,
 }
 
+pub type ChannelId = Id<Channel>;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Channel {
-    id: Id<Channel>,
+    id: ChannelId,
     name: String,
     plugin_id: String,
     gain_value: f32,
@@ -204,7 +206,7 @@ impl Channel {
         self.name.as_str()
     }
 
-    pub fn id(&self) -> Id<Channel> {
+    pub fn id(&self) -> ChannelId {
         self.id
     }
 
