@@ -90,7 +90,7 @@ impl Graph {
 
             node.output_audio_buffers.prepare_for_processing(num_frames);
 
-            let mut out_audio_buffers = node.output_audio_buffers.channels.borrow_mut();
+            let mut out_audio_buffers = node.output_audio_buffers.ports.borrow_mut();
             let out_audio_buffers = out_audio_buffers.as_mut_slice();
 
             node.output_event_buffers.prepare_for_processing();

@@ -53,7 +53,7 @@ impl Processor for SumInputs {
             .input_nodes
             .iter()
             .map(|id| &graph.nodes[id.0])
-            .map(|node| node.output_audio_buffers.channels.borrow());
+            .map(|node| node.output_audio_buffers.ports.borrow());
 
         for input in inputs {
             let input = input[0].channel(0);

@@ -5,37 +5,37 @@ use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockSequential};
 use crate::Event;
 
 pub struct AudioBuffers {
-    pub(crate) channels: RefCell<Vec<AudioBlockSequential<f32>>>,
+    pub(crate) ports: RefCell<Vec<AudioBlockSequential<f32>>>,
 }
 
 impl AudioBuffers {
-    pub(crate) fn new(num_channels: u16, num_frames: usize) -> Self {
+    pub(crate) fn new(num_ports: u16, num_frames: usize) -> Self {
         AudioBuffers {
-            channels: RefCell::new(AudioBuffers::build_channels(num_channels, num_frames)),
+            ports: RefCell::new(AudioBuffers::build_ports(num_ports, num_frames)),
         }
     }
 
-    fn build_channels(num_channels: u16, num_frames: usize) -> Vec<AudioBlockSequential<f32>> {
-        (0..num_channels)
+    fn build_ports(num_ports: u16, num_frames: usize) -> Vec<AudioBlockSequential<f32>> {
+        (0..num_ports)
             .map(|_| AudioBlockSequential::new(1, num_frames))
             .collect()
     }
 
     pub fn get(&self) -> Ref<'_, Vec<AudioBlockSequential<f32>>> {
-        self.channels.borrow()
+        self.ports.borrow()
     }
 
     pub(crate) fn prepare_for_processing(&self, num_frames: usize) {
-        let mut channels = self.channels.borrow_mut();
+        let mut ports = self.ports.borrow_mut();
 
-        if let Some(channel) = channels.first()
-            && channel.num_frames_allocated() < num_frames
+        if let Some(port) = ports.first()
+            && port.num_frames_allocated() < num_frames
         {
             println!("Allocating new audio buffers for {num_frames} frames");
-            *channels = AudioBuffers::build_channels(channels.len() as u16, num_frames);
+            *ports = AudioBuffers::build_ports(ports.len() as u16, num_frames);
         } else {
-            for channel in channels.iter_mut() {
-                channel.set_active_num_frames(num_frames);
+            for port in ports.iter_mut() {
+                port.set_active_num_frames(num_frames);
             }
         }
     }
