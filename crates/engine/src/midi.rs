@@ -7,6 +7,7 @@ use std::error::Error;
 use wmidi::MidiMessage;
 
 /// A MIDI message that was received at a given time.
+#[derive(Debug)]
 pub struct MidiEventMessage {
     /// A micro-timestamp of when the event occurred.
     ///

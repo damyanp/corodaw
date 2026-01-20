@@ -1,5 +1,9 @@
-use std::{cell::RefCell, rc::Rc};
+use std::time::Duration;
 
+use bevy_ecs::{
+    query::{Added, Changed, Or},
+    system::{NonSend, Query},
+};
 use engine::plugins::discovery::{FoundPlugin, get_plugins};
 use project::*;
 
@@ -36,46 +40,94 @@ impl SelectItem for SelectablePlugin {
 }
 
 #[derive(Default)]
-pub struct CorodawProject {
-    project: Rc<RefCell<model::Project>>,
-}
-
+pub struct CorodawProject(Project);
 impl Global for CorodawProject {}
-
-impl CorodawProject {
-    async fn new_module(name: String, plugin: &FoundPlugin, cx: &AsyncApp) -> Module {
-        let initial_gain = 1.0;
-
-        let project = cx
-            .read_global(|project: &CorodawProject, _| project.project.clone())
-            .unwrap();
-
-        let audio_graph = project.borrow().audio_graph();
-        let clap_plugin_manager = project.borrow().clap_plugin_manager();
-
-        let module = model::Channel::new(
-            name,
-            &audio_graph,
-            &clap_plugin_manager,
-            plugin,
-            initial_gain,
-        )
-        .await;
-        let module_id = project.borrow_mut().add_channel(module);
-
-        cx.update(|cx| Module::new(module_id, initial_gain, cx))
-            .unwrap()
-    }
-}
 
 pub struct Corodaw {
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
     modules: Vec<Entity<Module>>,
 }
 
+fn update_channels(
+    gpui: NonSend<GpuiContext>,
+    new_channels: Query<(bevy_ecs::entity::Entity, &ChannelState), Added<ChannelState>>,
+) {
+    #[derive(Debug)]
+    struct NewChannelInfo {
+        entity: bevy_ecs::entity::Entity,
+        state: ChannelState,
+    }
+
+    let new_channels: Vec<_> = new_channels
+        .iter()
+        .map(|(entity, state)| NewChannelInfo {
+            entity,
+            state: (*state).clone(),
+        })
+        .collect();
+
+    gpui.spawn_update_corodaw(move |corodaw, cx| {
+        for channel in &new_channels {
+            corodaw
+                .modules
+                .push(cx.new(|cx| Module::new(channel.entity, channel.state.gain_value, cx)));
+        }
+    })
+    .detach();
+}
+
+#[allow(clippy::type_complexity)]
+fn data_changed(
+    gpui: NonSend<GpuiContext>,
+    _: Query<bevy_ecs::entity::Entity, Or<(Changed<ChannelAudioView>, Changed<ChannelData>)>>,
+) {
+    // we don't care about the actual items returned, just whether _something_ has changed.
+    gpui.spawn(async |app| {
+        app.refresh().unwrap();
+    })
+    .detach();
+}
+
+struct GpuiContext {
+    app: AsyncApp,
+    corodaw: Entity<Corodaw>,
+}
+
+impl GpuiContext {
+    pub fn spawn<AsyncFn, R>(&self, f: AsyncFn) -> Task<R>
+    where
+        AsyncFn: AsyncFnOnce(&mut AsyncApp) -> R + 'static,
+        R: 'static,
+    {
+        self.app.spawn(f)
+    }
+
+    fn spawn_update_corodaw<R: 'static>(
+        &self,
+        update: impl FnOnce(&mut Corodaw, &mut Context<'_, Corodaw>) -> R + 'static,
+    ) -> Task<Result<R>> {
+        let corodaw = self.corodaw.clone();
+        self.spawn(async move |app| app.update_entity(&corodaw, update))
+    }
+}
+
 impl Corodaw {
     fn new(plugins: Vec<FoundPlugin>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        cx.set_global(CorodawProject::default());
+        let mut corodaw_project = CorodawProject::default();
+
+        corodaw_project
+            .0
+            .get_world_mut()
+            .insert_non_send_resource(GpuiContext {
+                app: cx.to_async(),
+                corodaw: cx.entity(),
+            });
+
+        corodaw_project
+            .0
+            .add_systems((update_channels, data_changed));
+
+        cx.set_global(corodaw_project);
 
         let searchable_plugins = SearchableVec::new(
             plugins
@@ -88,40 +140,21 @@ impl Corodaw {
 
         Self {
             plugin_selector,
-            modules: Vec::new(),
+            modules: Default::default(),
         }
     }
 
-    async fn add_module(this: Entity<Corodaw>, cx: &mut AsyncApp) {
-        let (plugin, name) = cx
-            .read_entity(&this, |corodaw, cx| {
-                let plugin = corodaw
-                    .plugin_selector
-                    .read(cx)
-                    .selected_value()
-                    .expect("The Add button should only be enabled if a plugin is selected")
-                    .clone();
-                let name = format!("Module {}: {}", corodaw.modules.len() + 1, plugin.name);
-                (plugin, name)
-            })
-            .unwrap();
-
-        let module = CorodawProject::new_module(name, &plugin, cx).await;
-
-        cx.update_entity(&this, |corodaw, cx| {
-            corodaw.modules.push(cx.new(|_| module));
-        })
-        .unwrap();
-
-        cx.refresh().unwrap();
-    }
-
     fn on_click(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        cx.spawn(async move |e, cx| {
-            let corodaw = e.upgrade().unwrap();
-            Self::add_module(corodaw, cx).await;
+        let plugin = self
+            .plugin_selector
+            .read(cx)
+            .selected_value()
+            .expect("The Add button should only be enabled if a plugin is selected")
+            .clone();
+
+        cx.update_global(move |c: &mut CorodawProject, _| {
+            c.0.add_channel(&plugin);
         })
-        .detach();
     }
 }
 
@@ -174,6 +207,17 @@ fn main() {
             })?;
 
             Ok::<_, anyhow::Error>(())
+        })
+        .detach();
+
+        cx.spawn(async move |cx| {
+            loop {
+                cx.update_global(|c: &mut CorodawProject, _| {
+                    c.0.update();
+                })
+                .unwrap();
+                Timer::interval(Duration::from_millis(16)).await;
+            }
         })
         .detach();
     });

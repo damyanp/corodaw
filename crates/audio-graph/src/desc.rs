@@ -116,18 +116,16 @@ impl GraphDesc {
         id
     }
 
-    pub fn connect_audio_grow_inputs(
+    pub fn connect_audio_add_input(
         &mut self,
         dest_node: NodeId,
-        dest_port: usize,
         src_node: NodeId,
         src_port: usize,
     ) -> Result<(), AudioGraphDescError> {
         let dest = &mut self.nodes[dest_node.0];
-        while dest.audio_input_connections.len() <= dest_port {
-            dest.audio_input_connections
-                .push(InputConnection::Disconnected);
-        }
+        let dest_port = dest.audio_input_connections.len();
+        dest.audio_input_connections
+            .push(InputConnection::Disconnected);
         self.connect_audio(dest_node, dest_port, src_node, src_port)?;
         Ok(())
     }

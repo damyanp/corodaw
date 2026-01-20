@@ -5,8 +5,11 @@ edition = "2024"
 
 [dependencies]
 audio-graph = { path = "../audio-graph" }
+bevy_app.workspace = true
+bevy_ecs.workspace = true
 derivative.workspace = true
 engine = { path = "../engine" }
+futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true

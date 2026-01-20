@@ -1,33 +1,34 @@
 use std::cell::Cell;
 
+use bevy_ecs::{entity::Entity, name::Name};
 use eframe::egui::{self, Button, Color32, Margin, RichText, Slider, Stroke};
-use project::{model::ChannelControl, *};
-
-use crate::Corodaw;
+use project::*;
 
 pub struct Module {
-    id: model::Id<model::Channel>,
+    entity: Entity,
     gain_value: Cell<f32>,
 }
 
 impl Module {
-    pub fn new(id: model::Id<model::Channel>, initial_gain: f32) -> Self {
+    pub fn new(entity: Entity, initial_gain: f32) -> Self {
         Self {
-            id,
+            entity,
             gain_value: Cell::new(initial_gain),
         }
     }
 
-    pub fn add_to_ui(&self, corodaw: &Corodaw, ui: &mut egui::Ui) {
-        let (name, muted, soloed, armed) = {
-            let project = corodaw.project.borrow();
-            let module = project.channel(&self.id).unwrap();
-            (
-                module.name().to_owned(),
-                module.is_muted(),
-                module.is_soloed(),
-                module.is_armed(),
-            )
+    pub fn add_to_ui(&self, project: &mut Project, ui: &mut egui::Ui) {
+        let world = project.get_world();
+        let entity = world.entity(self.entity);
+        let name = entity.get::<Name>().unwrap().as_str().to_owned();
+        let has_gui = entity
+            .get::<ChannelAudioView>()
+            .map(|v| v.has_gui())
+            .unwrap_or(false);
+
+        let (muted, soloed, armed) = {
+            let state = entity.get::<ChannelState>().unwrap();
+            (state.muted, state.soloed, state.armed)
         };
 
         egui::Frame::new()
@@ -54,10 +55,10 @@ impl Module {
                                 )
                                 .clicked()
                             {
-                                corodaw
-                                    .project
-                                    .borrow_mut()
-                                    .channel_control(&self.id, control);
+                                project.write_message(ChannelMessage {
+                                    channel: self.entity,
+                                    control,
+                                });
                             }
                         };
 
@@ -75,25 +76,18 @@ impl Module {
                     {
                         self.gain_value.replace(gain_value);
 
-                        corodaw
-                            .project
-                            .borrow_mut()
-                            .channel_control(&self.id, model::ChannelControl::SetGain(gain_value));
+                        project.write_message(ChannelMessage {
+                            channel: self.entity,
+                            control: ChannelControl::SetGain(gain_value),
+                        });
                     }
-
-                    let has_gui = { corodaw.project.borrow().has_gui(&self.id) };
 
                     ui.add_enabled_ui(!has_gui, |ui| {
                         if ui.button("Show").clicked() {
-                            let project = corodaw.project.clone();
-                            let id = self.id;
-                            corodaw
-                                .executor
-                                .spawn(async move {
-                                    let future = project.borrow().show_gui(id);
-                                    future.await;
-                                })
-                                .detach();
+                            project.write_message(ChannelMessage {
+                                channel: self.entity,
+                                control: ChannelControl::ShowGui,
+                            });
                         }
                     });
                 });

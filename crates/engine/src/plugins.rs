@@ -34,7 +34,7 @@ use discovery::FoundPlugin;
 use timers::Timers;
 use ui_host::PluginUiHost;
 
-use crate::plugins::ui_host::GuiHandle;
+pub use crate::plugins::ui_host::GuiHandle;
 
 mod clap_adapter;
 pub mod discovery;
@@ -44,55 +44,12 @@ mod ui_host;
 #[derive(Debug, Hash, Copy, Clone, Eq, PartialEq)]
 pub struct ClapPluginId(usize);
 
-#[derive(Default, Clone)]
 pub struct ClapPluginManager {
-    inner: Rc<RefCell<ClapPluginManagerInner>>,
-}
-
-impl ClapPluginManager {
-    pub async fn create_plugin(&self, plugin: FoundPlugin) -> ClapPluginShared {
-        let (sender, receiver) = oneshot::channel();
-        self.inner
-            .borrow()
-            .sender
-            .send(Message::CreatePlugin(plugin, sender))
-            .unwrap();
-        receiver.await.unwrap()
-    }
-
-    pub async fn show_gui(&self, clap_plugin_id: ClapPluginId) {
-        let (sender, receiver) = oneshot::channel();
-
-        self.inner
-            .borrow()
-            .sender
-            .send(Message::ShowGui(clap_plugin_id, sender))
-            .unwrap();
-
-        let gui_handle = receiver.await.unwrap();
-        self.inner
-            .borrow_mut()
-            .guis
-            .insert(clap_plugin_id, gui_handle);
-    }
-
-    pub fn has_gui(&self, clap_plugin_id: &ClapPluginId) -> bool {
-        self.inner
-            .borrow()
-            .guis
-            .get(clap_plugin_id)
-            .map(|gui_handle| gui_handle.is_visible())
-            .unwrap_or(false)
-    }
-}
-
-struct ClapPluginManagerInner {
     sender: Sender<Message>,
-    guis: HashMap<ClapPluginId, GuiHandle>,
     _plugin_host: JoinHandle<()>,
 }
 
-impl Default for ClapPluginManagerInner {
+impl Default for ClapPluginManager {
     fn default() -> Self {
         let (sender, receiver) = channel();
 
@@ -107,9 +64,28 @@ impl Default for ClapPluginManagerInner {
 
         Self {
             sender,
-            guis: HashMap::default(),
             _plugin_host: plugin_host,
         }
+    }
+}
+
+impl ClapPluginManager {
+    pub fn create_plugin(&self, plugin: FoundPlugin) -> oneshot::Receiver<ClapPluginShared> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Message::CreatePlugin(plugin, sender))
+            .unwrap();
+        receiver
+    }
+
+    pub fn show_gui(&self, clap_plugin_id: ClapPluginId) -> oneshot::Receiver<GuiHandle> {
+        let (sender, receiver) = oneshot::channel();
+
+        self.sender
+            .send(Message::ShowGui(clap_plugin_id, sender))
+            .unwrap();
+
+        receiver
     }
 }
 
@@ -351,7 +327,7 @@ pub struct Extensions {
 }
 
 impl ClapPluginShared {
-    pub async fn create_audio_graph_node(&self, audio_graph: &AudioGraph) -> NodeId {
+    pub async fn create_audio_graph_node(&self, audio_graph: &mut AudioGraph) -> NodeId {
         let (sender, receiver) = oneshot::channel();
         self.channel
             .send(Message::CreateProcessor(self.plugin_id, sender))

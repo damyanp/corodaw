@@ -12,6 +12,8 @@ default-members = ["crates/corodaw-gpui"]
 [workspace.dependencies]
 anyhow = "1.0.100"
 audio-blocks = "0.5.0"
+bevy_app = "0.18.0"
+bevy_ecs = "0.18.0"
 clack-extensions = { package = "clack-extensions", git = "https://github.com/prokopyl/clack.git", features = [
   "audio-ports",
   "clack-host",

@@ -18,7 +18,7 @@ pub struct GainControl {
 }
 
 impl GainControl {
-    pub fn new(graph: &AudioGraph, initial_gain: f32) -> Self {
+    pub fn new(graph: &mut AudioGraph, initial_gain: f32) -> Self {
         let (sender, receiver) = channel();
 
         let processor = Box::new(GainControlProcessor {

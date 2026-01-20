@@ -2,11 +2,25 @@ use std::time::Duration;
 
 use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockOps, AudioBlockSequential};
 
-use audio_graph::{Event, Graph, InputConnection, Node, Processor};
+use audio_graph::{
+    AudioGraph, Event, Graph, InputConnection, Node, NodeDescBuilder, NodeId, Processor,
+};
+
+pub struct Summer {
+    pub node_id: NodeId,
+}
+
+impl Summer {
+    pub fn new(graph: &mut AudioGraph, num_channels: usize) -> Self {
+        let processor = Box::new(SummerProcessor);
+        let node_id = graph.add_node(NodeDescBuilder::default().audio(0, num_channels), processor);
+        Self { node_id }
+    }
+}
 
 #[derive(Debug)]
-pub struct Summer;
-impl Processor for Summer {
+struct SummerProcessor;
+impl Processor for SummerProcessor {
     fn process(
         &mut self,
         graph: &Graph,

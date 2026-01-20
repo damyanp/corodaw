@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+bevy_ecs.workspace = true
 engine = { path = "../engine" }
 gpui.workspace = true
 gpui-component.workspace = true

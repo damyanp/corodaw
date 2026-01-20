@@ -5,20 +5,11 @@ use crate::{
     worker::{Graph, Processor},
 };
 use std::{
-    cell::RefCell,
-    rc::Rc,
     sync::mpsc::{Receiver, Sender, channel},
     time::Duration,
 };
 
-/// Interface to the audio graph; cheap to clone, but must be kept on the
-/// application main thread.
-#[derive(Clone)]
 pub struct AudioGraph {
-    inner: Rc<RefCell<AudioGraphInner>>,
-}
-
-struct AudioGraphInner {
     modified: bool,
     graph_desc: GraphDesc,
     sender: Sender<AudioGraphMessage>,
@@ -43,95 +34,15 @@ impl AudioGraph {
         let (sender, receiver) = channel();
 
         let audio_graph = AudioGraph {
-            inner: Rc::new(RefCell::new(AudioGraphInner::new(sender))),
+            modified: false,
+            graph_desc: Default::default(),
+            sender,
         };
 
         (audio_graph, AudioGraphWorker::new(receiver))
     }
 
-    pub fn update(&self) {
-        self.inner.borrow_mut().update();
-    }
-
     pub fn add_node(
-        &self,
-        node_desc_builder: NodeDescBuilder,
-        processor: Box<dyn Processor>,
-    ) -> NodeId {
-        self.inner
-            .borrow_mut()
-            .add_node(node_desc_builder, processor)
-    }
-
-    pub fn connect_audio(
-        &self,
-        dest_node: NodeId,
-        dest_port: usize,
-        src_node: NodeId,
-        src_port: usize,
-    ) -> Result<(), AudioGraphDescError> {
-        self.inner
-            .borrow_mut()
-            .connect_audio(dest_node, dest_port, src_node, src_port)
-    }
-
-    pub fn connect_audio_grow_inputs(
-        &self,
-        dest_node: NodeId,
-        dest_port: usize,
-        src_node: NodeId,
-        src_port: usize,
-    ) -> Result<(), AudioGraphDescError> {
-        self.inner
-            .borrow_mut()
-            .connect_audio_grow_inputs(dest_node, dest_port, src_node, src_port)
-    }
-
-    pub fn connect_event(
-        &self,
-        dest_node: NodeId,
-        dest_port: usize,
-        src_node: NodeId,
-        src_port: usize,
-    ) -> Result<(), AudioGraphDescError> {
-        self.inner
-            .borrow_mut()
-            .connect_event(dest_node, dest_port, src_node, src_port)
-    }
-
-    pub fn disconnect_event(
-        &self,
-        dest_node: NodeId,
-        dest_port: usize,
-    ) -> Result<(), AudioGraphDescError> {
-        self.inner
-            .borrow_mut()
-            .disconnect_event(dest_node, dest_port)
-    }
-
-    pub fn set_output_node(&self, node_id: NodeId) -> Result<(), AudioGraphDescError> {
-        self.inner.borrow_mut().set_output_node(node_id)
-    }
-
-    pub fn add_input_node(
-        &self,
-        summer: NodeId,
-        midi_input: NodeId,
-    ) -> Result<(), AudioGraphDescError> {
-        self.inner.borrow_mut().add_input_node(summer, midi_input)
-    }
-}
-
-impl AudioGraphInner {
-    fn new(sender: Sender<AudioGraphMessage>) -> Self {
-        Self {
-            modified: false,
-            graph_desc: GraphDesc::default(),
-            sender,
-        }
-    }
-
-    fn add_node(
         &mut self,
         node_desc_builder: NodeDescBuilder,
         processor: Box<dyn Processor>,
@@ -140,7 +51,7 @@ impl AudioGraphInner {
         self.graph_desc.add_node(node_desc_builder, processor)
     }
 
-    fn connect_audio(
+    pub fn connect_audio(
         &mut self,
         dest_node: NodeId,
         dest_port: usize,
@@ -152,19 +63,18 @@ impl AudioGraphInner {
             .connect_audio(dest_node, dest_port, src_node, src_port)
     }
 
-    fn connect_audio_grow_inputs(
+    pub fn connect_audio_add_input(
         &mut self,
         dest_node: NodeId,
-        dest_port: usize,
         src_node: NodeId,
         src_port: usize,
     ) -> Result<(), AudioGraphDescError> {
         self.modified = true;
         self.graph_desc
-            .connect_audio_grow_inputs(dest_node, dest_port, src_node, src_port)
+            .connect_audio_add_input(dest_node, src_node, src_port)
     }
 
-    fn connect_event(
+    pub fn connect_event(
         &mut self,
         dest_node: NodeId,
         dest_port: usize,
@@ -176,7 +86,7 @@ impl AudioGraphInner {
             .connect_event(dest_node, dest_port, src_node, src_port)
     }
 
-    fn disconnect_event(
+    pub fn disconnect_event(
         &mut self,
         dest_node: NodeId,
         dest_port: usize,
@@ -185,7 +95,7 @@ impl AudioGraphInner {
         self.graph_desc.disconnect_event(dest_node, dest_port)
     }
 
-    fn add_input_node(
+    pub fn add_input_node(
         &mut self,
         dest_node: NodeId,
         src_node: NodeId,
@@ -194,12 +104,12 @@ impl AudioGraphInner {
         self.graph_desc.add_input_node(dest_node, src_node)
     }
 
-    fn set_output_node(&mut self, node_id: NodeId) -> Result<(), AudioGraphDescError> {
+    pub fn set_output_node(&mut self, node_id: NodeId) -> Result<(), AudioGraphDescError> {
         self.modified = true;
         self.graph_desc.set_output_node(node_id)
     }
 
-    fn update(&mut self) {
+    pub fn update(&mut self) {
         if self.modified {
             self.modified = false;
             self.sender

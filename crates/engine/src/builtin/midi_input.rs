@@ -12,7 +12,7 @@ pub struct MidiInputNode {
 }
 
 impl MidiInputNode {
-    pub fn new(graph: &AudioGraph) -> Self {
+    pub fn new(graph: &mut AudioGraph) -> Self {
         let processor = Box::new(MidiInputProcessor::default());
 
         let node_id = graph.add_node(NodeDescBuilder::default().event(0, 1), processor);
@@ -34,8 +34,14 @@ struct MidiInputProcessor {
 
 impl Default for MidiInputProcessor {
     fn default() -> Self {
+        let midi_receiver = MidiReceiver::new();
+        if let Err(err) = &midi_receiver {
+            println!("** Failed to create MIDI receiver: {}", err);
+        }
+        let midi_receiver = midi_receiver.ok().flatten();
+
         Self {
-            midi_receiver: MidiReceiver::new().ok().flatten(),
+            midi_receiver,
             events: Default::default(),
             first_event_timestamp: Default::default(),
         }
