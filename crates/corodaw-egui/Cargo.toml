@@ -9,4 +9,6 @@ bevy_ecs.workspace = true
 eframe = "0.33.3"
 engine = { path = "../engine" }
 project = { path = "../project" }
+rfd = "0.17.2"
+smol.workspace = true
 winit = "0.30.12"

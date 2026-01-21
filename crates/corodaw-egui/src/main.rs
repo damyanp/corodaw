@@ -1,4 +1,9 @@
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{
+    cell::{RefCell, RefMut},
+    ops::DerefMut,
+    rc::Rc,
+    time::Duration,
+};
 
 use bevy_app::Update;
 use bevy_ecs::{
@@ -9,10 +14,11 @@ use bevy_ecs::{
 };
 use eframe::{
     UserEvent,
-    egui::{self, ComboBox},
+    egui::{self, ComboBox, InnerResponse, Ui},
 };
 use engine::plugins::discovery::{FoundPlugin, get_plugins};
 use project::{AddChannel, ChannelState};
+use smol::{LocalExecutor, Task};
 use winit::event_loop::EventLoop;
 
 use crate::module::Module;
@@ -20,63 +26,75 @@ use crate::module::Module;
 mod module;
 
 struct Corodaw {
-    app: bevy_app::App,
+    app: Rc<RefCell<bevy_app::App>>,
+    state: Rc<RefCell<CorodawState>>,
     found_plugins: Vec<FoundPlugin>,
+    executor: LocalExecutor<'static>,
+    current_task: Option<Task<()>>,
 }
 
 #[derive(Default)]
 struct CorodawState {
     selected_plugin: Option<FoundPlugin>,
-    modules: Rc<RefCell<Vec<Module>>>,
+    modules: Vec<Module>,
 }
 
 impl Default for Corodaw {
     fn default() -> Self {
+        let state: Rc<RefCell<CorodawState>> = Rc::default();
+
         let mut app = project::make_app();
         app.add_systems(Update, update_channels)
-            .insert_non_send_resource(CorodawState::default());
+            .insert_non_send_resource(state.clone());
 
         Self {
-            app,
+            app: Rc::new(RefCell::new(app)),
             found_plugins: get_plugins(),
+            executor: LocalExecutor::new(),
+            state,
+            current_task: None,
         }
-    }
-}
-
-impl Corodaw {
-    fn state(&self) -> &CorodawState {
-        self.app
-            .world()
-            .get_non_send_resource::<CorodawState>()
-            .unwrap()
-    }
-
-    fn state_mut(&mut self) -> Mut<'_, CorodawState> {
-        self.app.world_mut().get_non_send_resource_mut().unwrap()
-    }
-
-    fn add_module(&mut self) {
-        let found_plugin = self.state().selected_plugin.clone().unwrap();
-        self.app.world_mut().trigger(AddChannel(found_plugin));
     }
 }
 
 impl eframe::App for Corodaw {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
-        self.app.update();
+        self.app.borrow_mut().update();
+        while self.executor.try_tick() {}
+        if let Some(task) = &self.current_task {
+            if task.is_finished() {
+                self.current_task = None;
+            }
+        }
+
+        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+            if self.current_task.is_some() {
+                ui.disable();
+            }
+            egui::MenuBar::new().ui(ui, |ui| self.main_menu_bar(ui));
+        });
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            if self.current_task.is_some() {
+                ui.disable();
+            }
+
             ui.horizontal(|ui| {
-                ui.add_enabled_ui(self.state().selected_plugin.is_some(), |ui| {
+                let mut state = self.state.borrow_mut();
+                let mut app = self.app.borrow_mut();
+
+                ui.add_enabled_ui(state.selected_plugin.is_some(), |ui| {
                     if ui.button("Add Module").clicked() {
-                        self.add_module();
+                        app.world_mut()
+                            .trigger(AddChannel(state.selected_plugin.clone().unwrap()));
                     }
                 });
+
                 ComboBox::from_id_salt("Plugin")
                     .width(ui.available_width())
-                    .selected_text(display_found_plugin(&self.state().selected_plugin).to_string())
+                    .selected_text(display_found_plugin(&state.selected_plugin).to_string())
                     .show_ui(ui, |ui| {
-                        let mut selected_plugin = self.state().selected_plugin.clone();
+                        let mut selected_plugin = state.selected_plugin.clone();
                         for plugin in &self.found_plugins {
                             ui.selectable_value(
                                 &mut selected_plugin,
@@ -84,17 +102,56 @@ impl eframe::App for Corodaw {
                                 plugin.name.to_owned(),
                             );
                         }
-                        self.state_mut().selected_plugin = selected_plugin;
+                        state.selected_plugin = selected_plugin;
                     });
             });
 
-            let modules = self.state().modules.clone();
-            let modules = modules.borrow();
+            self.state
+                .borrow_mut()
+                .add_modules(RefMut::deref_mut(&mut self.app.borrow_mut()), ui);
+        });
+    }
+}
 
-            for module in modules.iter() {
-                module.add_to_ui(&mut self.app, ui);
+impl Corodaw {
+    fn main_menu_bar(&mut self, ui: &mut Ui) {
+        ui.menu_button("File", |ui| {
+            if ui.button("Open...").clicked() {
+                todo!()
+            }
+            if ui.button("Save...").clicked() {
+                self.save();
+            }
+            ui.separator();
+            if ui.button("Quit").clicked() {
+                todo!();
             }
         });
+    }
+
+    fn save(&mut self) {
+        assert!(self.current_task.is_none());
+
+        self.current_task = Some(self.executor.spawn(async move {
+            let file = rfd::AsyncFileDialog::new()
+                .add_filter("Corodaw Project", &[".cod"])
+                .save_file()
+                .await;
+
+            let filename = file
+                .map(|fh| fh.file_name())
+                .unwrap_or("nothing".to_owned());
+
+            println!("Chose: {}", filename);
+        }));
+    }
+}
+
+impl CorodawState {
+    fn add_modules(&mut self, app: &mut bevy_app::App, ui: &mut Ui) {
+        for module in self.modules.iter() {
+            module.add_to_ui(app, ui);
+        }
     }
 }
 
@@ -106,13 +163,15 @@ fn display_found_plugin(value: &Option<FoundPlugin>) -> &str {
 }
 
 fn update_channels(
-    corodaw_state: NonSend<CorodawState>,
+    corodaw_state: NonSend<Rc<RefCell<CorodawState>>>,
     new_channels: Query<(Entity, &ChannelState), Added<ChannelState>>,
 ) {
-    let mut modules = corodaw_state.modules.borrow_mut();
+    let mut corodaw_state = corodaw_state.borrow_mut();
 
     for (entity, state) in new_channels {
-        modules.push(Module::new(entity, state.gain_value));
+        corodaw_state
+            .modules
+            .push(Module::new(entity, state.gain_value));
     }
 }
 
