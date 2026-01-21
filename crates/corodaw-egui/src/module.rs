@@ -17,8 +17,8 @@ impl Module {
         }
     }
 
-    pub fn add_to_ui(&self, project: &mut Project, ui: &mut egui::Ui) {
-        let world = project.get_world();
+    pub fn add_to_ui(&self, app: &mut bevy_app::App, ui: &mut egui::Ui) {
+        let world = app.world();
         let entity = world.entity(self.entity);
         let name = entity.get::<Name>().unwrap().as_str().to_owned();
         let has_gui = entity
@@ -55,7 +55,7 @@ impl Module {
                                 )
                                 .clicked()
                             {
-                                project.write_message(ChannelMessage {
+                                app.world_mut().write_message(ChannelMessage {
                                     channel: self.entity,
                                     control,
                                 });
@@ -76,7 +76,7 @@ impl Module {
                     {
                         self.gain_value.replace(gain_value);
 
-                        project.write_message(ChannelMessage {
+                        app.world_mut().write_message(ChannelMessage {
                             channel: self.entity,
                             control: ChannelControl::SetGain(gain_value),
                         });
@@ -84,7 +84,7 @@ impl Module {
 
                     ui.add_enabled_ui(!has_gui, |ui| {
                         if ui.button("Show").clicked() {
-                            project.write_message(ChannelMessage {
+                            app.world_mut().write_message(ChannelMessage {
                                 channel: self.entity,
                                 control: ChannelControl::ShowGui,
                             });

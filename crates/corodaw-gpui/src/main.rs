@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use bevy_app::Update;
 use bevy_ecs::{
     query::{Added, Changed, Or},
     system::{NonSend, Query},
@@ -39,9 +40,8 @@ impl SelectItem for SelectablePlugin {
     }
 }
 
-#[derive(Default)]
-pub struct CorodawProject(Project);
-impl Global for CorodawProject {}
+pub struct CorodawApp(bevy_app::App);
+impl Global for CorodawApp {}
 
 pub struct Corodaw {
     plugin_selector: Entity<SelectState<SearchableVec<SelectablePlugin>>>,
@@ -113,21 +113,15 @@ impl GpuiContext {
 
 impl Corodaw {
     fn new(plugins: Vec<FoundPlugin>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut corodaw_project = CorodawProject::default();
+        let mut app = project::make_app();
 
-        corodaw_project
-            .0
-            .get_world_mut()
-            .insert_non_send_resource(GpuiContext {
-                app: cx.to_async(),
-                corodaw: cx.entity(),
-            });
+        app.insert_non_send_resource(GpuiContext {
+            app: cx.to_async(),
+            corodaw: cx.entity(),
+        })
+        .add_systems(Update, (update_channels, data_changed));
 
-        corodaw_project
-            .0
-            .add_systems((update_channels, data_changed));
-
-        cx.set_global(corodaw_project);
+        cx.set_global(CorodawApp(app));
 
         let searchable_plugins = SearchableVec::new(
             plugins
@@ -152,8 +146,8 @@ impl Corodaw {
             .expect("The Add button should only be enabled if a plugin is selected")
             .clone();
 
-        cx.update_global(move |c: &mut CorodawProject, _| {
-            c.0.add_channel(&plugin);
+        cx.update_global(move |c: &mut CorodawApp, _| {
+            c.0.world_mut().trigger(AddChannel(plugin));
         })
     }
 }
@@ -212,7 +206,7 @@ fn main() {
 
         cx.spawn(async move |cx| {
             loop {
-                cx.update_global(|c: &mut CorodawProject, _| {
+                cx.update_global(|c: &mut CorodawApp, _| {
                     c.0.update();
                 })
                 .unwrap();

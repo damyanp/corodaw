@@ -134,7 +134,7 @@ fn handle_channel_messages(
 struct InputNode(pub NodeId);
 
 #[derive(Event)]
-pub(crate) struct AddChannel(pub FoundPlugin);
+pub struct AddChannel(pub FoundPlugin);
 
 #[derive(Component, Debug, Clone)]
 pub struct ChannelData {

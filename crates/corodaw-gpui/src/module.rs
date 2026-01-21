@@ -8,7 +8,7 @@ use gpui_component::{
 
 use project::*;
 
-use crate::CorodawProject;
+use crate::CorodawApp;
 
 pub struct Module {
     bevy_entity: bevy_ecs::entity::Entity,
@@ -27,8 +27,8 @@ impl Module {
 
         cx.subscribe(&gain_slider, move |_, event, cx| match event {
             SliderEvent::Change(slider_value) => {
-                let project: &mut CorodawProject = cx.global_mut();
-                project.0.write_message(ChannelMessage {
+                let corodaw_app: &mut CorodawApp = cx.global_mut();
+                corodaw_app.0.world_mut().write_message(ChannelMessage {
                     channel: bevy_entity,
                     control: ChannelControl::SetGain(slider_value.start()),
                 });
@@ -43,8 +43,8 @@ impl Module {
     }
 
     fn on_toggle_muted(&mut self, _e: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        CorodawProject::update_global(cx, |corodaw_project, _| {
-            corodaw_project.0.write_message(ChannelMessage {
+        CorodawApp::update_global(cx, |corodaw_app, _| {
+            corodaw_app.0.world_mut().write_message(ChannelMessage {
                 channel: self.bevy_entity,
                 control: ChannelControl::ToggleMute,
             });
@@ -52,8 +52,8 @@ impl Module {
     }
 
     fn on_toggle_soloed(&mut self, _e: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        CorodawProject::update_global(cx, |corodaw_project, _| {
-            corodaw_project.0.write_message(ChannelMessage {
+        CorodawApp::update_global(cx, |corodaw_app, _| {
+            corodaw_app.0.world_mut().write_message(ChannelMessage {
                 channel: self.bevy_entity,
                 control: ChannelControl::ToggleSolo,
             });
@@ -61,8 +61,8 @@ impl Module {
     }
 
     fn on_toggle_armed(&mut self, _e: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        CorodawProject::update_global(cx, |corodaw_project, _| {
-            corodaw_project.0.write_message(ChannelMessage {
+        CorodawApp::update_global(cx, |corodaw_app, _| {
+            corodaw_app.0.world_mut().write_message(ChannelMessage {
                 channel: self.bevy_entity,
                 control: ChannelControl::ToggleArmed,
             });
@@ -70,8 +70,8 @@ impl Module {
     }
 
     fn on_show(&mut self, _e: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        CorodawProject::update_global(cx, |corodaw_project, _| {
-            corodaw_project.0.write_message(ChannelMessage {
+        CorodawApp::update_global(cx, |corodaw_app, _| {
+            corodaw_app.0.world_mut().write_message(ChannelMessage {
                 channel: self.bevy_entity,
                 control: ChannelControl::ShowGui,
             })
@@ -81,7 +81,7 @@ impl Module {
 
 impl Render for Module {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let world = CorodawProject::global(cx).0.get_world();
+        let world = CorodawApp::global(cx).0.world();
         let bevy_entity = world.entity(self.bevy_entity);
         let state = bevy_entity.get::<ChannelState>();
         let has_gui = bevy_entity

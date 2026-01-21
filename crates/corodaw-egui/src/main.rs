@@ -1,5 +1,6 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
+use bevy_app::Update;
 use bevy_ecs::{
     entity::Entity,
     query::Added,
@@ -11,7 +12,7 @@ use eframe::{
     egui::{self, ComboBox},
 };
 use engine::plugins::discovery::{FoundPlugin, get_plugins};
-use project::{ChannelState, Project};
+use project::{AddChannel, ChannelState};
 use winit::event_loop::EventLoop;
 
 use crate::module::Module;
@@ -19,7 +20,7 @@ use crate::module::Module;
 mod module;
 
 struct Corodaw {
-    project: Project,
+    app: bevy_app::App,
     found_plugins: Vec<FoundPlugin>,
 }
 
@@ -31,43 +32,38 @@ struct CorodawState {
 
 impl Default for Corodaw {
     fn default() -> Self {
-        let mut project = Project::default();
-        project.add_systems(update_channels);
-        project
-            .get_world_mut()
+        let mut app = project::make_app();
+        app.add_systems(Update, update_channels)
             .insert_non_send_resource(CorodawState::default());
 
         Self {
+            app,
             found_plugins: get_plugins(),
-            project,
         }
     }
 }
 
 impl Corodaw {
     fn state(&self) -> &CorodawState {
-        self.project
-            .get_world()
+        self.app
+            .world()
             .get_non_send_resource::<CorodawState>()
             .unwrap()
     }
 
     fn state_mut(&mut self) -> Mut<'_, CorodawState> {
-        self.project
-            .get_world_mut()
-            .get_non_send_resource_mut()
-            .unwrap()
+        self.app.world_mut().get_non_send_resource_mut().unwrap()
     }
 
     fn add_module(&mut self) {
         let found_plugin = self.state().selected_plugin.clone().unwrap();
-        self.project.add_channel(&found_plugin);
+        self.app.world_mut().trigger(AddChannel(found_plugin));
     }
 }
 
 impl eframe::App for Corodaw {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
-        self.project.update();
+        self.app.update();
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -96,7 +92,7 @@ impl eframe::App for Corodaw {
             let modules = modules.borrow();
 
             for module in modules.iter() {
-                module.add_to_ui(&mut self.project, ui);
+                module.add_to_ui(&mut self.app, ui);
             }
         });
     }

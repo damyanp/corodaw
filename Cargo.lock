@@ -1742,6 +1742,7 @@ dependencies = [
 name = "corodaw-egui"
 version = "0.1.0"
 dependencies = [
+ "bevy_app",
  "bevy_ecs",
  "eframe",
  "engine",
@@ -1754,6 +1755,7 @@ name = "corodaw-gpui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bevy_app",
  "bevy_ecs",
  "engine",
  "gpui",
