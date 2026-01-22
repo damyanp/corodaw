@@ -10,11 +10,10 @@ use bevy_ecs::{
     entity::Entity,
     query::Added,
     system::{NonSend, Query},
-    world::Mut,
 };
 use eframe::{
     UserEvent,
-    egui::{self, ComboBox, InnerResponse, Ui},
+    egui::{self, ComboBox, Ui},
 };
 use engine::plugins::discovery::{FoundPlugin, get_plugins};
 use project::{AddChannel, ChannelState};
