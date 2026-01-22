@@ -1753,6 +1753,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "corodaw-egui-widgets"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+]
+
+[[package]]
 name = "corodaw-gpui"
 version = "0.1.0"
 dependencies = [

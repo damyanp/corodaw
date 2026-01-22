@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "crates/audio-graph",
   "crates/corodaw-egui",
+  "crates/corodaw-egui-widgets",
   "crates/corodaw-gpui",
   "crates/engine",
   "crates/project"
@@ -27,6 +28,7 @@ clack-extensions = { package = "clack-extensions", git = "https://github.com/pro
 clack-host = { package = "clack-host", git = "https://github.com/prokopyl/clack.git" }
 cpal = "0.17.0"
 derivative = "2.2.0"
+eframe = "0.33.3"
 futures = "0.3.31"
 futures-channel = "0.3.31"
 gpui = "0.2.2"
