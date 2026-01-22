@@ -149,6 +149,17 @@ pub struct ChannelState {
     pub armed: bool,
 }
 
+impl Default for ChannelState {
+    fn default() -> Self {
+        Self {
+            gain_value: 1.0,
+            muted: false,
+            soloed: false,
+            armed: false,
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct ChannelAudioView {
     clap_plugin: ClapPluginShared,
