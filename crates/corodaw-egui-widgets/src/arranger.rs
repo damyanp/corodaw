@@ -30,7 +30,7 @@ impl ArrangerWidget {
         }
     }
 
-    pub fn show(self, _: &Context, ui: &mut Ui) {
+    pub fn show(self, ui: &mut Ui) {
         let Self { id, default_width } = self;
 
         let available_rect = ui.available_rect_before_wrap();

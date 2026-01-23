@@ -11,6 +11,7 @@ use bevy_ecs::{
     query::Added,
     system::{NonSend, Query},
 };
+use corodaw_egui_widgets::arranger::ArrangerWidget;
 use eframe::{
     UserEvent,
     egui::{self, ComboBox, Ui},
@@ -108,6 +109,8 @@ impl eframe::App for Corodaw {
             self.state
                 .borrow_mut()
                 .add_modules(RefMut::deref_mut(&mut self.app.borrow_mut()), ui);
+
+            ArrangerWidget::new("arranger").show(ui);
         });
     }
 }

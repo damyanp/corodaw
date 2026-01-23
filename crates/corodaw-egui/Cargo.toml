@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bevy_app.workspace = true
 bevy_ecs.workspace = true
+corodaw-egui-widgets = { path = "../corodaw-egui-widgets" }
 eframe.workspace = true
 engine = { path = "../engine" }
 project = { path = "../project" }

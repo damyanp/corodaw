@@ -1,3 +1,4 @@
+use corodaw_egui_widgets::arranger::ArrangerWidget;
 use eframe::egui::{self, CollapsingHeader, Vec2};
 
 fn main() {
@@ -30,10 +31,8 @@ impl eframe::App for App {
             CollapsingHeader::new("Arranger")
                 .default_open(true)
                 .show(ui, |ui| {
-                    arranger::ArrangerWidget::new("arranger").show(ctx, ui);
+                    ArrangerWidget::new("arranger").show(ui);
                 });
         });
     }
 }
-
-pub mod arranger;
