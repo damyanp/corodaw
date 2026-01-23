@@ -79,7 +79,11 @@ fn on_add_channel(
 }
 
 fn handle_channel_messages(
-    mut channels: Query<(&mut ChannelState, &mut ChannelAudioView, &InputNode)>,
+    mut channels: Query<(
+        &mut ChannelState,
+        Option<&mut ChannelAudioView>,
+        Option<&InputNode>,
+    )>,
     mut messages: MessageReader<ChannelMessage>,
     clap_plugin_manager: NonSend<ClapPluginManager>,
     mut audio_graph: NonSendMut<AudioGraph>,
@@ -92,7 +96,7 @@ fn handle_channel_messages(
     for message in messages.read() {
         if let Ok(channel) = channels.get_mut(message.channel) {
             let mut channel_state = channel.0;
-            let mut channel_view = channel.1;
+            let channel_view = channel.1;
 
             match message.control {
                 ChannelControl::SetGain(value) => channel_state.gain_value = value,
@@ -100,13 +104,15 @@ fn handle_channel_messages(
                 ChannelControl::ToggleSolo => channel_state.soloed = !channel_state.soloed,
                 ChannelControl::ToggleArmed => channel_state.armed = !channel_state.armed,
                 ChannelControl::ShowGui => {
-                    let gui_handle = futures::executor::block_on(async {
-                        clap_plugin_manager
-                            .show_gui(channel_view.clap_plugin.plugin_id)
-                            .await
-                            .unwrap()
-                    });
-                    channel_view.gui_handle = Some(gui_handle);
+                    if let Some(mut channel_view) = channel_view {
+                        let gui_handle = futures::executor::block_on(async {
+                            clap_plugin_manager
+                                .show_gui(channel_view.clap_plugin.plugin_id)
+                                .await
+                                .unwrap()
+                        });
+                        channel_view.gui_handle = Some(gui_handle);
+                    }
                 }
             }
         }
@@ -114,17 +120,20 @@ fn handle_channel_messages(
 
     let has_soloed = channels.iter().any(|(d, _, _)| d.soloed);
     for channel in &channels {
-        let muted = channel.0.muted || (has_soloed && !channel.0.soloed);
-        let gain = if muted { 0.0 } else { channel.0.gain_value };
-        channel.1.gain_control.set_gain(gain);
+        if let Some(channel_view) = channel.1
+            && let Some(input_node) = channel.2
+        {
+            let muted = channel.0.muted || (has_soloed && !channel.0.soloed);
+            let gain = if muted { 0.0 } else { channel.0.gain_value };
+            channel_view.gain_control.set_gain(gain);
 
-        let input_node = channel.2;
-        if channel.0.armed {
-            audio_graph
-                .connect_event(input_node.0, 0, midi_input.node_id, 0)
-                .unwrap();
-        } else {
-            audio_graph.disconnect_event(input_node.0, 0).unwrap();
+            if channel.0.armed {
+                audio_graph
+                    .connect_event(input_node.0, 0, midi_input.node_id, 0)
+                    .unwrap();
+            } else {
+                audio_graph.disconnect_event(input_node.0, 0).unwrap();
+            }
         }
     }
     audio_graph.update();
@@ -176,12 +185,13 @@ impl ChannelAudioView {
     }
 }
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 pub struct ChannelMessage {
     pub channel: Entity,
     pub control: ChannelControl,
 }
 
+#[derive(Debug)]
 pub enum ChannelControl {
     SetGain(f32),
     ToggleMute,

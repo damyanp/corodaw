@@ -1,17 +1,6 @@
-use std::{
-    cell::{RefCell, RefMut},
-    ops::DerefMut,
-    rc::Rc,
-    time::Duration,
-};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use bevy_app::Update;
-use bevy_ecs::{
-    entity::Entity,
-    query::Added,
-    system::{NonSend, Query},
-};
-use corodaw_egui_widgets::arranger::ArrangerWidget;
+use bevy_ecs::{prelude::*, system::RunSystemOnce};
 use eframe::{
     UserEvent,
     egui::{self, ComboBox, Ui},
@@ -21,9 +10,9 @@ use project::{AddChannel, ChannelState};
 use smol::{LocalExecutor, Task};
 use winit::event_loop::EventLoop;
 
-use crate::module::Module;
+use crate::arranger::arranger_ui;
 
-mod module;
+mod arranger;
 
 struct Corodaw {
     app: Rc<RefCell<bevy_app::App>>,
@@ -36,7 +25,6 @@ struct Corodaw {
 #[derive(Default)]
 struct CorodawState {
     selected_plugin: Option<FoundPlugin>,
-    modules: Vec<Module>,
 }
 
 impl Default for Corodaw {
@@ -44,8 +32,12 @@ impl Default for Corodaw {
         let state: Rc<RefCell<CorodawState>> = Rc::default();
 
         let mut app = project::make_app();
-        app.add_systems(Update, update_channels)
-            .insert_non_send_resource(state.clone());
+        app.insert_non_send_resource(state.clone());
+
+        for i in 0..5 {
+            app.world_mut()
+                .spawn((Name::new(format!("Channel {i}")), ChannelState::default()));
+        }
 
         Self {
             app: Rc::new(RefCell::new(app)),
@@ -106,11 +98,11 @@ impl eframe::App for Corodaw {
                     });
             });
 
-            self.state
+            self.app
                 .borrow_mut()
-                .add_modules(RefMut::deref_mut(&mut self.app.borrow_mut()), ui);
-
-            ArrangerWidget::new("arranger").show(ui);
+                .world_mut()
+                .run_system_once_with(arranger_ui, ui)
+                .unwrap();
         });
     }
 }
@@ -149,32 +141,11 @@ impl Corodaw {
     }
 }
 
-impl CorodawState {
-    fn add_modules(&mut self, app: &mut bevy_app::App, ui: &mut Ui) {
-        for module in self.modules.iter() {
-            module.add_to_ui(app, ui);
-        }
-    }
-}
-
 fn display_found_plugin(value: &Option<FoundPlugin>) -> &str {
     value
         .as_ref()
         .map(|plugin| plugin.name.as_str())
         .unwrap_or("<none>")
-}
-
-fn update_channels(
-    corodaw_state: NonSend<Rc<RefCell<CorodawState>>>,
-    new_channels: Query<(Entity, &ChannelState), Added<ChannelState>>,
-) {
-    let mut corodaw_state = corodaw_state.borrow_mut();
-
-    for (entity, state) in new_channels {
-        corodaw_state
-            .modules
-            .push(Module::new(entity, state.gain_value));
-    }
 }
 
 fn main() -> eframe::Result {

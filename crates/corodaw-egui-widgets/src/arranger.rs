@@ -1,5 +1,6 @@
 use eframe::egui::{
-    Align2, Context, CursorIcon, FontId, Id, NumExt, Rect, Sense, TextStyle, Ui, pos2, vec2,
+    Align2, Context, CursorIcon, FontId, Id, NumExt, Rect, Sense, TextStyle, Ui, UiBuilder, pos2,
+    vec2,
 };
 
 #[derive(Clone, Debug, Copy)]
@@ -17,6 +18,13 @@ impl State {
     }
 }
 
+pub trait ArrangerDataProvider {
+    fn num_channels(&self) -> usize;
+    fn channel_height(&self, index: usize) -> f32;
+    fn show_channel(&mut self, index: usize, ui: &mut Ui);
+    fn show_strip(&mut self, index: usize, ui: &mut Ui);
+}
+
 pub struct ArrangerWidget {
     id: Id,
     default_width: f32,
@@ -30,7 +38,7 @@ impl ArrangerWidget {
         }
     }
 
-    pub fn show(self, ui: &mut Ui) {
+    pub fn show(self, mut data: impl ArrangerDataProvider, ui: &mut Ui) {
         let Self { id, default_width } = self;
 
         let available_rect = ui.available_rect_before_wrap();
@@ -112,8 +120,6 @@ impl ArrangerWidget {
             ui.style().visuals.widgets.active.text_color(),
         );
 
-        let num_channels = 10;
-
         let mut channels_rect = Rect::from_min_max(
             pos2(available_rect.min.x, timestrip_rect.max.y + gap),
             pos2(available_rect.min.x + width, available_rect.max.y),
@@ -135,29 +141,26 @@ impl ArrangerWidget {
             ui.style().visuals.widgets.noninteractive.bg_fill,
         );
 
-        let channel_height = 50.0;
+        for i in 0..data.num_channels() {
+            let channel_height = data.channel_height(i);
 
-        for i in 0..num_channels {
             let mut channel_rect = channels_rect;
             channel_rect.set_height(channel_height);
 
             let mut strip_rect = strips_rect;
             strip_rect.set_height(channel_height);
 
-            ui.painter().rect_filled(
-                channel_rect,
-                2.0,
-                ui.style().visuals.widgets.inactive.bg_fill,
-            );
-            ui.painter()
-                .rect_filled(strip_rect, 0.0, ui.style().visuals.widgets.inactive.bg_fill);
-            ui.painter().text(
-                channel_rect.center(),
-                Align2::CENTER_CENTER,
-                format!("Channel {i}"),
-                FontId::default(),
-                ui.style().visuals.widgets.active.text_color(),
-            );
+            ui.scope_builder(UiBuilder::new().max_rect(channel_rect), |ui| {
+                ui.set_max_size(channel_rect.size());
+                ui.shrink_clip_rect(channel_rect);
+                data.show_channel(i, ui);
+            });
+
+            ui.scope_builder(UiBuilder::new().max_rect(strip_rect), |ui| {
+                ui.set_max_size(strip_rect.size());
+                ui.shrink_clip_rect(strip_rect);
+                data.show_strip(i, ui);
+            });
 
             channels_rect.set_top(channel_rect.bottom() + gap);
             strips_rect.set_top(strip_rect.bottom() + gap);
