@@ -34,11 +34,6 @@ impl Default for Corodaw {
         let mut app = project::make_app();
         app.insert_non_send_resource(state.clone());
 
-        for i in 0..5 {
-            app.world_mut()
-                .spawn((Name::new(format!("Channel {i}")), ChannelState::default()));
-        }
-
         Self {
             app: Rc::new(RefCell::new(app)),
             found_plugins: get_plugins(),
