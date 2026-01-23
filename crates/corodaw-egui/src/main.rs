@@ -1,12 +1,12 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use bevy_ecs::{prelude::*, system::RunSystemOnce};
+use bevy_ecs::system::RunSystemOnce;
 use eframe::{
     UserEvent,
-    egui::{self, ComboBox, Ui},
+    egui::{self, ComboBox, Ui, vec2},
 };
 use engine::plugins::discovery::{FoundPlugin, get_plugins};
-use project::{AddChannel, ChannelState};
+use project::AddChannel;
 use smol::{LocalExecutor, Task};
 use winit::event_loop::EventLoop;
 
@@ -144,13 +144,14 @@ fn display_found_plugin(value: &Option<FoundPlugin>) -> &str {
 }
 
 fn main() -> eframe::Result {
-    let options = eframe::NativeOptions::default();
+    let mut native_options = eframe::NativeOptions::default();
+    native_options.viewport = native_options.viewport.with_inner_size(vec2(800.0, 600.0));
 
     let mut eventloop = EventLoop::<UserEvent>::with_user_event().build()?;
 
     let mut app = eframe::create_native(
         "Corodaw",
-        options,
+        native_options,
         Box::new(|_| Ok(Box::new(Corodaw::default()))),
         &eventloop,
     );
