@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
 use corodaw_egui_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
-use eframe::egui::{Button, Color32, Frame, Margin, RichText, Slider, Stroke, Ui};
+use eframe::egui::{Align, Button, Color32, Frame, Layout, Margin, RichText, Slider, Stroke, Ui};
 use project::{ChannelAudioView, ChannelControl, ChannelMessage, ChannelState};
 
 #[derive(SystemParam)]
@@ -37,6 +37,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             .inner_margin(Margin::same(5))
             .outer_margin(Margin::same(5))
             .show(ui, |ui| {
+                ui.set_min_size(ui.available_size());
                 ui.horizontal(|ui| {
                     ui.take_available_width();
 
@@ -85,29 +86,34 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                     ui.add_space(1.0);
                     ui.label(name.as_str());
 
-                    let mut gain_value = state.gain_value;
-                    if ui
-                        .add(Slider::new(&mut gain_value, 0.0..=1.0).show_value(false))
-                        .changed()
-                    {
-                        self.commands.write_message(ChannelMessage {
-                            channel: entity,
-                            control: ChannelControl::SetGain(gain_value),
-                        });
-                    }
+                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                        ui.take_available_space();
 
-                    if let Some(audio_view) = audio_view {
-                        let has_gui = audio_view.has_gui();
+                        if let Some(audio_view) = audio_view {
+                            let has_gui = audio_view.has_gui();
 
-                        ui.add_enabled_ui(!has_gui, |ui| {
-                            if ui.button("Show").clicked() {
-                                self.commands.write_message(ChannelMessage {
-                                    channel: entity,
-                                    control: ChannelControl::ShowGui,
-                                });
-                            }
-                        });
-                    }
+                            ui.add_enabled_ui(!has_gui, |ui| {
+                                if ui.button("Show").clicked() {
+                                    self.commands.write_message(ChannelMessage {
+                                        channel: entity,
+                                        control: ChannelControl::ShowGui,
+                                    });
+                                }
+                            });
+                        }
+
+                        let mut gain_value = state.gain_value;
+                        ui.spacing_mut().slider_width = ui.available_size().x;
+                        if ui
+                            .add(Slider::new(&mut gain_value, 0.0..=1.0).show_value(false))
+                            .changed()
+                        {
+                            self.commands.write_message(ChannelMessage {
+                                channel: entity,
+                                control: ChannelControl::SetGain(gain_value),
+                            });
+                        }
+                    });
                 });
             });
     }
