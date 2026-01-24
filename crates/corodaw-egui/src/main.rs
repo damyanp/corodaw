@@ -48,11 +48,10 @@ impl eframe::App for Corodaw {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.app.borrow_mut().update();
         while self.executor.try_tick() {}
-        if let Some(task) = &self.current_task {
-            if task.is_finished() {
+        if let Some(task) = &self.current_task
+            && task.is_finished() {
                 self.current_task = None;
             }
-        }
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             if self.current_task.is_some() {
