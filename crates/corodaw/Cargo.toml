@@ -1,12 +1,12 @@
 [package]
-name = "corodaw-egui"
+name = "corodaw"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 bevy_app.workspace = true
 bevy_ecs.workspace = true
-corodaw-egui-widgets = { path = "../corodaw-egui-widgets" }
+corodaw-widgets = { path = "../corodaw-widgets" }
 eframe.workspace = true
 engine = { path = "../engine" }
 project = { path = "../project" }

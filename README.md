@@ -8,4 +8,4 @@ Experiments in building something that could maybe turn into a DAW one day. This
 * [CLAP](https://cleveraudio.org/)
 * [cpal](https://github.com/RustAudio/cpal)
 * [egui](https://github.com/emilk/egui)
-* [gpui](https://www.gpui.rs/)
+

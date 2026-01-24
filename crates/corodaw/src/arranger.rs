@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
-use corodaw_egui_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
+use corodaw_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
 use eframe::egui::{Button, Color32, Frame, Margin, Popup, RichText, Slider, Stroke, Ui};
 use project::{AvailablePlugin, ChannelAudioView, ChannelControl, ChannelMessage, ChannelState};
 

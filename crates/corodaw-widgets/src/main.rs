@@ -1,4 +1,4 @@
-use corodaw_egui_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
+use corodaw_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
 use eframe::egui::{self, Align2, CollapsingHeader, Color32, FontId, Ui, Vec2};
 
 fn main() {
@@ -8,7 +8,7 @@ fn main() {
         .with_inner_size(Vec2::new(800.0, 600.0));
 
     let _ = eframe::run_native(
-        "Corodaw egui widgets",
+        "Corodaw widgets",
         native_options,
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     );
@@ -28,7 +28,7 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Corodaw egui widgets");
+            ui.heading("Corodaw widgets");
 
             CollapsingHeader::new("Arranger")
                 .default_open(true)
