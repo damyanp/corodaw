@@ -7,6 +7,7 @@ use project::{AvailablePlugin, ChannelAudioView, ChannelControl, ChannelMessage,
 
 #[derive(SystemParam)]
 pub struct ArrangerData<'w, 's> {
+    commands: Commands<'w, 's>,
     channels: Query<
         'w,
         's,
@@ -80,6 +81,10 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
         let r = ui.available_rect_before_wrap();
         ui.painter()
             .rect_filled(r, 5.0, ui.style().visuals.widgets.inactive.bg_fill);
+    }
+
+    fn on_add_channel(&mut self) {
+        self.commands.spawn(project::new_channel());
     }
 }
 

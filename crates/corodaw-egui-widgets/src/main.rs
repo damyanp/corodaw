@@ -15,11 +15,13 @@ fn main() {
 }
 
 #[derive(Default)]
-struct App {}
+struct App {
+    num_channels: usize,
+}
 
 impl App {
     fn new(_: &eframe::CreationContext<'_>) -> Self {
-        Self::default()
+        Self { num_channels: 2 }
     }
 }
 
@@ -31,10 +33,10 @@ impl eframe::App for App {
             CollapsingHeader::new("Arranger")
                 .default_open(true)
                 .show(ui, |ui| {
-                    struct TestArranger;
-                    impl ArrangerDataProvider for TestArranger {
+                    struct TestArranger<'a>(&'a mut usize);
+                    impl<'a> ArrangerDataProvider for TestArranger<'a> {
                         fn num_channels(&self) -> usize {
-                            10
+                            *self.0
                         }
 
                         fn channel_height(&self, _: usize) -> f32 {
@@ -68,9 +70,13 @@ impl eframe::App for App {
                             let p = ui.painter();
                             p.rect_filled(r, 2.0, Color32::DARK_RED);
                         }
+
+                        fn on_add_channel(&mut self) {
+                            *self.0 += 1;
+                        }
                     }
 
-                    ArrangerWidget::new("arranger").show(TestArranger, ui);
+                    ArrangerWidget::new("arranger").show(TestArranger(&mut self.num_channels), ui);
                 });
         });
     }

@@ -23,6 +23,7 @@ pub trait ArrangerDataProvider {
     fn channel_height(&self, index: usize) -> f32;
     fn show_channel(&mut self, index: usize, ui: &mut Ui);
     fn show_strip(&mut self, index: usize, ui: &mut Ui);
+    fn on_add_channel(&mut self);
 }
 
 pub struct ArrangerWidget {
@@ -165,5 +166,12 @@ impl ArrangerWidget {
             channels_rect.set_top(channel_rect.bottom() + gap);
             strips_rect.set_top(strip_rect.bottom() + gap);
         }
+
+        ui.scope_builder(UiBuilder::new().max_rect(channels_rect), |ui| {
+            if ui.button("+").clicked() {
+                println!("!");
+                data.on_add_channel();
+            }
+        });
     }
 }
