@@ -76,7 +76,11 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
         self.messages.write_batch(messages);
     }
 
-    fn show_strip(&mut self, _: usize, _: &mut Ui) {}
+    fn show_strip(&mut self, _: usize, ui: &mut Ui) {
+        let r = ui.available_rect_before_wrap();
+        ui.painter()
+            .rect_filled(r, 5.0, ui.style().visuals.widgets.inactive.bg_fill);
+    }
 }
 
 fn show_available_plugins_menu(
