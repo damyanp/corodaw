@@ -73,7 +73,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                 });
             });
 
-        self.messages.write_batch(messages.into_iter());
+        self.messages.write_batch(messages);
     }
 
     fn show_strip(&mut self, _: usize, _: &mut Ui) {}

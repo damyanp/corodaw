@@ -28,6 +28,7 @@ pub fn new_channel() -> impl Bundle {
     )
 }
 
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn handle_channel_messages(
     mut commands: Commands,
     mut channels: Query<(
