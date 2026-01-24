@@ -2,7 +2,10 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
 use corodaw_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
-use eframe::egui::{Button, Color32, Frame, Margin, Popup, RichText, Slider, Stroke, Ui};
+use eframe::egui::{
+    Button, Color32, Frame, Id, Key, Label, Margin, Popup, RichText, Sense, Slider, Stroke,
+    TextEdit, Ui,
+};
 use project::{
     AvailablePlugin, ChannelAudioView, ChannelControl, ChannelData, ChannelMessage, ChannelState,
 };
@@ -50,7 +53,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                     mute_solo_arm_buttons(&mut messages, entity, state, ui);
 
                     ui.add_space(1.0);
-                    ui.label(name.as_str());
+                    show_channel_name_editor(&mut messages, entity, name, ui);
                     ui.add_space(1.0);
 
                     show_gain_slider(&mut messages, entity, state, ui);
@@ -103,6 +106,46 @@ fn show_available_plugins_menu(
             });
         }
     }
+}
+
+fn show_channel_name_editor(
+    messages: &mut Vec<ChannelMessage>,
+    entity: Entity,
+    name: &Name,
+    ui: &mut Ui,
+) {
+    let name_edit_id = Id::new(("channel_name_edit", entity));
+    let mut edit_value = ui
+        .ctx()
+        .data_mut(|d| d.get_temp::<Option<String>>(name_edit_id))
+        .unwrap_or(None);
+
+    if let Some(value) = edit_value.as_mut() {
+        let response = ui.add(TextEdit::singleline(value).id(name_edit_id));
+        let cancel = ui.input(|i| i.key_pressed(Key::Escape));
+        let commit = response.lost_focus() || ui.input(|i| i.key_pressed(Key::Enter));
+        if cancel {
+            edit_value = None;
+        } else if commit {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() && trimmed != name.as_str() {
+                messages.push(ChannelMessage {
+                    channel: entity,
+                    control: ChannelControl::SetName(trimmed.to_owned()),
+                });
+            }
+            edit_value = None;
+        }
+    } else {
+        let response = ui.add(Label::new(name.as_str()).sense(Sense::click()));
+        if response.clicked() {
+            edit_value = Some(name.as_str().to_owned());
+            ui.ctx().memory_mut(|m| m.request_focus(name_edit_id));
+        }
+    }
+
+    ui.ctx()
+        .data_mut(|d| d.insert_temp(name_edit_id, edit_value));
 }
 
 fn show_gain_slider(

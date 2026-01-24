@@ -30,7 +30,7 @@ pub fn new_channel() -> impl Bundle {
 }
 
 fn handle_channel_messages(
-    mut channels: Query<(&mut ChannelState, Option<&mut ChannelAudioView>)>,
+    mut channels: Query<(&mut ChannelState, &mut Name, Option<&mut ChannelAudioView>)>,
     mut messages: MessageReader<ChannelMessage>,
     clap_plugin_manager: NonSend<ClapPluginManager>,
 ) {
@@ -39,9 +39,10 @@ fn handle_channel_messages(
     }
 
     for message in messages.read() {
-        if let Ok((mut state, view)) = channels.get_mut(message.channel) {
-            match message.control {
-                ChannelControl::SetGain(value) => state.gain_value = value,
+        if let Ok((mut state, mut name, view)) = channels.get_mut(message.channel) {
+            match &message.control {
+                ChannelControl::SetGain(value) => state.gain_value = *value,
+                ChannelControl::SetName(value) => *name = Name::new(value.clone()),
                 ChannelControl::ToggleMute => state.muted = !state.muted,
                 ChannelControl::ToggleSolo => state.soloed = !state.soloed,
                 ChannelControl::ToggleArmed => state.armed = !state.armed,
@@ -232,6 +233,7 @@ pub struct ChannelMessage {
 #[derive(Debug)]
 pub enum ChannelControl {
     SetGain(f32),
+    SetName(String),
     ToggleMute,
     ToggleSolo,
     ToggleArmed,
