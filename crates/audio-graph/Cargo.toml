@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 audio-blocks.workspace = true
+bevy_app.workspace = true
+bevy_ecs.workspace = true
 fixedbitset = "0.5.7"
 itertools = "0.14.0"
 thiserror.workspace = true

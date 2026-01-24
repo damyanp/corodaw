@@ -11,7 +11,7 @@ use clack_host::{
 };
 
 use crate::plugins::ClapPlugin;
-use audio_graph::{Event, Graph, InputConnection, Node, Processor};
+use audio_graph::{AgEvent, AgNode, Graph, InputConnection, Processor};
 
 pub struct ClapPluginProcessor {
     plugin_audio_processor: PluginAudioProcessor<ClapPlugin>,
@@ -58,11 +58,11 @@ impl Processor for ClapPluginProcessor {
     fn process(
         &mut self,
         graph: &Graph,
-        node: &Node,
+        node: &AgNode,
         _: usize,
         timestamp: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
-        _: &mut [Vec<Event>],
+        _: &mut [Vec<AgEvent>],
     ) {
         self.update_input_events(graph, node, timestamp);
 
@@ -101,7 +101,7 @@ impl Processor for ClapPluginProcessor {
 }
 
 impl ClapPluginProcessor {
-    fn update_input_events(&mut self, graph: &Graph, node: &Node, timestamp: &Duration) {
+    fn update_input_events(&mut self, graph: &Graph, node: &AgNode, timestamp: &Duration) {
         self.input_events.clear();
 
         if node.desc.event_input_connections.is_empty() {
@@ -114,7 +114,7 @@ impl ClapPluginProcessor {
             return;
         };
 
-        let events = &graph.get_node(&input_node).output_event_buffers.get()[input_port];
+        let events = &graph.get_node(input_node).output_event_buffers.get()[input_port];
 
         for event in events {
             let mut data: [u8; 3] = Default::default();

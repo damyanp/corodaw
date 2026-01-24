@@ -1,65 +1,53 @@
-use crate::worker::Processor;
+#![allow(unused)]
+
+use bevy_ecs::{prelude::*, query::QueryEntityError, world::error::EntityMutableFetchError};
+
+use crate::{AudioGraph, worker::Processor};
 use thiserror::Error;
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, PartialOrd, Ord)]
-pub struct NodeId(pub(crate) usize);
+#[derive(Component)]
+pub struct OutputNode;
 
-#[derive(Default)]
-pub struct GraphDesc {
-    pub(crate) nodes: Vec<NodeDesc>,
-    pub(crate) processors: Vec<Option<Box<dyn Processor>>>,
-    pub(crate) output_node_id: Option<NodeId>,
-}
-
-#[derive(Clone, Debug)]
-pub struct NodeDesc {
-    pub id: NodeId,
-    pub input_nodes: Vec<NodeId>,
+#[derive(Component, Clone, Debug, Default)]
+pub struct Node {
+    pub inputs: Vec<Entity>,
     pub audio_input_connections: Vec<InputConnection>,
     pub event_input_connections: Vec<InputConnection>,
     pub num_audio_outputs: usize,
     pub num_event_outputs: usize,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum InputConnection {
+    #[default]
     Disconnected,
-    Connected(NodeId, usize),
+    Connected(Entity, usize),
 }
 
-impl NodeDesc {
-    fn new(id: NodeId, node_desc_builder: NodeDescBuilder) -> Self {
+impl Node {
+    pub fn audio(self, num_audio_inputs: usize, num_audio_outputs: usize) -> Self {
         let mut audio_input_connections = Vec::default();
-        audio_input_connections.resize(
-            node_desc_builder.num_audio_inputs,
-            InputConnection::Disconnected,
-        );
-        let num_audio_outputs = node_desc_builder.num_audio_outputs;
-
-        let mut event_input_connections = Vec::default();
-        event_input_connections.resize(
-            node_desc_builder.num_event_inputs,
-            InputConnection::Disconnected,
-        );
-        let num_event_outputs = node_desc_builder.num_event_outputs;
+        audio_input_connections.resize_with(num_audio_inputs, Default::default);
 
         Self {
-            id,
-            input_nodes: Vec::default(),
             audio_input_connections,
-            event_input_connections,
             num_audio_outputs,
+            ..self
+        }
+    }
+
+    pub fn event(self, num_event_inputs: usize, num_event_outputs: usize) -> Self {
+        let mut event_input_connections = Vec::default();
+        event_input_connections.resize_with(num_event_inputs, Default::default);
+
+        Self {
+            event_input_connections,
             num_event_outputs,
+            ..self
         }
     }
 
-    fn add_input_node(&mut self, node: &NodeId) {
-        if !self.input_nodes.contains(node) {
-            self.input_nodes.push(*node);
-        }
-    }
-
-    fn update_input_nodes(&mut self) {
+    pub(crate) fn update_input_nodes(&mut self) {
         let mut nodes: Vec<_> = self
             .audio_input_connections
             .iter()
@@ -74,204 +62,123 @@ impl NodeDesc {
             .collect();
         nodes.sort();
         nodes.dedup();
-        self.input_nodes = nodes;
+        self.inputs = nodes;
     }
 }
 
-#[derive(Default)]
-pub struct NodeDescBuilder {
-    num_audio_inputs: usize,
-    num_audio_outputs: usize,
-    num_event_inputs: usize,
-    num_event_outputs: usize,
+pub fn set_processor(world_mut: &mut World, entity: Entity, processor: Box<dyn Processor>) {
+    // It's hard to put dyn Processor's into components (they don't naturally
+    // want to be sync), so this is working around that.
+
+    let audio_graph = world_mut.get_non_send_resource_mut::<AudioGraph>().unwrap();
+    audio_graph.set_processor(entity, processor);
 }
 
-impl NodeDescBuilder {
-    pub fn audio(self, num_audio_inputs: usize, num_audio_outputs: usize) -> Self {
-        Self {
-            num_audio_inputs,
-            num_audio_outputs,
-            ..self
-        }
+pub fn connect_audio(
+    world: &mut World,
+    dst: Entity,
+    dst_port: usize,
+    src: Entity,
+    src_port: usize,
+) -> Result<(), AudioGraphDescError> {
+    let mut nodes = world.query::<&mut Node>();
+
+    let [mut dst_node, src_node] =
+        nodes
+            .get_many_mut(world, [dst, src])
+            .map_err(|err| match err {
+                QueryEntityError::QueryDoesNotMatch(entity, _) => {
+                    AudioGraphDescError::InvalidEntity(entity)
+                }
+                QueryEntityError::NotSpawned(e) => AudioGraphDescError::InvalidEntity(e.entity()),
+                QueryEntityError::AliasedMutability(_) => AudioGraphDescError::DestEqualsSrc,
+            })?;
+
+    if dst_port >= dst_node.audio_input_connections.len() {
+        return Err(AudioGraphDescError::DestPortOutOfBounds);
     }
 
-    pub fn event(self, num_event_inputs: usize, num_event_outputs: usize) -> Self {
-        Self {
-            num_event_inputs,
-            num_event_outputs,
-            ..self
-        }
+    if src_port >= src_node.num_audio_outputs {
+        return Err(AudioGraphDescError::SrcPortOutOfBounds);
     }
+
+    dst_node.audio_input_connections[dst_port] = InputConnection::Connected(src, src_port);
+    dst_node.update_input_nodes();
+
+    Ok(())
 }
 
-impl GraphDesc {
-    pub fn add_node(
-        &mut self,
-        node_desc_builder: NodeDescBuilder,
-        processor: Box<dyn Processor>,
-    ) -> NodeId {
-        let id = NodeId(self.nodes.len());
-        self.nodes.push(NodeDesc::new(id, node_desc_builder));
-        self.processors.push(Some(processor));
-        id
+pub fn add_audio_input(
+    world: &mut World,
+    dst: Entity,
+    src: Entity,
+    src_port: usize,
+) -> Result<(), AudioGraphDescError> {
+    let mut dst_node = world
+        .get_mut::<Node>(dst)
+        .ok_or(AudioGraphDescError::InvalidEntity(dst))?;
+    let dst_port = dst_node.audio_input_connections.len();
+    dst_node
+        .audio_input_connections
+        .push(InputConnection::Disconnected);
+    connect_audio(world, dst, dst_port, src, src_port)?;
+    Ok(())
+}
+
+pub fn connect_event(
+    world: &mut World,
+    dst: Entity,
+    dst_port: usize,
+    src: Entity,
+    src_port: usize,
+) -> Result<(), AudioGraphDescError> {
+    let mut nodes = world.query::<&mut Node>();
+
+    let [mut dst_node, src_node] =
+        nodes
+            .get_many_mut(world, [dst, src])
+            .map_err(|err| match err {
+                QueryEntityError::QueryDoesNotMatch(entity, _) => {
+                    AudioGraphDescError::InvalidEntity(entity)
+                }
+                QueryEntityError::NotSpawned(e) => AudioGraphDescError::InvalidEntity(e.entity()),
+                QueryEntityError::AliasedMutability(_) => AudioGraphDescError::DestEqualsSrc,
+            })?;
+
+    if dst_port >= dst_node.event_input_connections.len() {
+        return Err(AudioGraphDescError::DestPortOutOfBounds);
     }
 
-    pub fn connect_audio_add_input(
-        &mut self,
-        dest_node: NodeId,
-        src_node: NodeId,
-        src_port: usize,
-    ) -> Result<(), AudioGraphDescError> {
-        let dest = &mut self.nodes[dest_node.0];
-        let dest_port = dest.audio_input_connections.len();
-        dest.audio_input_connections
-            .push(InputConnection::Disconnected);
-        self.connect_audio(dest_node, dest_port, src_node, src_port)?;
-        Ok(())
+    if src_port >= src_node.num_event_outputs {
+        return Err(AudioGraphDescError::SrcPortOutOfBounds);
     }
 
-    pub fn connect_audio(
-        &mut self,
-        dest_node: NodeId,
-        dest_port: usize,
-        src_node: NodeId,
-        src_port: usize,
-    ) -> Result<(), AudioGraphDescError> {
-        if dest_node == src_node {
-            return Err(AudioGraphDescError::DestEqualsSrc);
-        }
+    dst_node.event_input_connections[dst_port] = InputConnection::Connected(src, src_port);
+    dst_node.update_input_nodes();
 
-        if dest_node.0 >= self.nodes.len() {
-            return Err(AudioGraphDescError::DestOutOfBounds);
-        }
-        if src_node.0 >= self.nodes.len() {
-            return Err(AudioGraphDescError::SrcOutOfBounds);
-        }
+    Ok(())
+}
 
-        // SAFETY: previously checked that node indices are unique and in bounds
-        let [dest, src] = unsafe {
-            self.nodes
-                .get_disjoint_unchecked_mut([dest_node.0, src_node.0])
-        };
-
-        if dest_port >= dest.audio_input_connections.len() {
-            return Err(AudioGraphDescError::DestPortOutOfBounds);
-        }
-
-        if src_port >= src.num_audio_outputs {
-            return Err(AudioGraphDescError::SrcPortOutOfBounds);
-        }
-
-        dest.add_input_node(&src_node);
-
-        dest.audio_input_connections[dest_port] = InputConnection::Connected(src_node, src_port);
-
-        Ok(())
-    }
-
-    pub fn connect_event(
-        &mut self,
-        dest_node: NodeId,
-        dest_port: usize,
-        src_node: NodeId,
-        src_port: usize,
-    ) -> Result<(), AudioGraphDescError> {
-        if dest_node == src_node {
-            return Err(AudioGraphDescError::DestEqualsSrc);
-        }
-
-        if dest_node.0 >= self.nodes.len() {
-            return Err(AudioGraphDescError::DestOutOfBounds);
-        }
-        if src_node.0 >= self.nodes.len() {
-            return Err(AudioGraphDescError::SrcOutOfBounds);
-        }
-
-        // SAFETY: previously checked that node indices are unique and in bounds
-        let [dest, src] = unsafe {
-            self.nodes
-                .get_disjoint_unchecked_mut([dest_node.0, src_node.0])
-        };
-
-        if dest_port >= dest.event_input_connections.len() {
-            return Err(AudioGraphDescError::DestPortOutOfBounds);
-        }
-
-        if src_port >= src.num_event_outputs {
-            return Err(AudioGraphDescError::SrcPortOutOfBounds);
-        }
-
-        dest.add_input_node(&src_node);
-
-        dest.event_input_connections[dest_port] = InputConnection::Connected(src_node, src_port);
-        Ok(())
-    }
-
-    pub fn disconnect_event(
-        &mut self,
-        dest_node: NodeId,
-        dest_port: usize,
-    ) -> Result<(), AudioGraphDescError> {
-        let dest = self
-            .nodes
-            .get_mut(dest_node.0)
-            .ok_or(AudioGraphDescError::DestOutOfBounds)?;
-        dest.event_input_connections[dest_port] = InputConnection::Disconnected;
-        dest.update_input_nodes();
-        Ok(())
-    }
-
-    pub fn add_input_node(
-        &mut self,
-        dest_node: NodeId,
-        src_node: NodeId,
-    ) -> Result<(), AudioGraphDescError> {
-        if src_node.0 >= self.nodes.len() {
-            return Err(AudioGraphDescError::SrcOutOfBounds);
-        }
-        let dest = self
-            .nodes
-            .get_mut(dest_node.0)
-            .ok_or(AudioGraphDescError::DestOutOfBounds)?;
-        dest.add_input_node(&src_node);
-        Ok(())
-    }
-
-    pub fn set_output_node(&mut self, node_id: NodeId) -> Result<(), AudioGraphDescError> {
-        if node_id.0 >= self.nodes.len() {
-            return Err(AudioGraphDescError::DestOutOfBounds);
-        }
-
-        self.output_node_id = Some(node_id);
-        Ok(())
-    }
-
-    pub fn send(&mut self) -> Self {
-        let mut processors = Vec::new();
-        for _ in 0..self.processors.len() {
-            processors.push(None);
-        }
-
-        std::mem::swap(&mut processors, &mut self.processors);
-
-        Self {
-            nodes: self.nodes.clone(),
-            processors,
-            output_node_id: self.output_node_id,
-        }
-    }
+pub fn disconnect_event(
+    world: &mut World,
+    dest_node: Entity,
+    dest_port: usize,
+) -> Result<(), AudioGraphDescError> {
+    let mut dest = world
+        .get_mut::<Node>(dest_node)
+        .ok_or(AudioGraphDescError::InvalidEntity(dest_node))?;
+    dest.event_input_connections[dest_port] = InputConnection::Disconnected;
+    dest.update_input_nodes();
+    Ok(())
 }
 
 #[derive(Error, Debug)]
 pub enum AudioGraphDescError {
+    #[error("entity doesn't exist")]
+    InvalidEntity(Entity),
+
     #[error("dest_node must not equal src_node")]
     DestEqualsSrc,
-
-    #[error("dest_node index out of bounds")]
-    DestOutOfBounds,
-
-    #[error("src_node index out of bounds")]
-    SrcOutOfBounds,
 
     #[error("dest_port out of bounds")]
     DestPortOutOfBounds,

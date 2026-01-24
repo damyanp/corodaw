@@ -7,11 +7,14 @@ edition = "2024"
 anyhow.workspace = true
 audio-blocks.workspace = true
 audio-graph = { path = "../audio-graph" }
+bevy_ecs.workspace = true
 clack-extensions.workspace = true
 clack-host.workspace = true
 cpal.workspace = true
+crossbeam = "0.8.4"
 derivative.workspace = true
 dirs = "6.0.0"
+futures.workspace = true
 futures-channel.workspace = true
 midir = "0.10.0"
 rtrb = "0.3.0"

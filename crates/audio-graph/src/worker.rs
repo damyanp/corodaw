@@ -1,12 +1,18 @@
-use std::{cell::RefCell, cmp::Reverse, collections::BinaryHeap, fmt::Debug, time::Duration};
+#![allow(unused)]
+
+use std::{
+    cell::RefCell,
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap, HashSet, hash_map::Entry},
+    fmt::Debug,
+    time::Duration,
+};
 
 use audio_blocks::AudioBlockSequential;
+use bevy_ecs::{entity::Entity, system::RunSystemOnce, world::World};
 use fixedbitset::FixedBitSet;
 
-use crate::{
-    Event,
-    desc::{GraphDesc, NodeDesc, NodeId},
-};
+use crate::{AgEvent, desc};
 
 mod buffers;
 pub use crate::worker::buffers::{AudioBuffers, EventBuffers};
@@ -15,78 +21,80 @@ pub trait Processor: Send + Debug {
     fn process(
         &mut self,
         graph: &Graph,
-        node: &Node,
+        node: &AgNode,
         num_frames: usize,
         timestamp: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
-        out_event_buffers: &mut [Vec<Event>],
+        out_event_buffers: &mut [Vec<AgEvent>],
     );
 }
 
-pub struct Node {
-    pub desc: NodeDesc,
-    pub processor: RefCell<Box<dyn Processor>>,
+#[derive(Default)]
+pub(crate) struct Processors {
+    processors: HashMap<Entity, Box<dyn Processor>>,
+}
+
+impl Processors {
+    fn get_mut(&mut self, entity: Entity) -> &mut dyn Processor {
+        self.processors.get_mut(&entity).unwrap().as_mut()
+    }
+
+    pub(crate) fn set(&mut self, entity: Entity, processor: Box<dyn Processor>) {
+        let _ = self.processors.insert(entity, processor);
+    }
+}
+
+pub struct AgNode {
+    pub entity: Entity,
+    pub desc: desc::Node,
     pub output_audio_buffers: AudioBuffers,
     pub output_event_buffers: EventBuffers,
 }
 
-impl Node {
-    fn new(desc: NodeDesc, processor: Box<dyn Processor>) -> Self {
+impl AgNode {
+    fn new(entity: Entity, desc: desc::Node) -> Self {
         const HARDCODED_NUM_FRAMES: usize = 1024;
         let output_audio_buffers =
             AudioBuffers::new(desc.num_audio_outputs as u16, HARDCODED_NUM_FRAMES);
         let output_event_buffers = EventBuffers::new(desc.num_event_outputs);
 
         Self {
+            entity,
             desc,
-            processor: RefCell::new(processor),
             output_audio_buffers,
             output_event_buffers,
         }
     }
 }
 
+#[derive(Default)]
 pub struct Graph {
-    pub(crate) nodes: Vec<Node>,
+    pub(crate) nodes: HashMap<Entity, AgNode>,
+    pub(crate) processors: RefCell<Processors>,
 }
 
 impl Graph {
-    pub(crate) fn new(mut desc: GraphDesc, old_graph: Option<Graph>) -> Self {
-        if let Some(old_graph) = old_graph {
-            // Processor's can't be copied - so we take all the ones from the
-            // old graph and swap them into nodes in the new graph that are
-            // missing processors.
-            let mut processors: Vec<_> = old_graph
-                .nodes
-                .into_iter()
-                .map(|node| Some(node.processor.into_inner()))
-                .collect();
-
-            for (id, processor) in desc.processors.iter_mut().enumerate() {
-                if processor.is_none() {
-                    std::mem::swap(processor, &mut processors[id]);
+    pub(crate) fn update(&mut self, changed: Vec<(Entity, desc::Node)>) {
+        for (entity, node) in changed {
+            match self.nodes.entry(entity) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().desc = node;
                 }
-            }
+                Entry::Vacant(entry) => {
+                    entry.insert(AgNode::new(entity, node));
+                }
+            };
         }
-
-        let nodes = desc
-            .nodes
-            .into_iter()
-            .zip(desc.processors)
-            .map(|(n, p)| Node::new(n, p.unwrap()))
-            .collect();
-
-        Self { nodes }
     }
 
-    pub fn get_node(&self, node_id: &NodeId) -> &Node {
-        &self.nodes[node_id.0]
+    pub fn get_node(&self, node_entity: Entity) -> &AgNode {
+        &self.nodes[&node_entity]
     }
 
-    pub fn process(&mut self, node_id: NodeId, num_frames: usize, timestamp: &Duration) {
-        let ordered = self.build_breadth_first_traversal(node_id);
-        for node_id in ordered {
-            let node = &self.nodes[node_id.0];
+    pub fn process(&mut self, node_entity: Entity, num_frames: usize, timestamp: &Duration) {
+        let ordered = self.build_breadth_first_traversal(node_entity);
+        for node_entity in ordered {
+            let node = self.get_node(node_entity);
 
             node.output_audio_buffers.prepare_for_processing(num_frames);
 
@@ -98,7 +106,10 @@ impl Graph {
             let mut out_event_buffers = node.output_event_buffers.ports.borrow_mut();
             let out_event_buffers = out_event_buffers.as_mut_slice();
 
-            node.processor.borrow_mut().process(
+            let mut processors = self.processors.borrow_mut();
+            let processor = processors.get_mut(node_entity);
+
+            processor.process(
                 self,
                 node,
                 num_frames,
@@ -109,54 +120,58 @@ impl Graph {
         }
     }
 
-    fn build_breadth_first_traversal(&self, start_node: NodeId) -> Vec<NodeId> {
+    fn build_breadth_first_traversal(&self, start_node: Entity) -> Vec<Entity> {
         let reachable = self.get_reachable_nodes(start_node);
 
-        let mut incoming = Vec::default();
-        incoming.resize(self.nodes.len(), 0);
+        let mut incoming: HashMap<Entity, usize> = HashMap::with_capacity(self.nodes.len());
 
-        let mut outputs: Vec<Vec<usize>> = Vec::with_capacity(self.nodes.len());
-        outputs.resize(self.nodes.len(), Vec::new());
+        let mut outputs: HashMap<Entity, Vec<Entity>> = HashMap::with_capacity(self.nodes.len());
 
-        let mut heap: BinaryHeap<Reverse<usize>> = BinaryHeap::with_capacity(self.nodes.len());
-        for id in reachable.ones() {
-            let node = &self.nodes[id];
-            for input in node.desc.input_nodes.iter() {
-                outputs[input.0].push(id);
+        let mut heap: BinaryHeap<Reverse<Entity>> = BinaryHeap::with_capacity(self.nodes.len());
+        for node_entity in reachable.iter() {
+            let node = self.get_node(*node_entity);
+            for input_entity in node.desc.inputs.iter() {
+                if !outputs.contains_key(input_entity) {
+                    outputs.insert(*input_entity, Vec::default());
+                }
+                outputs.get_mut(input_entity).unwrap().push(*node_entity);
             }
-            incoming[id] = node.desc.input_nodes.len();
-            if incoming[id] == 0 {
-                heap.push(Reverse(id));
+            incoming.insert(*node_entity, node.desc.inputs.len());
+
+            if *incoming.get(node_entity).unwrap_or(&0) == 0 {
+                heap.push(Reverse(*node_entity));
             }
         }
 
         let mut ordered = Vec::with_capacity(self.nodes.len());
 
-        while let Some(Reverse(node_id)) = heap.pop() {
-            assert_eq!(incoming[node_id], 0);
-            ordered.push(node_id);
+        while let Some(Reverse(node_entity)) = heap.pop() {
+            assert_eq!(incoming[&node_entity], 0);
+            ordered.push(node_entity);
 
-            for input in &outputs[node_id] {
-                incoming[*input] -= 1;
-                if incoming[*input] == 0 {
-                    heap.push(Reverse(*input));
+            if let Some(outputs) = outputs.get(&node_entity) {
+                for input in outputs {
+                    *incoming.get_mut(input).unwrap() -= 1;
+                    if incoming[input] == 0 {
+                        heap.push(Reverse(*input));
+                    }
                 }
             }
         }
 
-        ordered.into_iter().map(NodeId).collect()
+        ordered
     }
 
-    pub(crate) fn get_reachable_nodes(&self, start_node: NodeId) -> FixedBitSet {
-        let mut reachable = FixedBitSet::with_capacity(self.nodes.len());
+    pub(crate) fn get_reachable_nodes(&self, start_node: Entity) -> HashSet<Entity> {
+        let mut reachable = HashSet::with_capacity(self.nodes.len());
         let mut stack = Vec::with_capacity(self.nodes.len());
 
         stack.push(start_node);
         while let Some(node) = stack.pop() {
-            if !reachable.contains(node.0) {
-                reachable.put(node.0);
-                let node = &self.nodes[node.0];
-                stack.extend_from_slice(node.desc.input_nodes.as_slice());
+            if !reachable.contains(&node) {
+                reachable.insert(node);
+                let node = self.get_node(node);
+                stack.extend_from_slice(node.desc.inputs.as_slice());
             }
         }
 

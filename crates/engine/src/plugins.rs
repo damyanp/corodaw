@@ -11,6 +11,7 @@ use std::{
     thread::JoinHandle,
 };
 
+use bevy_ecs::prelude::*;
 use clack_extensions::{
     audio_ports::{AudioPortInfoBuffer, PluginAudioPorts},
     gui::{GuiSize, HostGui, HostGuiImpl, PluginGui},
@@ -29,7 +30,7 @@ use smol::LocalExecutor;
 
 use clap_adapter::ClapPluginProcessor;
 
-use audio_graph::{AudioGraph, NodeDescBuilder, NodeId, Processor};
+use audio_graph::{Node, Processor};
 use discovery::FoundPlugin;
 use timers::Timers;
 use ui_host::PluginUiHost;
@@ -76,6 +77,11 @@ impl ClapPluginManager {
             .send(Message::CreatePlugin(plugin, sender))
             .unwrap();
         receiver
+    }
+
+    pub fn create_plugin_sync(&self, plugin: FoundPlugin) -> ClapPluginShared {
+        let receiver = self.create_plugin(plugin);
+        futures::executor::block_on(async { receiver.await.unwrap() })
     }
 
     pub fn show_gui(&self, clap_plugin_id: ClapPluginId) -> oneshot::Receiver<GuiHandle> {
@@ -327,19 +333,20 @@ pub struct Extensions {
 }
 
 impl ClapPluginShared {
-    pub async fn create_audio_graph_node(&self, audio_graph: &mut AudioGraph) -> NodeId {
+    pub async fn create_audio_graph_node(&self) -> (Node, Box<dyn Processor>) {
         let (sender, receiver) = oneshot::channel();
         self.channel
             .send(Message::CreateProcessor(self.plugin_id, sender))
             .unwrap();
         let (num_inputs, num_outputs, processor) = receiver.await.unwrap();
 
-        audio_graph.add_node(
-            NodeDescBuilder::default()
-                .audio(num_inputs, num_outputs)
-                .event(1, 0),
-            processor,
-        )
+        let node = Node::default().audio(num_inputs, num_outputs).event(1, 0);
+
+        (node, processor)
+    }
+
+    pub fn create_audio_graph_node_sync(&self) -> (Node, Box<dyn Processor>) {
+        futures::executor::block_on(async { self.create_audio_graph_node().await })
     }
 }
 

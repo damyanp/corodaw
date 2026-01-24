@@ -2,7 +2,7 @@ use std::cell::{Ref, RefCell};
 
 use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockSequential};
 
-use crate::Event;
+use crate::{AgEvent, Event};
 
 pub struct AudioBuffers {
     pub(crate) ports: RefCell<Vec<AudioBlockSequential<f32>>>,
@@ -42,7 +42,7 @@ impl AudioBuffers {
 }
 
 pub struct EventBuffers {
-    pub(crate) ports: RefCell<Vec<Vec<Event>>>,
+    pub(crate) ports: RefCell<Vec<Vec<AgEvent>>>,
 }
 
 impl EventBuffers {
@@ -52,7 +52,7 @@ impl EventBuffers {
         }
     }
 
-    pub fn get(&self) -> Ref<'_, Vec<Vec<Event>>> {
+    pub fn get(&self) -> Ref<'_, Vec<Vec<AgEvent>>> {
         self.ports.borrow()
     }
 

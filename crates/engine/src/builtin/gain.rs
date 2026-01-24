@@ -1,34 +1,35 @@
-use std::{
-    sync::mpsc::{Receiver, Sender, channel},
-    time::Duration,
-};
+use bevy_ecs::prelude::*;
+use crossbeam::channel::{self, Receiver, Sender};
+use std::time::Duration;
 
 use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockOps, AudioBlockSequential};
-use derivative::Derivative;
 
-use audio_graph::{
-    AudioGraph, Event, Graph, InputConnection, Node, NodeDescBuilder, NodeId, Processor,
-};
+use audio_graph::{AgEvent, AgNode, Graph, InputConnection, Node, Processor};
 
-#[derive(Derivative)]
-#[derivative(Debug)]
+#[derive(Debug)]
 pub struct GainControl {
-    pub node_id: NodeId,
+    pub entity: Entity,
     sender: Sender<f32>,
 }
 
 impl GainControl {
-    pub fn new(graph: &mut AudioGraph, initial_gain: f32) -> Self {
-        let (sender, receiver) = channel();
+    pub fn new(commands: &mut Commands, initial_gain: f32) -> Self {
+        let (sender, receiver) = channel::unbounded();
 
-        let processor = Box::new(GainControlProcessor {
-            receiver,
-            gain: initial_gain,
+        let entity = commands.spawn(Node::default().audio(2, 2)).id();
+
+        commands.queue(move |world: &mut World| {
+            audio_graph::set_processor(
+                world,
+                entity,
+                Box::new(GainControlProcessor {
+                    receiver,
+                    gain: initial_gain,
+                }),
+            );
         });
 
-        let node_id = graph.add_node(NodeDescBuilder::default().audio(2, 2), processor);
-
-        GainControl { node_id, sender }
+        GainControl { entity, sender }
     }
 
     pub fn set_gain(&self, gain: f32) {
@@ -46,18 +47,18 @@ impl Processor for GainControlProcessor {
     fn process(
         &mut self,
         graph: &Graph,
-        node: &Node,
+        node: &AgNode,
         _: usize,
         _: &Duration,
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
-        _: &mut [Vec<Event>],
+        _: &mut [Vec<AgEvent>],
     ) {
         self.process_messages();
 
         for (channel, output_buffer) in out_audio_buffers.iter_mut().enumerate() {
             let input_connection = node.desc.audio_input_connections[channel];
             if let InputConnection::Connected(input_node_id, input_channel) = input_connection {
-                let input_node = graph.get_node(&input_node_id);
+                let input_node = graph.get_node(input_node_id);
                 let input_buffers = input_node.output_audio_buffers.get();
                 let input_buffer = &input_buffers[input_channel];
 

@@ -1,17 +1,21 @@
+#![allow(unused)]
+use bevy_ecs::prelude::*;
+
 use audio_blocks::{AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, AudioBlockOps};
 
 use crate::{
-    desc::{AudioGraphDescError, GraphDesc, NodeDescBuilder, NodeId},
-    worker::{Graph, Processor},
+    Processor,
+    desc::{self, OutputNode},
+    worker::Graph,
 };
 use std::{
+    cell::RefCell,
     sync::mpsc::{Receiver, Sender, channel},
     time::Duration,
 };
 
 pub struct AudioGraph {
     modified: bool,
-    graph_desc: GraphDesc,
     sender: Sender<AudioGraphMessage>,
 }
 
@@ -21,12 +25,14 @@ pub struct AudioGraphWorker {
     receiver: Receiver<AudioGraphMessage>,
     num_channels: u16,
     sample_rate: u32,
-    graph: Option<Graph>,
-    output_node_id: Option<NodeId>,
+    pub(crate) graph: Graph,
+    output: Option<Entity>,
 }
 
 enum AudioGraphMessage {
-    UpdateGraph(GraphDesc),
+    ChangedNodes(Vec<(Entity, desc::Node)>),
+    SetProcessor(Entity, Box<dyn Processor>),
+    SetOutputNode(Option<Entity>),
 }
 
 impl AudioGraph {
@@ -35,96 +41,47 @@ impl AudioGraph {
 
         let audio_graph = AudioGraph {
             modified: false,
-            graph_desc: Default::default(),
             sender,
         };
 
         (audio_graph, AudioGraphWorker::new(receiver))
     }
 
-    pub fn add_node(
-        &mut self,
-        node_desc_builder: NodeDescBuilder,
-        processor: Box<dyn Processor>,
-    ) -> NodeId {
-        self.modified = true;
-        self.graph_desc.add_node(node_desc_builder, processor)
+    pub fn set_processor(&self, entity: Entity, processor: Box<dyn Processor>) {
+        self.sender
+            .send(AudioGraphMessage::SetProcessor(entity, processor));
     }
+}
 
-    pub fn connect_audio(
-        &mut self,
-        dest_node: NodeId,
-        dest_port: usize,
-        src_node: NodeId,
-        src_port: usize,
-    ) -> Result<(), AudioGraphDescError> {
-        self.modified = true;
-        self.graph_desc
-            .connect_audio(dest_node, dest_port, src_node, src_port)
-    }
+pub(crate) fn update(
+    audio_graph: NonSendMut<AudioGraph>,
+    mut changed_nodes: Query<(Entity, Ref<desc::Node>)>,
+    output_node: Option<Single<(Entity, &OutputNode)>>,
+) {
+    let mut changed = Vec::default();
 
-    pub fn connect_audio_add_input(
-        &mut self,
-        dest_node: NodeId,
-        src_node: NodeId,
-        src_port: usize,
-    ) -> Result<(), AudioGraphDescError> {
-        self.modified = true;
-        self.graph_desc
-            .connect_audio_add_input(dest_node, src_node, src_port)
-    }
-
-    pub fn connect_event(
-        &mut self,
-        dest_node: NodeId,
-        dest_port: usize,
-        src_node: NodeId,
-        src_port: usize,
-    ) -> Result<(), AudioGraphDescError> {
-        self.modified = true;
-        self.graph_desc
-            .connect_event(dest_node, dest_port, src_node, src_port)
-    }
-
-    pub fn disconnect_event(
-        &mut self,
-        dest_node: NodeId,
-        dest_port: usize,
-    ) -> Result<(), AudioGraphDescError> {
-        self.modified = true;
-        self.graph_desc.disconnect_event(dest_node, dest_port)
-    }
-
-    pub fn add_input_node(
-        &mut self,
-        dest_node: NodeId,
-        src_node: NodeId,
-    ) -> Result<(), AudioGraphDescError> {
-        self.modified = true;
-        self.graph_desc.add_input_node(dest_node, src_node)
-    }
-
-    pub fn set_output_node(&mut self, node_id: NodeId) -> Result<(), AudioGraphDescError> {
-        self.modified = true;
-        self.graph_desc.set_output_node(node_id)
-    }
-
-    pub fn update(&mut self) {
-        if self.modified {
-            self.modified = false;
-            self.sender
-                .send(AudioGraphMessage::UpdateGraph(self.graph_desc.send()))
-                .unwrap();
+    for (entity, node) in &mut changed_nodes {
+        if node.is_changed() {
+            changed.push((entity, node.clone()));
         }
     }
+
+    let output_node = output_node.map(|s| s.0);
+
+    audio_graph
+        .sender
+        .send(AudioGraphMessage::ChangedNodes(changed));
+    audio_graph
+        .sender
+        .send(AudioGraphMessage::SetOutputNode(output_node));
 }
 
 impl AudioGraphWorker {
     fn new(receiver: Receiver<AudioGraphMessage>) -> Self {
         Self {
             receiver,
-            graph: None,
-            output_node_id: None,
+            graph: Default::default(),
+            output: None,
             num_channels: 0,
             sample_rate: 0,
         }
@@ -136,31 +93,24 @@ impl AudioGraphWorker {
     }
 
     pub fn tick(&mut self, data: &mut [f32], timestamp: Duration) {
-        let mut new_graph_desc = None;
-
         for message in self.receiver.try_iter() {
             match message {
-                AudioGraphMessage::UpdateGraph(graph_desc) => {
-                    new_graph_desc = Some(graph_desc);
+                AudioGraphMessage::ChangedNodes(nodes) => self.graph.update(nodes),
+                AudioGraphMessage::SetOutputNode(output) => self.output = output,
+                AudioGraphMessage::SetProcessor(entity, processor) => {
+                    self.graph.processors.borrow_mut().set(entity, processor);
                 }
             }
-        }
-
-        if let Some(new_graph_desc) = new_graph_desc {
-            self.output_node_id = new_graph_desc.output_node_id;
-            self.graph = Some(Graph::new(new_graph_desc, self.graph.take()));
         }
 
         let num_frames = data.len() / self.num_channels as usize;
         let mut block =
             AudioBlockInterleavedViewMut::from_slice(data, self.num_channels, num_frames);
 
-        if let Some(graph) = self.graph.as_mut()
-            && let Some(output_node_id) = self.output_node_id
-        {
-            graph.process(output_node_id, num_frames, &timestamp);
+        if let Some(output) = self.output {
+            self.graph.process(output, num_frames, &timestamp);
 
-            let output_node = graph.get_node(&output_node_id);
+            let output_node = self.graph.get_node(output);
             let output_buffers = output_node.output_audio_buffers.get();
             let a = &output_buffers[0];
             let b = &output_buffers[1];

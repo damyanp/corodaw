@@ -3,7 +3,9 @@ use bevy_ecs::system::SystemParam;
 
 use corodaw_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
 use eframe::egui::{Button, Color32, Frame, Margin, Popup, RichText, Slider, Stroke, Ui};
-use project::{AvailablePlugin, ChannelAudioView, ChannelControl, ChannelMessage, ChannelState};
+use project::{
+    AvailablePlugin, ChannelAudioView, ChannelControl, ChannelData, ChannelMessage, ChannelState,
+};
 
 #[derive(SystemParam)]
 pub struct ArrangerData<'w, 's> {
@@ -18,7 +20,7 @@ pub struct ArrangerData<'w, 's> {
             Option<&'static ChannelAudioView>,
         ),
     >,
-    available_plugins: Query<'w, 's, (Entity, &'static AvailablePlugin)>,
+    available_plugins: Query<'w, 's, &'static AvailablePlugin>,
     messages: MessageWriter<'w, ChannelMessage>,
 }
 
@@ -65,7 +67,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
 
                     Popup::menu(&input_button_response).show(|ui| {
                         show_available_plugins_menu(
-                            &mut messages,
+                            &mut self.commands,
                             entity,
                             self.available_plugins,
                             ui,
@@ -89,16 +91,15 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
 }
 
 fn show_available_plugins_menu(
-    messages: &mut Vec<ChannelMessage>,
+    commands: &mut Commands,
     channel_entity: Entity,
-    available_plugins: Query<'_, '_, (Entity, &'static AvailablePlugin), ()>,
+    available_plugins: Query<'_, '_, &'static AvailablePlugin, ()>,
     ui: &mut Ui,
 ) {
-    for (plugin_entity, AvailablePlugin(found_plugin)) in available_plugins.iter() {
+    for AvailablePlugin(found_plugin) in available_plugins.iter() {
         if ui.button(found_plugin.name.as_str()).clicked() {
-            messages.push(ChannelMessage {
-                channel: channel_entity,
-                control: ChannelControl::SetPlugin(plugin_entity),
+            commands.entity(channel_entity).insert(ChannelData {
+                plugin_id: found_plugin.id.clone(),
             });
         }
     }
