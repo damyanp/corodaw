@@ -845,9 +845,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.52"
+version = "1.2.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd4932aefd12402b36c60956a4fe0035421f544799057659ff86f923657aada3"
+checksum = "6354c81bbfd62d9cfa9cb3c773c2b7b2a3a482d569de977fd0e961f6e7c00583"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -980,9 +980,9 @@ dependencies = [
 
 [[package]]
 name = "core-foundation"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b55271e5c8c478ad3f38ad24ef34923091e0548492a266d19b3c0b4d82574c63"
+checksum = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6"
 dependencies = [
  "core-foundation-sys",
  "libc",
@@ -1025,7 +1025,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d44a101f213f6c4cdc1853d4b78aef6db6bdfa3468798cc1d9912f4735013eb"
 dependencies = [
  "bitflags 2.10.0",
- "core-foundation 0.10.0",
+ "core-foundation 0.10.1",
  "libc",
 ]
 
@@ -1603,9 +1603,9 @@ dependencies = [
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f449e6c6c08c865631d4890cfacf252b3d396c9bcc83adb6623cdb02a8336c41"
+checksum = "8591b0bcc8a98a64310a2fae1bb3e9b8564dd10e381e6e28010fde8e8e8568db"
 
 [[package]]
 name = "fixedbitset"
@@ -2246,9 +2246,9 @@ dependencies = [
 
 [[package]]
 name = "libm"
-version = "0.2.15"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libredox"
@@ -3126,9 +3126,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.105"
+version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "535d180e0ecab6268a3e718bb9fd44db66bbbc256257165fc699dadf70d16fe7"
+checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
 ]
@@ -3181,9 +3181,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.43"
+version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc74d9a594b72ae6656596548f56f667211f8a97b3d4c3d467150794690dc40a"
+checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
 dependencies = [
  "proc-macro2",
 ]
@@ -3964,9 +3964,9 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasip2"
-version = "1.0.1+wasi-0.2.4"
+version = "1.0.2+wasi-0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7"
+checksum = "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5"
 dependencies = [
  "wit-bindgen",
 ]
@@ -4191,7 +4191,7 @@ version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00f1243ef785213e3a32fa0396093424a3a6ea566f9948497e5a2309261a4c97"
 dependencies = [
- "core-foundation 0.10.0",
+ "core-foundation 0.10.1",
  "jni",
  "log",
  "ndk-context",
@@ -5000,9 +5000,9 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.46.0"
+version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 
 [[package]]
 name = "wmidi"
@@ -5104,9 +5104,9 @@ dependencies = [
 
 [[package]]
 name = "zbus"
-version = "5.13.1"
+version = "5.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17f79257df967b6779afa536788657777a0001f5b42524fcaf5038d4344df40b"
+checksum = "1bfeff997a0aaa3eb20c4652baf788d2dfa6d2839a0ead0b3ff69ce2f9c4bdd1"
 dependencies = [
  "async-broadcast",
  "async-executor",
@@ -5163,9 +5163,9 @@ dependencies = [
 
 [[package]]
 name = "zbus_macros"
-version = "5.13.1"
+version = "5.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aad23e2d2f91cae771c7af7a630a49e755f1eb74f8a46e9f6d5f7a146edf5a37"
+checksum = "0bbd5a90dbe8feee5b13def448427ae314ccd26a49cac47905cafefb9ff846f1"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -5275,9 +5275,9 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.14"
+version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd8f3f50b848df28f887acb68e41201b5aea6bc8a8dacc00fb40635ff9a72fea"
+checksum = "dfcd145825aace48cff44a8844de64bf75feec3080e0aa5cdbde72961ae51a65"
 
 [[package]]
 name = "zune-core"
@@ -5296,9 +5296,9 @@ dependencies = [
 
 [[package]]
 name = "zvariant"
-version = "5.9.1"
+version = "5.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "326aaed414f04fe839777b4c443d4e94c74e7b3621093bd9c5e649ac8aa96543"
+checksum = "68b64ef4f40c7951337ddc7023dd03528a57a3ce3408ee9da5e948bd29b232c4"
 dependencies = [
  "endi",
  "enumflags2",
@@ -5310,9 +5310,9 @@ dependencies = [
 
 [[package]]
 name = "zvariant_derive"
-version = "5.9.1"
+version = "5.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba44e1f8f4da9e6e2d25d2a60b116ef8b9d0be174a7685e55bb12a99866279a7"
+checksum = "484d5d975eb7afb52cc6b929c13d3719a20ad650fea4120e6310de3fc55e415c"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
