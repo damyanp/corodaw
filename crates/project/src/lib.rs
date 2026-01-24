@@ -42,6 +42,7 @@ pub fn make_app() -> App {
         .add_plugins(channel::ChannelBevyPlugin);
 
     app.world_mut().spawn(project::Project);
+    app.world_mut().spawn(channel::new_channel());
 
     app
 }

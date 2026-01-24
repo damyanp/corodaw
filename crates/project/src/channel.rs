@@ -21,6 +21,14 @@ impl Plugin for ChannelBevyPlugin {
     }
 }
 
+pub fn new_channel() -> impl Bundle {
+    (
+        ChannelState::default(),
+        Name::new("unnamed channel"),
+        Id(Uuid::new_v4()),
+    )
+}
+
 fn on_add_channel(
     add_channel: On<AddChannel>,
     mut commands: Commands,
@@ -146,11 +154,13 @@ struct InputNode(pub NodeId);
 pub struct AddChannel(pub FoundPlugin);
 
 #[derive(Component, Debug, Clone)]
+#[require(ChannelState)]
 pub struct ChannelData {
     pub plugin_id: String,
 }
 
 #[derive(Component, Debug, Clone)]
+#[require(Id=Id(Uuid::new_v4()), Name)]
 pub struct ChannelState {
     pub gain_value: f32,
     pub muted: bool,
@@ -170,6 +180,7 @@ impl Default for ChannelState {
 }
 
 #[derive(Component)]
+#[require(ChannelState)]
 pub struct ChannelAudioView {
     clap_plugin: ClapPluginShared,
     gain_control: GainControl,
