@@ -139,16 +139,12 @@ impl Corodaw {
     }
 
     fn on_click(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let plugin = self
+        let _ = self
             .plugin_selector
             .read(cx)
             .selected_value()
             .expect("The Add button should only be enabled if a plugin is selected")
             .clone();
-
-        cx.update_global(move |c: &mut CorodawApp, _| {
-            c.0.world_mut().trigger(AddChannel(plugin));
-        })
     }
 }
 

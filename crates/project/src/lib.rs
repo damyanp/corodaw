@@ -10,15 +10,17 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 mod channel;
+mod found_plugin;
 mod project;
 
 #[derive(Component, Serialize, Deserialize)]
 struct Id(Uuid);
 
-pub use channel::{
-    AddChannel, ChannelAudioView, ChannelControl, ChannelData, ChannelMessage, ChannelState,
-};
+pub use channel::{ChannelAudioView, ChannelControl, ChannelData, ChannelMessage, ChannelState};
+pub use found_plugin::AvailablePlugin;
 pub use project::Project;
+
+use crate::found_plugin::add_available_plugins;
 
 pub fn make_app() -> App {
     let (mut audio_graph, audio_graph_worker) = audio_graph::AudioGraph::new();
@@ -43,6 +45,8 @@ pub fn make_app() -> App {
 
     app.world_mut().spawn(project::Project);
     app.world_mut().spawn(channel::new_channel());
+
+    add_available_plugins(app.world_mut());
 
     app
 }
