@@ -5,7 +5,7 @@ use audio_blocks::{AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, Audi
 
 use crate::{
     Processor,
-    desc::{self, OutputNode},
+    node::{self, OutputNode},
     worker::Graph,
 };
 use std::{
@@ -30,7 +30,7 @@ pub struct AudioGraphWorker {
 }
 
 enum AudioGraphMessage {
-    ChangedNodes(Vec<(Entity, desc::Node)>),
+    ChangedNodes(Vec<(Entity, node::Node)>),
     SetProcessor(Entity, Box<dyn Processor>),
     SetOutputNode(Option<Entity>),
 }
@@ -55,7 +55,7 @@ impl AudioGraph {
 
 pub(crate) fn update(
     audio_graph: NonSendMut<AudioGraph>,
-    mut changed_nodes: Query<(Entity, Ref<desc::Node>)>,
+    mut changed_nodes: Query<(Entity, Ref<node::Node>)>,
     output_node: Option<Single<(Entity, &OutputNode)>>,
 ) {
     let mut changed = Vec::default();

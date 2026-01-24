@@ -12,7 +12,7 @@ use audio_blocks::AudioBlockSequential;
 use bevy_ecs::{entity::Entity, system::RunSystemOnce, world::World};
 use fixedbitset::FixedBitSet;
 
-use crate::{AgEvent, desc};
+use crate::{AgEvent, node};
 
 mod buffers;
 pub use crate::worker::buffers::{AudioBuffers, EventBuffers};
@@ -46,13 +46,13 @@ impl Processors {
 
 pub struct AgNode {
     pub entity: Entity,
-    pub desc: desc::Node,
+    pub desc: node::Node,
     pub output_audio_buffers: AudioBuffers,
     pub output_event_buffers: EventBuffers,
 }
 
 impl AgNode {
-    fn new(entity: Entity, desc: desc::Node) -> Self {
+    fn new(entity: Entity, desc: node::Node) -> Self {
         const HARDCODED_NUM_FRAMES: usize = 1024;
         let output_audio_buffers =
             AudioBuffers::new(desc.num_audio_outputs as u16, HARDCODED_NUM_FRAMES);
@@ -74,7 +74,7 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub(crate) fn update(&mut self, changed: Vec<(Entity, desc::Node)>) {
+    pub(crate) fn update(&mut self, changed: Vec<(Entity, node::Node)>) {
         for (entity, node) in changed {
             match self.nodes.entry(entity) {
                 Entry::Occupied(mut entry) => {

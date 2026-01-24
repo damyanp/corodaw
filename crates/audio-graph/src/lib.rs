@@ -2,16 +2,16 @@ use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 
 mod audio_graph;
-mod desc;
 mod events;
+mod node;
 mod worker;
 
 pub use audio_graph::{AudioGraph, AudioGraphWorker};
-pub use desc::{
+pub use events::AgEvent;
+pub use node::{
     InputConnection, Node, OutputNode, add_audio_input, connect_audio, connect_event,
     disconnect_event, set_processor,
 };
-pub use events::AgEvent;
 pub use worker::{AgNode, Graph, Processor};
 
 pub struct AudioGraphPlugin;

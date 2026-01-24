@@ -120,10 +120,10 @@ fn single_node_process() {
 
     let node = app
         .world_mut()
-        .spawn((desc::Node::default().audio(0, 2), desc::OutputNode))
+        .spawn((node::Node::default().audio(0, 2), node::OutputNode))
         .id();
 
-    desc::set_processor(app.world_mut(), node, Box::new(Constant(1.0)));
+    node::set_processor(app.world_mut(), node, Box::new(Constant(1.0)));
 
     app.update();
     app.update();
@@ -148,11 +148,11 @@ fn reachable_nodes() {
 
     let nodes: Vec<Entity> = app
         .world_mut()
-        .spawn_batch((0..5).map(|_| (desc::Node::default().audio(1, 1),)))
+        .spawn_batch((0..5).map(|_| (node::Node::default().audio(1, 1),)))
         .collect();
 
-    desc::connect_audio(app.world_mut(), nodes[0], 0, nodes[1], 0);
-    desc::connect_audio(app.world_mut(), nodes[2], 0, nodes[3], 0);
+    node::connect_audio(app.world_mut(), nodes[0], 0, nodes[1], 0);
+    node::connect_audio(app.world_mut(), nodes[2], 0, nodes[3], 0);
 
     app.update();
 
@@ -200,20 +200,20 @@ fn multiple_node_process_order() {
     let logger = Logger::new();
 
     let mut w = app.world_mut();
-    let a = w.spawn((desc::Node::default().audio(2, 1))).id();
-    let b = w.spawn((desc::Node::default().audio(0, 1))).id();
-    let c = w.spawn((desc::Node::default().audio(0, 1))).id();
+    let a = w.spawn((node::Node::default().audio(2, 1))).id();
+    let b = w.spawn((node::Node::default().audio(0, 1))).id();
+    let c = w.spawn((node::Node::default().audio(0, 1))).id();
     let d = w
-        .spawn((desc::Node::default().audio(1, 2), desc::OutputNode))
+        .spawn((node::Node::default().audio(1, 2), node::OutputNode))
         .id();
 
     for e in [a, b, c, d] {
-        desc::set_processor(w, e, logger.make_processor());
+        node::set_processor(w, e, logger.make_processor());
     }
 
-    desc::connect_audio(w, d, 0, a, 0);
-    desc::connect_audio(w, a, 0, b, 0);
-    desc::connect_audio(w, a, 1, c, 0);
+    node::connect_audio(w, d, 0, a, 0);
+    node::connect_audio(w, a, 0, b, 0);
+    node::connect_audio(w, a, 1, c, 0);
 
     app.update();
     let mut audio_graph_worker: AudioGraphWorker =
@@ -239,22 +239,22 @@ fn node_processing() {
     let mut w = app.world_mut();
 
     let a = w
-        .spawn((desc::Node::default().audio(2, 2), desc::OutputNode))
+        .spawn((node::Node::default().audio(2, 2), node::OutputNode))
         .id();
-    desc::set_processor(w, a, Box::new(SumInputs));
+    node::set_processor(w, a, Box::new(SumInputs));
 
     let [b, c] = w
-        .spawn_batch((0..2).map(|_| (desc::Node::default().audio(0, 1),)))
+        .spawn_batch((0..2).map(|_| (node::Node::default().audio(0, 1),)))
         .collect::<Vec<_>>()[..2]
         .try_into()
         .unwrap();
 
     for e in [b, c] {
-        desc::set_processor(w, e, Box::new(Constant(1.0)));
+        node::set_processor(w, e, Box::new(Constant(1.0)));
     }
 
-    desc::connect_audio(w, a, 0, b, 0);
-    desc::connect_audio(w, a, 1, c, 0);
+    node::connect_audio(w, a, 0, b, 0);
+    node::connect_audio(w, a, 1, c, 0);
 
     app.update();
 
@@ -352,18 +352,18 @@ fn events_output_to_single_input() {
 
     let events_sink: Arc<RwLock<VecDeque<AgEvent>>> = Arc::default();
 
-    let source = w.spawn((desc::Node::default().event(0, 1),)).id();
-    desc::set_processor(w, source, EventSource::make_processor(&events));
+    let source = w.spawn((node::Node::default().event(0, 1),)).id();
+    node::set_processor(w, source, EventSource::make_processor(&events));
 
     let sink = w
         .spawn((
-            desc::Node::default().event(1, 0).audio(0, 2),
-            desc::OutputNode,
+            node::Node::default().event(1, 0).audio(0, 2),
+            node::OutputNode,
         ))
         .id();
-    desc::set_processor(w, sink, EventSink::make_processor(events_sink.clone()));
+    node::set_processor(w, sink, EventSink::make_processor(events_sink.clone()));
 
-    desc::connect_event(w, sink, 0, source, 0);
+    node::connect_event(w, sink, 0, source, 0);
 
     app.update();
 
