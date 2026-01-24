@@ -7,7 +7,6 @@ use project::{ChannelAudioView, ChannelControl, ChannelMessage, ChannelState};
 
 #[derive(SystemParam)]
 pub struct ArrangerData<'w, 's> {
-    commands: Commands<'w, 's>,
     channels: Query<
         'w,
         's,
@@ -18,6 +17,7 @@ pub struct ArrangerData<'w, 's> {
             Option<&'static ChannelAudioView>,
         ),
     >,
+    messages: MessageWriter<'w, ChannelMessage>,
 }
 
 impl ArrangerDataProvider for ArrangerData<'_, '_> {
@@ -32,6 +32,8 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
     fn show_channel(&mut self, index: usize, ui: &mut Ui) {
         let (entity, name, state, audio_view) = self.channels.iter().nth(index).unwrap();
 
+        let mut messages: Vec<ChannelMessage> = Vec::new();
+
         Frame::new()
             .stroke(Stroke::new(1.0, Color32::WHITE))
             .inner_margin(Margin::same(5))
@@ -41,47 +43,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                 ui.horizontal(|ui| {
                     ui.take_available_width();
 
-                    let mut control_button =
-                        |label: &str, color: Color32, selected: bool, control: ChannelControl| {
-                            let color = if selected {
-                                color
-                            } else {
-                                color.gamma_multiply(0.5)
-                            };
-
-                            if ui
-                                .add(
-                                    Button::new(RichText::new(label).color(Color32::BLACK))
-                                        .fill(color)
-                                        .selected(selected),
-                                )
-                                .clicked()
-                            {
-                                self.commands.write_message(ChannelMessage {
-                                    channel: entity,
-                                    control,
-                                });
-                            }
-                        };
-
-                    control_button(
-                        "M",
-                        Color32::ORANGE,
-                        state.muted,
-                        ChannelControl::ToggleMute,
-                    );
-                    control_button(
-                        "S",
-                        Color32::GREEN,
-                        state.soloed,
-                        ChannelControl::ToggleSolo,
-                    );
-                    control_button(
-                        "R",
-                        Color32::DARK_RED,
-                        state.armed,
-                        ChannelControl::ToggleArmed,
-                    );
+                    mute_solo_arm_buttons(&mut messages, entity, state, ui);
 
                     ui.add_space(1.0);
                     ui.label(name.as_str());
@@ -89,36 +51,104 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                     ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                         ui.take_available_space();
 
-                        if let Some(audio_view) = audio_view {
-                            let has_gui = audio_view.has_gui();
-
-                            ui.add_enabled_ui(!has_gui, |ui| {
-                                if ui.button("Show").clicked() {
-                                    self.commands.write_message(ChannelMessage {
-                                        channel: entity,
-                                        control: ChannelControl::ShowGui,
-                                    });
-                                }
-                            });
-                        }
-
-                        let mut gain_value = state.gain_value;
-                        ui.spacing_mut().slider_width = ui.available_size().x;
-                        if ui
-                            .add(Slider::new(&mut gain_value, 0.0..=1.0).show_value(false))
-                            .changed()
-                        {
-                            self.commands.write_message(ChannelMessage {
-                                channel: entity,
-                                control: ChannelControl::SetGain(gain_value),
-                            });
-                        }
+                        show_gui_button(&mut messages, entity, audio_view, ui);
+                        show_gain_slider(&mut messages, entity, state, ui);
                     });
                 });
             });
+
+        self.messages.write_batch(messages.into_iter());
     }
 
     fn show_strip(&mut self, _: usize, _: &mut Ui) {}
+}
+
+fn show_gain_slider(
+    messages: &mut Vec<ChannelMessage>,
+    entity: Entity,
+    state: &ChannelState,
+    ui: &mut Ui,
+) {
+    let mut gain_value = state.gain_value;
+    ui.spacing_mut().slider_width = ui.available_size().x;
+    if ui
+        .add(Slider::new(&mut gain_value, 0.0..=1.0).show_value(false))
+        .changed()
+    {
+        messages.push(ChannelMessage {
+            channel: entity,
+            control: ChannelControl::SetGain(gain_value),
+        });
+    }
+}
+
+fn show_gui_button(
+    messages: &mut Vec<ChannelMessage>,
+    entity: Entity,
+    audio_view: Option<&ChannelAudioView>,
+    ui: &mut Ui,
+) {
+    if let Some(audio_view) = audio_view {
+        let has_gui = audio_view.has_gui();
+
+        ui.add_enabled_ui(!has_gui, |ui| {
+            if ui.button("Show").clicked() {
+                messages.push(ChannelMessage {
+                    channel: entity,
+                    control: ChannelControl::ShowGui,
+                });
+            }
+        });
+    }
+}
+
+fn mute_solo_arm_buttons(
+    messages: &mut Vec<ChannelMessage>,
+    entity: Entity,
+    state: &ChannelState,
+    ui: &mut Ui,
+) {
+    let mut control_button =
+        |label: &str, color: Color32, selected: bool, control: ChannelControl| {
+            let color = if selected {
+                color
+            } else {
+                color.gamma_multiply(0.5)
+            };
+
+            if ui
+                .add(
+                    Button::new(RichText::new(label).color(Color32::BLACK))
+                        .fill(color)
+                        .selected(selected),
+                )
+                .clicked()
+            {
+                messages.push(ChannelMessage {
+                    channel: entity,
+                    control,
+                });
+            }
+        };
+
+    control_button(
+        "M",
+        Color32::ORANGE,
+        state.muted,
+        ChannelControl::ToggleMute,
+    );
+    control_button(
+        "S",
+        Color32::GREEN,
+        state.soloed,
+        ChannelControl::ToggleSolo,
+    );
+    control_button(
+        "R",
+        Color32::DARK_RED,
+        state.armed,
+        ChannelControl::ToggleArmed,
+    );
 }
 
 pub fn arranger_ui(mut ui: InMut<Ui>, data: ArrangerData) {
