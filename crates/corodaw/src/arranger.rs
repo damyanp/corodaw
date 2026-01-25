@@ -7,7 +7,8 @@ use eframe::egui::{
     TextEdit, Ui,
 };
 use project::{
-    AvailablePlugin, ChannelAudioView, ChannelControl, ChannelData, ChannelMessage, ChannelState,
+    AvailablePlugin, ChannelAudioView, ChannelControl, ChannelData, ChannelMessage, ChannelOrder,
+    ChannelState,
 };
 
 #[derive(SystemParam)]
@@ -24,12 +25,13 @@ pub struct ArrangerData<'w, 's> {
         ),
     >,
     available_plugins: Query<'w, 's, &'static AvailablePlugin>,
+    channel_order: Single<'w, 's, &'static mut ChannelOrder>,
     messages: MessageWriter<'w, ChannelMessage>,
 }
 
 impl ArrangerDataProvider for ArrangerData<'_, '_> {
     fn num_channels(&self) -> usize {
-        self.channels.count()
+        self.channel_order.as_ref().channel_order.len()
     }
 
     fn channel_height(&self, _: usize) -> f32 {
@@ -37,7 +39,14 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
     }
 
     fn show_channel(&mut self, index: usize, ui: &mut Ui) {
-        let (entity, name, state, audio_view) = self.channels.iter().nth(index).unwrap();
+        let entity = *self
+            .channel_order
+            .as_ref()
+            .channel_order
+            .get(index)
+            .expect("ChannelOrder index out of bounds");
+
+        let (entity, name, state, audio_view) = self.channels.get(entity).unwrap();
 
         let mut messages: Vec<ChannelMessage> = Vec::new();
 
@@ -89,7 +98,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
     }
 
     fn on_add_channel(&mut self) {
-        self.commands.spawn(project::new_channel());
+        self.channel_order.as_mut().add_channel(&mut self.commands);
     }
 }
 

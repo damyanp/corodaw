@@ -12,7 +12,7 @@ pub use channel::{
     ChannelAudioView, ChannelControl, ChannelData, ChannelMessage, ChannelState, new_channel,
 };
 pub use found_plugin::AvailablePlugin;
-pub use project::Project;
+pub use project::{ChannelOrder, Project};
 
 #[derive(Component, Serialize, Deserialize)]
 struct Id(Uuid);

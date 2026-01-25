@@ -9,14 +9,19 @@ use engine::{
 };
 use uuid::Uuid;
 
-use crate::{AvailablePlugin, Id};
+use crate::{AvailablePlugin, ChannelOrder, Id};
 
 pub struct ChannelBevyPlugin;
 impl Plugin for ChannelBevyPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ChannelMessage>().add_systems(
             Update,
-            (handle_channel_messages, set_plugins, update_channels),
+            (
+                handle_channel_messages,
+                set_plugins,
+                update_channels,
+                sync_channel_order,
+            ),
         );
     }
 }
@@ -148,6 +153,19 @@ fn set_plugin(
     };
 
     channel_entity.insert((channel_audio_view, InputNode(plugin_node_id)));
+}
+
+fn sync_channel_order(
+    mut orders: Query<&mut ChannelOrder>,
+    channels: Query<Entity, With<ChannelState>>,
+) {
+    let mut order = orders
+        .single_mut()
+        .expect("Expected exactly one ChannelOrder");
+
+    order
+        .channel_order
+        .retain(|entity| channels.get(*entity).is_ok());
 }
 
 fn update_channels(
