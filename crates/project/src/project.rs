@@ -11,8 +11,8 @@ pub struct ChannelOrder {
 }
 
 impl ChannelOrder {
-    pub fn add_channel(&mut self, commands: &mut Commands) {
+    pub fn add_channel(&mut self, commands: &mut Commands, index: usize) {
         let entity = commands.spawn(new_channel()).id();
-        self.channel_order.push(entity);
+        self.channel_order.insert(index, entity);
     }
 }

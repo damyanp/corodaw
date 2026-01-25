@@ -98,8 +98,10 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             .rect_filled(r, 5.0, ui.style().visuals.widgets.inactive.bg_fill);
     }
 
-    fn on_add_channel(&mut self) {
-        self.channel_order.as_mut().add_channel(&mut self.commands);
+    fn on_add_channel(&mut self, index: usize) {
+        self.channel_order
+            .as_mut()
+            .add_channel(&mut self.commands, index);
     }
 }
 

@@ -16,12 +16,15 @@ fn main() {
 
 #[derive(Default)]
 struct App {
-    num_channels: usize,
+    channels: Vec<usize>,
 }
 
 impl App {
     fn new(_: &eframe::CreationContext<'_>) -> Self {
-        Self { num_channels: 2 }
+        let mut channels = Vec::new();
+        channels.push(0);
+        channels.push(1);
+        Self { channels }
     }
 }
 
@@ -33,10 +36,10 @@ impl eframe::App for App {
             CollapsingHeader::new("Arranger")
                 .default_open(true)
                 .show(ui, |ui| {
-                    struct TestArranger<'a>(&'a mut usize);
+                    struct TestArranger<'a>(&'a mut App);
                     impl<'a> ArrangerDataProvider for TestArranger<'a> {
                         fn num_channels(&self) -> usize {
-                            *self.0
+                            self.0.channels.len()
                         }
 
                         fn channel_height(&self, _: usize) -> f32 {
@@ -44,6 +47,8 @@ impl eframe::App for App {
                         }
 
                         fn show_channel(&mut self, index: usize, ui: &mut Ui) {
+                            let index = self.0.channels[index];
+
                             let r = ui.available_rect_before_wrap();
                             let p = ui.painter();
                             p.rect_filled(r, 2.0, Color32::DARK_BLUE);
@@ -71,12 +76,12 @@ impl eframe::App for App {
                             p.rect_filled(r, 2.0, Color32::DARK_RED);
                         }
 
-                        fn on_add_channel(&mut self) {
-                            *self.0 += 1;
+                        fn on_add_channel(&mut self, index: usize) {
+                            self.0.channels.insert(index, self.0.channels.len());
                         }
                     }
 
-                    ArrangerWidget::new("arranger").show(TestArranger(&mut self.num_channels), ui);
+                    ArrangerWidget::new("arranger").show(TestArranger(self), ui);
                 });
         });
     }

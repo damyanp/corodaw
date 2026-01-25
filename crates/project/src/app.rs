@@ -34,7 +34,7 @@ pub fn make_app() -> App {
     app.world_mut()
         .run_system_once(
             |mut commands: Commands, mut channel_order: Single<&mut project::ChannelOrder>| {
-                channel_order.as_mut().add_channel(&mut commands);
+                channel_order.as_mut().add_channel(&mut commands, 0);
             },
         )
         .unwrap();
