@@ -54,37 +54,39 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
         Frame::new()
             .stroke(Stroke::new(1.0, Color32::WHITE))
             .inner_margin(Margin::same(5))
-            .outer_margin(Margin::same(5))
+            .outer_margin(Margin::same(0))
             .show(ui, |ui| {
-                ui.set_min_size(ui.available_size());
-                ui.horizontal(|ui| {
-                    ui.take_available_width();
+                ui.vertical_centered_justified(|ui| {
+                    ui.set_min_size(ui.available_size());
+                    ui.horizontal(|ui| {
+                        ui.take_available_width();
 
-                    mute_solo_arm_buttons(&mut messages, entity, state, ui);
+                        mute_solo_arm_buttons(&mut messages, entity, state, ui);
 
-                    ui.add_space(1.0);
-                    show_channel_name_editor(&mut messages, entity, name, ui);
-                    ui.add_space(1.0);
+                        ui.add_space(1.0);
+                        show_channel_name_editor(&mut messages, entity, name, ui);
+                        ui.add_space(1.0);
 
-                    show_gain_slider(&mut messages, entity, state, ui);
-                });
-                ui.horizontal(|ui| {
-                    let input_button_response;
+                        show_gain_slider(&mut messages, entity, state, ui);
+                    });
+                    ui.horizontal(|ui| {
+                        let input_button_response;
 
-                    if let Some(audio_view) = audio_view {
-                        input_button_response = ui.button("🎵");
-                        show_gui_button(&mut messages, entity, audio_view, ui);
-                    } else {
-                        input_button_response = ui.button("?");
-                    }
+                        if let Some(audio_view) = audio_view {
+                            input_button_response = ui.button("🎵");
+                            show_gui_button(&mut messages, entity, audio_view, ui);
+                        } else {
+                            input_button_response = ui.button("?");
+                        }
 
-                    Popup::menu(&input_button_response).show(|ui| {
-                        show_available_plugins_menu(
-                            &mut self.commands,
-                            entity,
-                            self.available_plugins,
-                            ui,
-                        );
+                        Popup::menu(&input_button_response).show(|ui| {
+                            show_available_plugins_menu(
+                                &mut self.commands,
+                                entity,
+                                self.available_plugins,
+                                ui,
+                            );
+                        });
                     });
                 });
             });

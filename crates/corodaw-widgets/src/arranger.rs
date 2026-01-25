@@ -1,6 +1,6 @@
 use eframe::egui::{
-    Align2, Button, Context, CursorIcon, FontId, Id, NumExt, Rect, Sense, TextStyle, Ui, UiBuilder,
-    pos2, vec2,
+    Align2, Button, Context, CursorIcon, Direction, FontId, Id, Layout, NumExt, Rect, Sense,
+    TextStyle, Ui, UiBuilder, pos2, vec2,
 };
 
 #[derive(Clone, Debug, Copy)]
@@ -98,17 +98,23 @@ impl ArrangerWidget {
             let mut strip_rect = strips_rect;
             strip_rect.set_height(channel_height);
 
-            ui.scope_builder(UiBuilder::new().max_rect(channel_rect), |ui| {
-                ui.set_max_size(channel_rect.size());
-                ui.shrink_clip_rect(channel_rect);
-                data.show_channel(i, ui);
-            });
+            ui.scope_builder(
+                UiBuilder::new()
+                    .max_rect(channel_rect)
+                    .layout(Layout::centered_and_justified(Direction::TopDown)),
+                |ui| {
+                    data.show_channel(i, ui);
+                },
+            );
 
-            ui.scope_builder(UiBuilder::new().max_rect(strip_rect), |ui| {
-                ui.set_max_size(strip_rect.size());
-                ui.shrink_clip_rect(strip_rect);
-                data.show_strip(i, ui);
-            });
+            ui.scope_builder(
+                UiBuilder::new()
+                    .max_rect(strip_rect)
+                    .layout(Layout::centered_and_justified(Direction::TopDown)),
+                |ui| {
+                    data.show_strip(i, ui);
+                },
+            );
 
             let mut interact_rect = Rect::from_min_max(
                 pos2(0.0, channel_rect.top()),
@@ -124,7 +130,7 @@ impl ArrangerWidget {
             {
                 let t = eframe::egui::emath::remap(pos.y, interact_rect.y_range(), 0.0..=1.0);
 
-                if t >= 0.0 && t < 0.5 {
+                if (0.0..0.5).contains(&t) {
                     add_line = Some((i, channel_rect.top() - gap / 2.0));
                 } else if t <= 1.0 {
                     add_line = Some((i + 1, channel_rect.bottom() + gap / 2.0));

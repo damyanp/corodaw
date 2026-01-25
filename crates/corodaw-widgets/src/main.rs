@@ -21,9 +21,7 @@ struct App {
 
 impl App {
     fn new(_: &eframe::CreationContext<'_>) -> Self {
-        let mut channels = Vec::new();
-        channels.push(0);
-        channels.push(1);
+        let channels = vec![0, 1];
         Self { channels }
     }
 }
