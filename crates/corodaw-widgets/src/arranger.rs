@@ -42,70 +42,15 @@ impl ArrangerWidget {
     pub fn show(self, mut data: impl ArrangerDataProvider, ui: &mut Ui) {
         let Self { id, default_width } = self;
 
-        let available_rect = ui.available_rect_before_wrap();
-
-        let mut width = default_width;
-        {
-            if let Some(state) = State::load(ui.ctx(), id) {
-                width = state.width;
-            }
-            width = width.at_most(available_rect.width());
-        }
-
-        let resize_id = id.with("__resize");
-
-        // Grab any interaction values from previous frame
-        let mut is_resizing;
-        if let Some(resize_response) = ui.ctx().read_response(resize_id) {
-            is_resizing = resize_response.dragged();
-
-            if is_resizing && let Some(pointer) = resize_response.interact_pointer_pos() {
-                width = pointer.x - available_rect.left();
-            }
-        }
-
-        let resize_hover;
-        {
-            let resize_x = available_rect.left() + width;
-            let resize_rect = Rect::from_x_y_ranges(resize_x..=resize_x, available_rect.y_range())
-                .expand2(vec2(ui.style().interaction.resize_grab_radius_side, 0.0));
-            let resize_response = ui.interact(resize_rect, resize_id, Sense::drag());
-            resize_hover = resize_response.hovered();
-            is_resizing = resize_response.dragged();
-        }
-
-        if resize_hover || is_resizing {
-            ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
-        }
-
-        State { width }.store(ui.ctx(), id);
-
+        let rect = ui.available_rect_before_wrap();
         let gap = 5.0;
 
-        // draw the resize bar
-        {
-            let stroke = if is_resizing {
-                ui.style().visuals.widgets.active.fg_stroke
-            } else if resize_hover {
-                ui.style().visuals.widgets.hovered.fg_stroke
-            } else {
-                ui.style().visuals.widgets.noninteractive.bg_stroke
-            };
-
-            ui.painter().vline(
-                available_rect.left() + width + gap * 0.5,
-                available_rect.y_range(),
-                stroke,
-            );
-        }
+        let width = show_resize_bar(rect, default_width, gap, id, ui);
 
         let timestrip_height = ui.text_style_height(&TextStyle::Heading) * 2.0;
         let timestrip_rect = Rect::from_min_max(
-            pos2(available_rect.left() + width + gap, available_rect.top()),
-            pos2(
-                available_rect.right(),
-                available_rect.top() + timestrip_height,
-            ),
+            pos2(rect.left() + width + gap, rect.top()),
+            pos2(rect.right(), rect.top() + timestrip_height),
         );
 
         ui.painter().rect_filled(
@@ -122,13 +67,13 @@ impl ArrangerWidget {
         );
 
         let mut channels_rect = Rect::from_min_max(
-            pos2(available_rect.min.x, timestrip_rect.max.y + gap),
-            pos2(available_rect.min.x + width, available_rect.max.y),
+            pos2(rect.min.x, timestrip_rect.max.y + gap),
+            pos2(rect.min.x + width, rect.max.y),
         );
 
         let mut strips_rect = Rect::from_min_max(
             pos2(channels_rect.max.x + gap, channels_rect.min.y),
-            pos2(available_rect.max.x, available_rect.max.y),
+            pos2(rect.max.x, rect.max.y),
         );
 
         ui.painter().rect_filled(
@@ -207,4 +152,56 @@ impl ArrangerWidget {
             }
         }
     }
+}
+
+fn show_resize_bar(rect: Rect, default_width: f32, gap: f32, id: Id, ui: &mut Ui) -> f32 {
+    let mut width = default_width;
+    if let Some(state) = State::load(ui.ctx(), id) {
+        width = state.width;
+    }
+    width = width.at_most(rect.width());
+
+    let resize_id = id.with("__resize");
+
+    // Grab any interaction values from previous frame
+    let mut is_resizing;
+    if let Some(resize_response) = ui.ctx().read_response(resize_id) {
+        is_resizing = resize_response.dragged();
+
+        if is_resizing && let Some(pointer) = resize_response.interact_pointer_pos() {
+            width = pointer.x - rect.left();
+        }
+    }
+
+    let resize_hover;
+    {
+        let resize_x = rect.left() + width;
+        let resize_rect = Rect::from_x_y_ranges(resize_x..=resize_x, rect.y_range())
+            .expand2(vec2(ui.style().interaction.resize_grab_radius_side, 0.0));
+        let resize_response = ui.interact(resize_rect, resize_id, Sense::drag());
+        resize_hover = resize_response.hovered();
+        is_resizing = resize_response.dragged();
+    }
+
+    if resize_hover || is_resizing {
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+    }
+
+    State { width }.store(ui.ctx(), id);
+
+    // draw the resize bar
+    {
+        let stroke = if is_resizing {
+            ui.style().visuals.widgets.active.fg_stroke
+        } else if resize_hover {
+            ui.style().visuals.widgets.hovered.fg_stroke
+        } else {
+            ui.style().visuals.widgets.noninteractive.fg_stroke
+        };
+
+        ui.painter()
+            .vline(rect.left() + width + gap * 0.5, rect.y_range(), stroke);
+    }
+
+    width
 }
