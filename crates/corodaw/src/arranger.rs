@@ -2,6 +2,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
 use corodaw_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
+use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{
     Button, Color32, Frame, Id, Key, Label, Margin, Popup, RichText, Sense, Slider, Stroke,
     TextEdit, Ui,
@@ -123,14 +124,31 @@ fn show_channel_name_editor(
     name: &Name,
     ui: &mut Ui,
 ) {
+    // When we click on the label we switch to letting us rename the channel
     let name_edit_id = Id::new(("channel_name_edit", entity));
     let mut edit_value = ui
         .ctx()
         .data_mut(|d| d.get_temp::<Option<String>>(name_edit_id))
         .unwrap_or(None);
 
+    // We want the text to be selected when the text box is initially created
+    let name_edit_select_all_id = Id::new(("channel_name_select_all", entity));
+    let mut select_all = ui
+        .ctx()
+        .data_mut(|d| d.get_temp::<bool>(name_edit_select_all_id))
+        .unwrap_or(false);
+
     if let Some(value) = edit_value.as_mut() {
         let response = ui.add(TextEdit::singleline(value).id(name_edit_id));
+        if select_all {
+            if let Some(mut state) = TextEdit::load_state(ui.ctx(), name_edit_id) {
+                let char_count = value.chars().count();
+                let range = CCursorRange::two(CCursor::new(0), CCursor::new(char_count));
+                state.cursor.set_char_range(Some(range));
+                TextEdit::store_state(ui.ctx(), name_edit_id, state);
+            }
+            select_all = false;
+        }
         let cancel = ui.input(|i| i.key_pressed(Key::Escape));
         let commit = response.lost_focus() || ui.input(|i| i.key_pressed(Key::Enter));
         if cancel {
@@ -149,12 +167,15 @@ fn show_channel_name_editor(
         let response = ui.add(Label::new(name.as_str()).sense(Sense::click()));
         if response.clicked() {
             edit_value = Some(name.as_str().to_owned());
+            select_all = true;
             ui.ctx().memory_mut(|m| m.request_focus(name_edit_id));
         }
     }
 
-    ui.ctx()
-        .data_mut(|d| d.insert_temp(name_edit_id, edit_value));
+    ui.ctx().data_mut(|d| {
+        d.insert_temp(name_edit_id, edit_value);
+        d.insert_temp(name_edit_select_all_id, select_all);
+    });
 }
 
 fn show_gain_slider(
