@@ -44,13 +44,23 @@ impl ArrangerWidget {
 
         let rect = ui.available_rect_before_wrap();
         let gap = 5.0;
+        let timestrip_height = ui.text_style_height(&TextStyle::Heading) * 2.0;
 
         let width = show_resize_bar(rect, default_width, gap, id, ui);
 
-        let timestrip_height = ui.text_style_height(&TextStyle::Heading) * 2.0;
         let timestrip_rect = Rect::from_min_max(
             pos2(rect.left() + width + gap, rect.top()),
             pos2(rect.right(), rect.top() + timestrip_height),
+        );
+
+        let mut channels_rect = Rect::from_min_max(
+            pos2(rect.min.x, timestrip_rect.max.y + gap),
+            pos2(rect.min.x + width, rect.max.y),
+        );
+
+        let mut strips_rect = Rect::from_min_max(
+            pos2(channels_rect.max.x + gap, channels_rect.min.y),
+            pos2(rect.max.x, rect.max.y),
         );
 
         ui.painter().rect_filled(
@@ -64,16 +74,6 @@ impl ArrangerWidget {
             "Time Strip",
             FontId::default(),
             ui.style().visuals.widgets.active.text_color(),
-        );
-
-        let mut channels_rect = Rect::from_min_max(
-            pos2(rect.min.x, timestrip_rect.max.y + gap),
-            pos2(rect.min.x + width, rect.max.y),
-        );
-
-        let mut strips_rect = Rect::from_min_max(
-            pos2(channels_rect.max.x + gap, channels_rect.min.y),
-            pos2(rect.max.x, rect.max.y),
         );
 
         ui.painter().rect_filled(
@@ -110,10 +110,10 @@ impl ArrangerWidget {
                 data.show_strip(i, ui);
             });
 
-            let mut interact_rect = channel_rect;
-            interact_rect.extend_with_x(strip_rect.right());
-            interact_rect.extend_with_x(0.0);
-            interact_rect.extend_with_y(channel_rect.max.y + gap);
+            let mut interact_rect = Rect::from_min_max(
+                pos2(0.0, channel_rect.top()),
+                pos2(rect.right(), channel_rect.bottom() + gap),
+            );
 
             if i == 0 {
                 interact_rect.extend_with_y(channel_rect.min.y - gap);
@@ -139,10 +139,22 @@ impl ArrangerWidget {
             let style = &ui.style().visuals.widgets;
             let p = ui.painter();
 
+            let style = ui
+                .ctx()
+                .pointer_hover_pos()
+                .and_then(|pos| {
+                    if pos.y >= y - gap && pos.y <= y + gap {
+                        Some(style.hovered)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(style.inactive);
+
             p.hline(
                 channels_rect.left()..=strips_rect.right(),
                 y,
-                style.hovered.fg_stroke,
+                style.fg_stroke,
             );
 
             let add_rect = Rect::from_center_size(pos2(channels_rect.left(), y), vec2(20.0, 20.0));
