@@ -12,7 +12,7 @@ pub struct Audio {
 
 impl Audio {
     pub fn new(mut audio_graph_worker: AudioGraphWorker) -> Result<Audio, Error> {
-        let cpal = cpal::default_host();
+        let cpal = cpal::host_from_id(cpal::HostId::Asio)?;
         let device = cpal.default_output_device().unwrap();
 
         let config = StreamConfig {
@@ -20,6 +20,8 @@ impl Audio {
             sample_rate: 48_000,
             buffer_size: BufferSize::Fixed(4096),
         };
+        println!("cpal: {:?}", cpal.id());
+        println!("Audio device: {:?}", device.description());
 
         audio_graph_worker.configure(config.channels, config.sample_rate);
 
@@ -52,7 +54,6 @@ impl AudioThread {
     fn data_callback(&mut self, data: &mut [f32], info: &OutputCallbackInfo) {
         let playback_time = info.timestamp().playback;
         let first_playback = self.first_playback.get_or_insert(playback_time);
-
         // Sometimes (or, at least the second time the callback is called) the
         // playback time is before the previous playback time.
         if *first_playback > playback_time {
