@@ -15,4 +15,14 @@ impl ChannelOrder {
         let entity = commands.spawn(new_channel()).id();
         self.channel_order.insert(index, entity);
     }
+
+    pub fn move_channel(&mut self, index: usize, destination: usize) {
+        let channel = self.channel_order.remove(index);
+        let destination = if destination > index {
+            destination - 1
+        } else {
+            destination
+        };
+        self.channel_order.insert(destination, channel);
+    }
 }

@@ -77,6 +77,16 @@ impl eframe::App for App {
                         fn on_add_channel(&mut self, index: usize) {
                             self.0.channels.insert(index, self.0.channels.len());
                         }
+
+                        fn move_channel(&mut self, index: usize, destination: usize) {
+                            let channel = self.0.channels.remove(index);
+                            let destination = if destination > index {
+                                destination - 1
+                            } else {
+                                destination
+                            };
+                            self.0.channels.insert(destination, channel);
+                        }
                     }
 
                     ArrangerWidget::new("arranger").show(TestArranger(self), ui);

@@ -1,6 +1,9 @@
-use eframe::egui::{
-    Align, Align2, Button, Color32, Context, CursorIcon, Direction, FontId, Id, Layout, NumExt,
-    Rect, Sense, TextStyle, Ui, UiBuilder, pos2, vec2,
+use eframe::{
+    egui::{
+        Align, Align2, Color32, Context, CursorIcon, Direction, FontId, Id, Layout, NumExt,
+        PointerButton, Rect, Sense, Stroke, TextStyle, Ui, UiBuilder, pos2, vec2,
+    },
+    emath,
 };
 
 #[derive(Clone, Debug, Copy)]
@@ -24,6 +27,7 @@ pub trait ArrangerDataProvider {
     fn show_channel(&mut self, index: usize, ui: &mut Ui);
     fn show_strip(&mut self, index: usize, ui: &mut Ui);
     fn on_add_channel(&mut self, index: usize);
+    fn move_channel(&mut self, index: usize, destination: usize);
 }
 
 pub struct ArrangerWidget {
@@ -41,6 +45,9 @@ impl ArrangerWidget {
 
     pub fn show(self, mut data: impl ArrangerDataProvider, ui: &mut Ui) {
         let Self { id, default_width } = self;
+
+        let drag_id = id.with("__drag_channel");
+        let drag_info = ui.data(|data| data.get_temp::<usize>(drag_id));
 
         let rect = ui.available_rect_before_wrap();
         let gap = 5.0;
@@ -89,6 +96,9 @@ impl ArrangerWidget {
 
         let num_channels = data.num_channels();
 
+        let mut drop_target = None;
+        let mut dropped = false;
+
         for i in 0..num_channels {
             let channel_height = data.channel_height(i);
 
@@ -98,22 +108,53 @@ impl ArrangerWidget {
             let mut strip_rect = strips_rect;
             strip_rect.set_height(channel_height);
 
-            ui.scope_builder(
-                UiBuilder::new()
-                    .max_rect(channel_rect)
-                    .layout(Layout::centered_and_justified(Direction::TopDown)),
-                |ui| {
-                    ui.set_min_height(strip_rect.height());
-                    data.show_channel(i, ui);
-                },
-            );
+            if drag_info.is_some()
+                && let Some(pos) = ui.ctx().pointer_hover_pos()
+                && channels_rect.contains(pos)
+            {
+                let rect = channel_rect.expand2(vec2(0.0, gap));
+
+                let t = emath::remap(pos.y, rect.y_range(), 0.0..=1.0);
+
+                if (0.0..0.5).contains(&t) {
+                    drop_target = Some((i, rect.top() + gap / 2.0));
+                } else if t <= 1.0 {
+                    drop_target = Some((i + 1, rect.bottom() - gap / 2.0));
+                }
+            }
+
+            let r = ui
+                .scope_builder(
+                    UiBuilder::new()
+                        .max_rect(channel_rect)
+                        .layout(Layout::centered_and_justified(Direction::TopDown))
+                        .sense(Sense::all()),
+                    |ui| {
+                        ui.take_available_space();
+                        data.show_channel(i, ui);
+                    },
+                )
+                .response;
+
+            if drag_info == Some(i) {
+                ui.painter()
+                    .rect_filled(channel_rect, 0.0, Color32::WHITE.gamma_multiply(0.25));
+            }
+
+            if r.drag_started_by(PointerButton::Primary) {
+                ui.data_mut(|data| {
+                    data.insert_temp(drag_id, i);
+                });
+            } else if r.drag_stopped() {
+                dropped = true;
+            }
 
             ui.scope_builder(
                 UiBuilder::new()
                     .max_rect(strip_rect)
                     .layout(Layout::centered_and_justified(Direction::TopDown)),
                 |ui| {
-                    ui.set_min_height(strip_rect.height());
+                    ui.take_available_space();
                     data.show_strip(i, ui);
                 },
             );
@@ -132,6 +173,32 @@ impl ArrangerWidget {
                 }
             },
         );
+
+        if let Some((drop_index, drop_y)) = drop_target {
+            if dropped {
+                let dragged_channel =
+                    ui.data_mut(|data| data.remove_temp::<usize>(drag_id).unwrap());
+
+                data.move_channel(dragged_channel, drop_index);
+            } else {
+                let p = ui.painter();
+                let stroke = Stroke::new(2.0, Color32::WHITE);
+
+                p.hline(channels_rect.x_range(), drop_y, stroke);
+
+                let chevron = [vec2(-gap, -gap), vec2(0.0, 0.0), vec2(-gap, gap)];
+                let left_chevron: Vec<_> = chevron
+                    .iter()
+                    .map(|p| pos2(channels_rect.min.x, drop_y) + *p)
+                    .collect();
+                p.line(left_chevron, stroke);
+                let right_chevron: Vec<_> = chevron
+                    .iter()
+                    .map(|p| pos2(channels_rect.max.x, drop_y) - *p)
+                    .collect();
+                p.line(right_chevron, stroke);
+            }
+        }
     }
 }
 

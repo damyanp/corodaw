@@ -105,6 +105,10 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             .as_mut()
             .add_channel(&mut self.commands, index);
     }
+
+    fn move_channel(&mut self, index: usize, destination: usize) {
+        self.channel_order.as_mut().move_channel(index, destination);
+    }
 }
 
 fn show_available_plugins_menu(
