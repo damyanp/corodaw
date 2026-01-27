@@ -1,6 +1,6 @@
 use eframe::egui::{
-    Align2, Button, Context, CursorIcon, Direction, FontId, Id, Layout, NumExt, Rect, Sense,
-    TextStyle, Ui, UiBuilder, pos2, vec2,
+    Align, Align2, Button, Color32, Context, CursorIcon, Direction, FontId, Id, Layout, NumExt,
+    Rect, Sense, TextStyle, Ui, UiBuilder, pos2, vec2,
 };
 
 #[derive(Clone, Debug, Copy)]
@@ -87,9 +87,9 @@ impl ArrangerWidget {
             ui.style().visuals.widgets.noninteractive.bg_fill,
         );
 
-        let mut add_line = None;
+        let num_channels = data.num_channels();
 
-        for i in 0..data.num_channels() {
+        for i in 0..num_channels {
             let channel_height = data.channel_height(i);
 
             let mut channel_rect = channels_rect;
@@ -103,6 +103,7 @@ impl ArrangerWidget {
                     .max_rect(channel_rect)
                     .layout(Layout::centered_and_justified(Direction::TopDown)),
                 |ui| {
+                    ui.set_min_height(strip_rect.height());
                     data.show_channel(i, ui);
                 },
             );
@@ -112,63 +113,25 @@ impl ArrangerWidget {
                     .max_rect(strip_rect)
                     .layout(Layout::centered_and_justified(Direction::TopDown)),
                 |ui| {
+                    ui.set_min_height(strip_rect.height());
                     data.show_strip(i, ui);
                 },
             );
-
-            let mut interact_rect = Rect::from_min_max(
-                pos2(0.0, channel_rect.top()),
-                pos2(rect.right(), channel_rect.bottom() + gap),
-            );
-
-            if i == 0 {
-                interact_rect.extend_with_y(channel_rect.min.y - gap);
-            }
-
-            if let Some(pos) = ui.ctx().pointer_hover_pos()
-                && interact_rect.contains(pos)
-            {
-                let t = eframe::egui::emath::remap(pos.y, interact_rect.y_range(), 0.0..=1.0);
-
-                if (0.0..0.5).contains(&t) {
-                    add_line = Some((i, channel_rect.top() - gap / 2.0));
-                } else if t <= 1.0 {
-                    add_line = Some((i + 1, channel_rect.bottom() + gap / 2.0));
-                }
-            }
 
             channels_rect.set_top(channel_rect.bottom() + gap);
             strips_rect.set_top(strip_rect.bottom() + gap);
         }
 
-        if let Some((index, y)) = add_line {
-            let style = &ui.style().visuals.widgets;
-            let p = ui.painter();
-
-            let style = ui
-                .ctx()
-                .pointer_hover_pos()
-                .and_then(|pos| {
-                    if pos.y >= y - gap && pos.y <= y + gap {
-                        Some(style.hovered)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(style.inactive);
-
-            p.hline(
-                channels_rect.left()..=strips_rect.right(),
-                y,
-                style.fg_stroke,
-            );
-
-            let add_rect = Rect::from_center_size(pos2(channels_rect.left(), y), vec2(20.0, 20.0));
-
-            if ui.place(add_rect, Button::new("+")).clicked() {
-                data.on_add_channel(index);
-            }
-        }
+        ui.scope_builder(
+            UiBuilder::new()
+                .layout(Layout::top_down(Align::Center))
+                .max_rect(channels_rect),
+            |ui| {
+                if ui.button("+").clicked() {
+                    data.on_add_channel(num_channels);
+                }
+            },
+        );
     }
 }
 
