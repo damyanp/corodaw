@@ -151,8 +151,8 @@ fn reachable_nodes() {
         .spawn_batch((0..5).map(|_| (node::Node::default().audio(1, 1),)))
         .collect();
 
-    node::connect_audio(app.world_mut(), nodes[0], 0, nodes[1], 0);
-    node::connect_audio(app.world_mut(), nodes[2], 0, nodes[3], 0);
+    node::connect_audio(app.world_mut(), nodes[0], Connection::new(0, nodes[1], 0));
+    node::connect_audio(app.world_mut(), nodes[2], Connection::new(0, nodes[3], 0));
 
     app.update();
 
@@ -211,9 +211,9 @@ fn multiple_node_process_order() {
         node::set_processor(w, e, logger.make_processor());
     }
 
-    node::connect_audio(w, d, 0, a, 0);
-    node::connect_audio(w, a, 0, b, 0);
-    node::connect_audio(w, a, 1, c, 0);
+    node::connect_audio(w, d, Connection::new(0, a, 0));
+    node::connect_audio(w, a, Connection::new(0, b, 0));
+    node::connect_audio(w, a, Connection::new(1, c, 0));
 
     app.update();
     let mut audio_graph_worker: AudioGraphWorker =
@@ -253,8 +253,8 @@ fn node_processing() {
         node::set_processor(w, e, Box::new(Constant(1.0)));
     }
 
-    node::connect_audio(w, a, 0, b, 0);
-    node::connect_audio(w, a, 1, c, 0);
+    node::connect_audio(w, a, Connection::new(0, b, 0));
+    node::connect_audio(w, a, Connection::new(1, c, 0));
 
     app.update();
 
@@ -307,18 +307,15 @@ impl Processor for EventSink {
         out_audio_buffers: &mut [AudioBlockSequential<f32>],
         _: &mut [Vec<crate::AgEvent>],
     ) {
-        let input_connection = &node.desc.event_input_connections[0];
-        let InputConnection::Connected(input_node, input_port) = input_connection else {
-            return;
-        };
+        for input_connection in &node.desc.event_ports.connections {
+            let input_node = graph.get_node(input_connection.src);
+            let input_events = &input_node.output_event_buffers.get()[input_connection.src_port];
 
-        let input_node = graph.get_node(*input_node);
-        let input_events = &input_node.output_event_buffers.get()[0];
-
-        self.events
-            .write()
-            .unwrap()
-            .extend(input_events.iter().cloned());
+            self.events
+                .write()
+                .unwrap()
+                .extend(input_events.iter().cloned());
+        }
     }
 }
 
@@ -363,7 +360,7 @@ fn events_output_to_single_input() {
         .id();
     node::set_processor(w, sink, EventSink::make_processor(events_sink.clone()));
 
-    node::connect_event(w, sink, 0, source, 0);
+    node::connect_event(w, sink, Connection::new(0, source, 0)).unwrap();
 
     app.update();
 

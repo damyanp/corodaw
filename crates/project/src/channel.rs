@@ -1,3 +1,4 @@
+use audio_graph::Connection;
 use bevy_app::prelude::*;
 use bevy_ecs::{name::Name, prelude::*};
 
@@ -137,9 +138,18 @@ fn set_plugin(
     let summer_entity = summer.entity;
     commands.queue(move |world: &mut World| {
         for port in 0..2 {
-            audio_graph::connect_audio(world, gain_control_entity, port, plugin_node_id, port)
-                .unwrap();
-            audio_graph::add_audio_input(world, summer_entity, gain_control_entity, port).unwrap();
+            audio_graph::connect_audio(
+                world,
+                gain_control_entity,
+                Connection::new(port, plugin_node_id, port),
+            )
+            .unwrap();
+            audio_graph::connect_audio(
+                world,
+                summer_entity,
+                Connection::new(port, gain_control_entity, port),
+            )
+            .unwrap();
         }
     });
 
@@ -183,11 +193,12 @@ fn update_channels(
         if state.armed {
             let midi_input = midi_input.entity;
             commands.queue(move |world: &mut World| {
-                audio_graph::connect_event(world, input_node, 0, midi_input, 0).unwrap();
+                audio_graph::connect_event(world, input_node, Connection::new(0, midi_input, 0))
+                    .unwrap();
             });
         } else {
             commands.queue(move |world: &mut World| {
-                audio_graph::disconnect_event(world, input_node, 0).unwrap();
+                audio_graph::disconnect_event_input_port(world, input_node, 0).unwrap();
             });
         }
     }

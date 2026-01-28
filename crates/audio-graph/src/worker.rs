@@ -55,8 +55,8 @@ impl AgNode {
     fn new(entity: Entity, desc: node::Node) -> Self {
         const HARDCODED_NUM_FRAMES: usize = 1024;
         let output_audio_buffers =
-            AudioBuffers::new(desc.num_audio_outputs as u16, HARDCODED_NUM_FRAMES);
-        let output_event_buffers = EventBuffers::new(desc.num_event_outputs);
+            AudioBuffers::new(desc.audio_ports.num_outputs as u16, HARDCODED_NUM_FRAMES);
+        let output_event_buffers = EventBuffers::new(desc.event_ports.num_outputs);
 
         Self {
             entity,

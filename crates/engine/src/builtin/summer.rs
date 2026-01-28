@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockOps, AudioBlockSequential};
 
-use audio_graph::{AgEvent, AgNode, Graph, InputConnection, Node, Processor};
+use audio_graph::{AgEvent, AgNode, Graph, Node, Processor};
 
 pub struct Summer {
     pub entity: Entity,
@@ -11,7 +11,9 @@ pub struct Summer {
 
 impl Summer {
     pub fn new(world: &mut World, num_channels: usize) -> Self {
-        let entity = world.spawn(Node::default().audio(0, num_channels)).id();
+        let entity = world
+            .spawn(Node::default().audio(num_channels, num_channels))
+            .id();
 
         audio_graph::set_processor(world, entity, Box::new(SummerProcessor));
 
@@ -34,26 +36,23 @@ impl Processor for SummerProcessor {
         for (channel, output_buffer) in out_audio_buffers.iter_mut().enumerate() {
             output_buffer.fill_with(0.0);
 
-            let inputs = node.desc.audio_input_connections.iter().filter(|c| {
-                if let InputConnection::Connected(_, n) = c {
-                    *n == channel
-                } else {
-                    false
-                }
-            });
+            let inputs = node
+                .desc
+                .audio_ports
+                .connections
+                .iter()
+                .filter(|c| c.port == channel);
 
             for input in inputs {
-                if let InputConnection::Connected(input_node, input_channel) = input {
-                    let input_node = graph.get_node(*input_node);
-                    let input_buffers = input_node.output_audio_buffers.get();
-                    let input_buffer = &input_buffers[*input_channel];
+                let input_node = graph.get_node(input.src);
+                let input_buffers = input_node.output_audio_buffers.get();
+                let input_buffer = &input_buffers[input.src_port];
 
-                    for (input, output) in input_buffer
-                        .channel_iter(0)
-                        .zip(output_buffer.channel_iter_mut(0))
-                    {
-                        *output += *input;
-                    }
+                for (input, output) in input_buffer
+                    .channel_iter(0)
+                    .zip(output_buffer.channel_iter_mut(0))
+                {
+                    *output += *input;
                 }
             }
         }
