@@ -230,7 +230,7 @@ fn mute_solo_arm_buttons(
     ui: &mut Ui,
 ) {
     let mut control_button =
-        |label: &str, color: Color32, selected: bool, control: ChannelControl| {
+        |label: &str, color: Color32, selected: bool, control: fn(bool) -> ChannelControl| {
             let color = if selected {
                 color
             } else {
@@ -247,29 +247,14 @@ fn mute_solo_arm_buttons(
             {
                 messages.push(ChannelMessage {
                     channel: entity,
-                    control,
+                    control: control(!selected),
                 });
             }
         };
 
-    control_button(
-        "M",
-        Color32::ORANGE,
-        state.muted,
-        ChannelControl::ToggleMute,
-    );
-    control_button(
-        "S",
-        Color32::GREEN,
-        state.soloed,
-        ChannelControl::ToggleSolo,
-    );
-    control_button(
-        "R",
-        Color32::DARK_RED,
-        state.armed,
-        ChannelControl::ToggleArmed,
-    );
+    control_button("M", Color32::ORANGE, state.muted, ChannelControl::Mute);
+    control_button("S", Color32::GREEN, state.soloed, ChannelControl::Solo);
+    control_button("R", Color32::DARK_RED, state.armed, ChannelControl::Armed);
 }
 
 pub fn arranger_ui(mut ui: InMut<Ui>, data: ArrangerData) {

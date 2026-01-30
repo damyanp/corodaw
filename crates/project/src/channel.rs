@@ -49,9 +49,9 @@ fn handle_channel_messages(
             match &message.control {
                 ChannelControl::SetGain(value) => state.gain_value = *value,
                 ChannelControl::SetName(value) => *name = Name::new(value.clone()),
-                ChannelControl::ToggleMute => state.muted = !state.muted,
-                ChannelControl::ToggleSolo => state.soloed = !state.soloed,
-                ChannelControl::ToggleArmed => state.armed = !state.armed,
+                ChannelControl::Mute(value) => state.muted = *value,
+                ChannelControl::Solo(value) => state.soloed = *value,
+                ChannelControl::Armed(value) => state.armed = *value,
                 ChannelControl::ShowGui => {
                     if let Some(mut channel_view) = view {
                         let gui_handle = futures::executor::block_on(async {
@@ -263,8 +263,8 @@ pub struct ChannelMessage {
 pub enum ChannelControl {
     SetGain(f32),
     SetName(String),
-    ToggleMute,
-    ToggleSolo,
-    ToggleArmed,
+    Mute(bool),
+    Solo(bool),
+    Armed(bool),
     ShowGui,
 }
