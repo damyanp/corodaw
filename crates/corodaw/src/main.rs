@@ -32,13 +32,7 @@ impl Default for Corodaw {
 
 impl eframe::App for Corodaw {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
-        self.app.borrow_mut().update();
-        while self.executor.try_tick() {}
-        if let Some(task) = &self.current_task
-            && task.is_finished()
-        {
-            self.current_task = None;
-        }
+        self.update_logic(ctx);
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             if self.current_task.is_some() {
@@ -62,6 +56,20 @@ impl eframe::App for Corodaw {
 }
 
 impl Corodaw {
+    fn update_logic(&mut self, ctx: &egui::Context) {
+        ctx.request_repaint(); // keep repainting so we keep updating logic
+
+        self.app.borrow_mut().update();
+
+        while self.executor.try_tick() {}
+
+        if let Some(task) = &self.current_task
+            && task.is_finished()
+        {
+            self.current_task = None;
+        }
+    }
+
     fn main_menu_bar(&mut self, ui: &mut Ui) {
         ui.menu_button("File", |ui| {
             if ui.button("Open...").clicked() {
