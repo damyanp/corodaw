@@ -4,6 +4,7 @@ use std::{
     cmp::Reverse,
     collections::{BinaryHeap, VecDeque},
     pin::Pin,
+    process::Output,
     rc::Rc,
     sync::{Arc, RwLock, RwLockReadGuard},
     time::Duration,
@@ -227,6 +228,58 @@ fn multiple_node_process_order() {
 
     // Rest has to be set order
     assert_eq!([a, d], logger.get()[2..]);
+}
+
+#[test]
+fn always_run_nodes() {
+    // Nodes marked to always run should....always run!
+
+    // a --> b --> c
+    //   \-> d
+    // e
+    // f
+    //
+    // always_run: c, d, e
+
+    let mut app = test_app();
+
+    let logger = Logger::new();
+
+    let mut w = app.world_mut();
+    let [a, b, f] = std::array::from_fn(|_| w.spawn((Node::default().audio(1, 2))).id());
+    let [c, d, e] = std::array::from_fn(|_| w.spawn(Node::default().audio(1, 1).always_run()).id());
+
+    w.insert_batch([(a, OutputNode)]);
+
+    for e in [a, b, c, d, e, f] {
+        set_processor(w, e, logger.make_processor());
+    }
+
+    connect_audio(w, a, Connection::new(0, b, 0));
+    connect_audio(w, a, Connection::new(0, d, 0));
+    connect_audio(w, b, Connection::new(0, c, 0));
+
+    app.update();
+    let mut audio_graph_worker: AudioGraphWorker =
+        app.world_mut().remove_non_send_resource().unwrap();
+    audio_graph_worker.configure(2, 1);
+    let mut data = [0.0, 0.0];
+    audio_graph_worker.tick(&mut data, Duration::default());
+
+    let order = logger.get();
+
+    assert!(is_before(&order, c, b));
+    assert!(is_before(&order, b, a));
+    assert!(is_before(&order, d, a));
+    assert!(order.contains(&e));
+    assert!(!order.contains(&f));
+}
+
+fn is_before(order: &Vec<Entity>, entity: Entity, is_before: Entity) -> bool {
+    let entity_index = order.iter().find_position(|e| **e == entity).unwrap();
+    let is_before_index = order.iter().find_position(|e| **e == is_before).unwrap();
+
+    entity_index < is_before_index
 }
 
 #[test]

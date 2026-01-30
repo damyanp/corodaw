@@ -13,6 +13,7 @@ pub struct Node {
     pub inputs: Vec<Entity>,
     pub audio_ports: Ports,
     pub event_ports: Ports,
+    pub always_run: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -76,6 +77,13 @@ impl Node {
     pub fn event(self, num_event_input_ports: usize, num_event_output_ports: usize) -> Self {
         Self {
             event_ports: Ports::new(num_event_input_ports, num_event_output_ports),
+            ..self
+        }
+    }
+
+    pub fn always_run(self) -> Self {
+        Self {
+            always_run: true,
             ..self
         }
     }

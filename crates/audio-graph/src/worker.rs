@@ -166,6 +166,12 @@ impl Graph {
         let mut reachable = HashSet::with_capacity(self.nodes.len());
         let mut stack = Vec::with_capacity(self.nodes.len());
 
+        for (entity, node) in self.nodes.iter() {
+            if node.desc.always_run {
+                stack.push(*entity);
+            }
+        }
+
         stack.push(start_node);
         while let Some(node) = stack.pop() {
             if !reachable.contains(&node) {

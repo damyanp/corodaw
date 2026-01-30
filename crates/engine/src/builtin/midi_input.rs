@@ -15,7 +15,7 @@ pub struct MidiInputNode {
 
 impl MidiInputNode {
     pub fn new(world: &mut World) -> Self {
-        let entity = world.spawn(Node::default().event(0, 1)).id();
+        let entity = world.spawn(Node::default().event(0, 1).always_run()).id();
         audio_graph::set_processor(world, entity, Box::new(MidiInputProcessor::default()));
         MidiInputNode { entity }
     }
