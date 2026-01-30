@@ -112,22 +112,31 @@ impl AudioGraphWorker {
 
             let output_node = self.graph.get_node(output);
             let output_buffers = output_node.output_audio_buffers.get();
-            let a = &output_buffers[0];
-            let b = &output_buffers[1];
 
-            assert_eq!(1, a.num_channels());
-            assert_eq!(1, b.num_channels());
+            if output_buffers.num_channels() == block.num_channels() {
+                let output_buffers = output_buffers.frames_iter();
+                let frames_dest = block.frames_iter_mut();
 
-            let frames_dest = block.frames_iter_mut();
-            let frames_a = a.frames_iter();
-            let frames_b = b.frames_iter();
-
-            for (mut dest, (mut a, mut b)) in frames_dest.zip(frames_a.zip(frames_b)) {
-                *dest.next().unwrap() = *a.next().unwrap();
-                *dest.next().unwrap() = *b.next().unwrap();
-                assert!(a.next().is_none());
-                assert!(b.next().is_none());
-                assert!(dest.next().is_none());
+                for (output_channel, dest_channel) in output_buffers.zip(frames_dest) {
+                    for (output_frame, mut dest_frame) in output_channel.zip(dest_channel) {
+                        *dest_frame = *output_frame;
+                    }
+                }
+            } else if output_buffers.num_channels() == 1 {
+                let frames_dest = block.channels_iter_mut();
+                for dest_channel in frames_dest {
+                    for (output_frame, mut dest_frame) in
+                        output_buffers.channel_iter(0).zip(dest_channel)
+                    {
+                        *dest_frame = *output_frame;
+                    }
+                }
+            } else {
+                panic!(
+                    "Don't know how to convert from {} channels to {} channels",
+                    output_buffers.num_channels(),
+                    block.num_channels()
+                );
             }
         } else {
             block.fill_with(0.0);

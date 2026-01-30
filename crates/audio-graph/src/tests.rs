@@ -29,11 +29,11 @@ impl Processor for Constant {
         node: &AgNode,
         _: usize,
         _: &Duration,
-        out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        out_audio_buffers: &mut AudioBlockSequential<f32>,
         _: &mut [Vec<AgEvent>],
     ) {
-        for out in out_audio_buffers {
-            out.channel_mut(0)[0] = self.0;
+        for out in out_audio_buffers.raw_data_mut() {
+            *out = self.0;
         }
     }
 }
@@ -48,21 +48,21 @@ impl Processor for SumInputs {
         node: &AgNode,
         _: usize,
         _: &Duration,
-        out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        out_audio_buffers: &mut AudioBlockSequential<f32>,
         _: &mut [Vec<AgEvent>],
     ) {
-        out_audio_buffers[0].channel_mut(0).fill(0.0);
+        out_audio_buffers.channel_mut(0).fill(0.0);
 
         let inputs = node
             .desc
             .inputs
             .iter()
             .map(|id| &graph.nodes[id])
-            .map(|node| node.output_audio_buffers.ports.borrow());
+            .map(|node| node.output_audio_buffers.get());
 
         for input in inputs {
-            let input = input[0].channel(0);
-            for (input, mut output) in input.iter().zip(out_audio_buffers[0].channel_iter_mut(0)) {
+            let input = input.channel(0);
+            for (input, mut output) in input.iter().zip(out_audio_buffers.channel_iter_mut(0)) {
                 *output += *input;
             }
         }
@@ -80,7 +80,7 @@ impl Processor for LogProcessor {
         node: &AgNode,
         _: usize,
         _: &Duration,
-        out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        _: &mut AudioBlockSequential<f32>,
         _: &mut [Vec<AgEvent>],
     ) {
         self.log.write().unwrap().push(node.entity);
@@ -320,6 +320,27 @@ fn node_processing() {
     assert_eq!(2.0, data[0]);
 }
 
+#[test]
+fn mono_node_stereo_output() {
+    let mut app = test_app();
+    let mut w = app.world_mut();
+
+    let a = w
+        .spawn((node::Node::default().audio(0, 1), node::OutputNode))
+        .id();
+    set_processor(w, a, Box::new(Constant(1.0)));
+
+    app.update();
+
+    let mut audio_graph_worker: AudioGraphWorker =
+        app.world_mut().remove_non_send_resource().unwrap();
+    audio_graph_worker.configure(2, 1);
+    let mut data = [0.0, 0.0];
+    audio_graph_worker.tick(&mut data, Duration::default());
+
+    assert_eq!([1.0, 1.0], data);
+}
+
 #[derive(Debug)]
 struct EventSource {
     events: VecDeque<crate::AgEvent>,
@@ -331,7 +352,7 @@ impl Processor for EventSource {
         node: &AgNode,
         _: usize,
         timestamp: &Duration,
-        out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        _: &mut AudioBlockSequential<f32>,
         out_event_buffers: &mut [Vec<AgEvent>],
     ) {
         out_event_buffers[0].extend(self.events.iter().cloned());
@@ -357,12 +378,13 @@ impl Processor for EventSink {
         node: &AgNode,
         _: usize,
         timestamp: &Duration,
-        out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        _: &mut AudioBlockSequential<f32>,
         _: &mut [Vec<crate::AgEvent>],
     ) {
-        for input_connection in &node.desc.event_ports.connections {
+        for input_connection in &node.desc.event_channels.connections {
             let input_node = graph.get_node(input_connection.src);
-            let input_events = &input_node.output_event_buffers.get()[input_connection.src_port];
+            let input_events =
+                &input_node.output_event_buffers.get()[input_connection.src_channel as usize];
 
             self.events
                 .write()

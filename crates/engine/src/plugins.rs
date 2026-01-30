@@ -177,7 +177,7 @@ impl PluginHostThread {
                         let processor = Box::new(ClapPluginProcessor::new(&clap_plugin));
 
                         let num_inputs = 0; // TODO: support inputs!
-                        let num_outputs = processor.get_total_output_channels();
+                        let num_outputs = processor.get_total_output_channels() as u16;
 
                         sender.send((num_inputs, num_outputs, processor)).unwrap();
                     }
@@ -296,7 +296,7 @@ enum Message {
     RequestResize(ClapPluginId, GuiSize),
     CreateProcessor(
         ClapPluginId,
-        oneshot::Sender<(usize, usize, Box<dyn Processor>)>,
+        oneshot::Sender<(u16, u16, Box<dyn Processor>)>,
     ),
 }
 

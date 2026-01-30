@@ -1,6 +1,6 @@
 use std::{fmt::Debug, time::Duration};
 
-use audio_blocks::AudioBlockSequential;
+use audio_blocks::{AudioBlock, AudioBlockSequential};
 use clack_host::{
     events::event_types::MidiEvent,
     prelude::{
@@ -29,21 +29,21 @@ impl Debug for ClapPluginProcessor {
 
 impl ClapPluginProcessor {
     pub fn new(clap_plugin: &ClapPlugin) -> Self {
-        let output_ports = clap_plugin.get_audio_ports(false);
-        let total_channel_count = output_ports
+        let output_channels = clap_plugin.get_audio_ports(false);
+        let total_channel_count = output_channels
             .iter()
             .copied()
             .reduce(|a, b| a + b)
             .unwrap_or(0) as usize;
 
-        let audio_ports = AudioPorts::with_capacity(total_channel_count, output_ports.len());
+        let audio_channels = AudioPorts::with_capacity(total_channel_count, output_channels.len());
 
         let sample_rate = 48_000;
 
         Self {
             plugin_audio_processor: clap_plugin.get_audio_processor(sample_rate as f64),
             sample_rate,
-            audio_ports,
+            audio_ports: audio_channels,
             input_events: EventBuffer::new(),
             num_outputs: total_channel_count,
         }
@@ -61,7 +61,7 @@ impl Processor for ClapPluginProcessor {
         node: &AgNode,
         _: usize,
         timestamp: &Duration,
-        out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        out_audio_buffers: &mut AudioBlockSequential<f32>,
         _: &mut [Vec<AgEvent>],
     ) {
         self.update_input_events(graph, node, timestamp);
@@ -80,12 +80,15 @@ impl Processor for ClapPluginProcessor {
         let steady_time = None;
         let transport = None;
 
-        let mut audio_outputs =
-            self.audio_ports
-                .with_output_buffers(out_audio_buffers.iter_mut().map(|port| AudioPortBuffer {
+        let num_channels = out_audio_buffers.num_channels() as usize;
+        let mut audio_outputs = self.audio_ports.with_output_buffers(
+            ExactIter::new(out_audio_buffers.channels_mut(), num_channels).map(|channel| {
+                AudioPortBuffer {
                     latency: 0,
-                    channels: AudioPortBufferType::f32_output_only(port.channels_mut()),
-                }));
+                    channels: AudioPortBufferType::f32_output_only(std::iter::once(channel)),
+                }
+            }),
+        );
 
         processor
             .process(
@@ -100,20 +103,55 @@ impl Processor for ClapPluginProcessor {
     }
 }
 
+struct ExactIter<I> {
+    iter: I,
+    remaining: usize,
+}
+
+impl<I> ExactIter<I> {
+    fn new(iter: I, remaining: usize) -> Self {
+        Self { iter, remaining }
+    }
+}
+
+impl<I: Iterator> Iterator for ExactIter<I> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.iter.next();
+        if item.is_some() {
+            self.remaining = self.remaining.saturating_sub(1);
+        }
+        item
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<I: Iterator> ExactSizeIterator for ExactIter<I> {
+    fn len(&self) -> usize {
+        self.remaining
+    }
+}
+
 impl ClapPluginProcessor {
     fn update_input_events(&mut self, graph: &Graph, node: &AgNode, timestamp: &Duration) {
         self.input_events.clear();
 
-        if node.desc.event_ports.connections.is_empty() {
+        if node.desc.event_channels.connections.is_empty() {
             return;
         }
 
         // TODO: handle multiple inputs
-        assert_eq!(node.desc.event_ports.connections.len(), 1);
+        assert_eq!(node.desc.event_channels.connections.len(), 1);
 
-        let Connection { src, src_port, .. } = node.desc.event_ports.connections[0];
+        let Connection {
+            src, src_channel, ..
+        } = node.desc.event_channels.connections[0];
 
-        let events = &graph.get_node(src).output_event_buffers.get()[src_port];
+        let events = &graph.get_node(src).output_event_buffers.get()[src_channel as usize];
 
         for event in events {
             let mut data: [u8; 3] = Default::default();

@@ -24,7 +24,7 @@ pub trait Processor: Send + Debug {
         node: &AgNode,
         num_frames: usize,
         timestamp: &Duration,
-        out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        out_audio_buffers: &mut AudioBlockSequential<f32>,
         out_event_buffers: &mut [Vec<AgEvent>],
     );
 }
@@ -55,8 +55,8 @@ impl AgNode {
     fn new(entity: Entity, desc: node::Node) -> Self {
         const HARDCODED_NUM_FRAMES: usize = 1024;
         let output_audio_buffers =
-            AudioBuffers::new(desc.audio_ports.num_outputs as u16, HARDCODED_NUM_FRAMES);
-        let output_event_buffers = EventBuffers::new(desc.event_ports.num_outputs);
+            AudioBuffers::new(desc.audio_channels.num_outputs, HARDCODED_NUM_FRAMES);
+        let output_event_buffers = EventBuffers::new(desc.event_channels.num_outputs as usize);
 
         Self {
             entity,
@@ -98,8 +98,7 @@ impl Graph {
 
             node.output_audio_buffers.prepare_for_processing(num_frames);
 
-            let mut out_audio_buffers = node.output_audio_buffers.ports.borrow_mut();
-            let out_audio_buffers = out_audio_buffers.as_mut_slice();
+            let mut out_audio_buffers = node.output_audio_buffers.buffers.borrow_mut();
 
             node.output_event_buffers.prepare_for_processing();
 
@@ -114,7 +113,7 @@ impl Graph {
                 node,
                 num_frames,
                 timestamp,
-                out_audio_buffers,
+                &mut out_audio_buffers,
                 out_event_buffers,
             );
         }

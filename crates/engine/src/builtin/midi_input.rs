@@ -56,7 +56,7 @@ impl Processor for MidiInputProcessor {
         _: &AgNode,
         _: usize,
         timestamp: &Duration,
-        _: &mut [AudioBlockSequential<f32>],
+        _: &mut AudioBlockSequential<f32>,
         out_event_buffers: &mut [Vec<AgEvent>],
     ) {
         self.receive_midi_events(timestamp);

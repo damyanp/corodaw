@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 use crossbeam::channel::{self, Receiver, Sender};
 use std::time::Duration;
 
-use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockOps, AudioBlockSequential};
+use audio_blocks::AudioBlockSequential;
 
 use audio_graph::{AgEvent, AgNode, Connection, Graph, Node, Processor};
 
@@ -50,29 +50,26 @@ impl Processor for GainControlProcessor {
         node: &AgNode,
         _: usize,
         _: &Duration,
-        out_audio_buffers: &mut [AudioBlockSequential<f32>],
+        out_audio_buffers: &mut AudioBlockSequential<f32>,
         _: &mut [Vec<AgEvent>],
     ) {
         self.process_messages();
 
-        for (channel, output_buffer) in out_audio_buffers.iter_mut().enumerate() {
-            output_buffer.fill_with(0.0);
+        for (output_channel, output_buffer) in out_audio_buffers.channels_mut().enumerate() {
+            output_buffer.fill(0.0);
 
             for Connection {
-                port,
+                channel,
                 src,
-                src_port,
-            } in &node.desc.audio_ports.connections
+                src_channel,
+            } in &node.desc.audio_channels.connections
             {
-                if *port == channel {
+                if *channel == output_channel as u16 {
                     let input_node = graph.get_node(*src);
                     let input_buffers = input_node.output_audio_buffers.get();
-                    let input_buffer = &input_buffers[*src_port];
+                    let input_buffer = input_buffers.channel(*src_channel);
 
-                    for (input, output) in input_buffer
-                        .channel_iter(0)
-                        .zip(output_buffer.channel_iter_mut(0))
-                    {
+                    for (input, output) in input_buffer.iter().zip(output_buffer.iter_mut()) {
                         *output += *input * self.gain;
                     }
                 }

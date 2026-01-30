@@ -11,20 +11,20 @@ pub struct OutputNode;
 #[derive(Component, Clone, Debug, Default)]
 pub struct Node {
     pub inputs: Vec<Entity>,
-    pub audio_ports: Ports,
-    pub event_ports: Ports,
+    pub audio_channels: Ports,
+    pub event_channels: Ports,
     pub always_run: bool,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Ports {
     pub connections: Vec<Connection>,
-    pub num_inputs: usize,
-    pub num_outputs: usize,
+    pub num_inputs: u16,
+    pub num_outputs: u16,
 }
 
 impl Ports {
-    fn new(num_inputs: usize, num_outputs: usize) -> Self {
+    fn new(num_inputs: u16, num_outputs: u16) -> Self {
         Self {
             num_inputs,
             num_outputs,
@@ -33,11 +33,11 @@ impl Ports {
     }
 
     fn connect(&mut self, src: &Self, connection: Connection) -> Result<(), AudioGraphDescError> {
-        if connection.port >= self.num_inputs {
+        if connection.channel >= self.num_inputs {
             return Err(AudioGraphDescError::DestPortOutOfBounds);
         }
 
-        if connection.src_port >= src.num_outputs {
+        if connection.src_channel >= src.num_outputs {
             return Err(AudioGraphDescError::SrcPortOutOfBounds);
         }
 
@@ -51,32 +51,32 @@ impl Ports {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Connection {
-    pub port: usize,
+    pub channel: u16,
     pub src: Entity,
-    pub src_port: usize,
+    pub src_channel: u16,
 }
 
 impl Connection {
-    pub fn new(port: usize, src: Entity, src_port: usize) -> Self {
+    pub fn new(channel: u16, src: Entity, src_channel: u16) -> Self {
         Self {
-            port,
+            channel,
             src,
-            src_port,
+            src_channel,
         }
     }
 }
 
 impl Node {
-    pub fn audio(self, num_audio_input_ports: usize, num_audio_output_ports: usize) -> Self {
+    pub fn audio(self, num_audio_input_channels: u16, num_audio_output_channels: u16) -> Self {
         Self {
-            audio_ports: Ports::new(num_audio_input_ports, num_audio_output_ports),
+            audio_channels: Ports::new(num_audio_input_channels, num_audio_output_channels),
             ..self
         }
     }
 
-    pub fn event(self, num_event_input_ports: usize, num_event_output_ports: usize) -> Self {
+    pub fn event(self, num_event_input_channels: u16, num_event_output_channels: u16) -> Self {
         Self {
-            event_ports: Ports::new(num_event_input_ports, num_event_output_ports),
+            event_channels: Ports::new(num_event_input_channels, num_event_output_channels),
             ..self
         }
     }
@@ -89,9 +89,9 @@ impl Node {
     }
 
     pub(crate) fn update_input_nodes(&mut self) {
-        let audio_ports = self.audio_ports.connections.iter();
-        let event_ports = self.event_ports.connections.iter();
-        let ports = audio_ports.chain(event_ports);
+        let audio_channels = self.audio_channels.connections.iter();
+        let event_channels = self.event_channels.connections.iter();
+        let ports = audio_channels.chain(event_channels);
 
         let mut nodes: Vec<_> = ports.map(|c| c.src).collect();
         nodes.sort();
@@ -113,7 +113,7 @@ pub fn connect_audio(
     dst: Entity,
     connection: Connection,
 ) -> Result<(), AudioGraphDescError> {
-    connect_ports(world, dst, connection, |node| &mut node.audio_ports)?;
+    connect_channels(world, dst, connection, |node| &mut node.audio_channels)?;
     Ok(())
 }
 
@@ -122,15 +122,15 @@ pub fn connect_event(
     dst: Entity,
     connection: Connection,
 ) -> Result<(), AudioGraphDescError> {
-    connect_ports(world, dst, connection, |node| &mut node.event_ports)?;
+    connect_channels(world, dst, connection, |node| &mut node.event_channels)?;
     Ok(())
 }
 
-fn connect_ports<F>(
+fn connect_channels<F>(
     world: &mut World,
     dst: Entity,
     connection: Connection,
-    get_ports: F,
+    get_channels: F,
 ) -> Result<(), AudioGraphDescError>
 where
     F: Fn(&mut Node) -> &mut Ports,
@@ -148,26 +148,26 @@ where
                 QueryEntityError::AliasedMutability(_) => AudioGraphDescError::DestEqualsSrc,
             })?;
 
-    get_ports(&mut dst_node).connect(get_ports(&mut src_node), connection)?;
+    get_channels(&mut dst_node).connect(get_channels(&mut src_node), connection)?;
     dst_node.update_input_nodes();
 
     Ok(())
 }
 
-pub fn disconnect_event_input_port(
+pub fn disconnect_event_input_channel(
     world: &mut World,
     node: Entity,
-    input_port: usize,
+    input_channel: u16,
 ) -> Result<(), AudioGraphDescError> {
-    disconnect_port(world, node, input_port, |node| &mut node.event_ports)?;
+    disconnect_channel(world, node, input_channel, |node| &mut node.event_channels)?;
     Ok(())
 }
 
-fn disconnect_port<F>(
+fn disconnect_channel<F>(
     world: &mut World,
     node: Entity,
-    input_port: usize,
-    get_ports: F,
+    input_channel: u16,
+    get_channels: F,
 ) -> Result<(), AudioGraphDescError>
 where
     F: Fn(&mut Node) -> &mut Ports,
@@ -175,9 +175,9 @@ where
     let mut dest = world
         .get_mut::<Node>(node)
         .ok_or(AudioGraphDescError::InvalidEntity(node))?;
-    get_ports(&mut dest)
+    get_channels(&mut dest)
         .connections
-        .retain(|connection| connection.port != input_port);
+        .retain(|connection| connection.channel != input_channel);
     Ok(())
 }
 
@@ -189,10 +189,10 @@ pub enum AudioGraphDescError {
     #[error("dest_node must not equal src_node")]
     DestEqualsSrc,
 
-    #[error("dest_port out of bounds")]
+    #[error("dest_channel out of bounds")]
     DestPortOutOfBounds,
 
-    #[error("src_port out of bounds")]
+    #[error("src_channel out of bounds")]
     SrcPortOutOfBounds,
 }
 
@@ -216,20 +216,20 @@ mod test {
         // out of bound ports
         assert!(connect_audio(world, b, Connection::new(2, a, 0)).is_err());
         assert!(connect_audio(world, b, Connection::new(0, a, 2)).is_err());
-        assert!(get_node(world, b).audio_ports.connections.is_empty());
+        assert!(get_node(world, b).audio_channels.connections.is_empty());
 
         // simple connections
         connect_audio(world, b, Connection::new(0, a, 0)).unwrap();
         let n = get_node(world, b);
         assert_eq!(n.inputs, vec![a]);
-        assert_eq!(n.audio_ports.connections, vec![Connection::new(0, a, 0)]);
+        assert_eq!(n.audio_channels.connections, vec![Connection::new(0, a, 0)]);
 
         connect_audio(world, b, Connection::new(1, a, 1)).unwrap();
         let mut n = get_node(world, b);
         assert_eq!(n.inputs, vec![a]);
-        n.audio_ports.connections.sort();
+        n.audio_channels.connections.sort();
         assert_eq!(
-            n.audio_ports.connections,
+            n.audio_channels.connections,
             vec![Connection::new(0, a, 0), Connection::new(1, a, 1)]
         );
 
@@ -238,10 +238,10 @@ mod test {
         connect_audio(world, b, Connection::new(1, c, 0)).unwrap();
         let mut n = get_node(world, b);
         n.inputs.sort();
-        n.audio_ports.connections.sort();
+        n.audio_channels.connections.sort();
         assert_eq!(n.inputs, vec![c, a]);
         assert_eq!(
-            n.audio_ports.connections,
+            n.audio_channels.connections,
             vec![
                 Connection::new(0, c, 0),
                 Connection::new(0, a, 0),
@@ -257,10 +257,10 @@ mod test {
         connect_audio(world, b, Connection::new(1, c, 0)).unwrap();
         let mut n = get_node(world, b);
         n.inputs.sort();
-        n.audio_ports.connections.sort();
+        n.audio_channels.connections.sort();
         assert_eq!(n.inputs, vec![c, a]);
         assert_eq!(
-            n.audio_ports.connections,
+            n.audio_channels.connections,
             vec![
                 Connection::new(0, c, 0),
                 Connection::new(0, a, 0),

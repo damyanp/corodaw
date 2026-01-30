@@ -198,7 +198,7 @@ fn update_channels(
             });
         } else {
             commands.queue(move |world: &mut World| {
-                audio_graph::disconnect_event_input_port(world, input_node, 0).unwrap();
+                audio_graph::disconnect_event_input_channel(world, input_node, 0).unwrap();
             });
         }
     }
