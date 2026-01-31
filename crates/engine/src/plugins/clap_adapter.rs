@@ -1,6 +1,6 @@
 use std::{fmt::Debug, time::Duration};
 
-use audio_blocks::{AudioBlock, AudioBlockSequential};
+use audio_blocks::AudioBlockSequential;
 use clack_host::{
     events::event_types::MidiEvent,
     prelude::{
@@ -80,15 +80,14 @@ impl Processor for ClapPluginProcessor {
         let steady_time = None;
         let transport = None;
 
-        let num_channels = out_audio_buffers.num_channels() as usize;
-        let mut audio_outputs = self.audio_ports.with_output_buffers(
-            ExactIter::new(out_audio_buffers.channels_mut(), num_channels).map(|channel| {
-                AudioPortBuffer {
-                    latency: 0,
-                    channels: AudioPortBufferType::f32_output_only(std::iter::once(channel)),
-                }
-            }),
-        );
+        let mut audio_outputs =
+            self.audio_ports
+                .with_output_buffers(out_audio_buffers.channels_mut().map(|channel| {
+                    AudioPortBuffer {
+                        latency: 0,
+                        channels: AudioPortBufferType::f32_output_only(std::iter::once(channel)),
+                    }
+                }));
 
         processor
             .process(
@@ -100,39 +99,6 @@ impl Processor for ClapPluginProcessor {
                 transport,
             )
             .unwrap();
-    }
-}
-
-struct ExactIter<I> {
-    iter: I,
-    remaining: usize,
-}
-
-impl<I> ExactIter<I> {
-    fn new(iter: I, remaining: usize) -> Self {
-        Self { iter, remaining }
-    }
-}
-
-impl<I: Iterator> Iterator for ExactIter<I> {
-    type Item = I::Item;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let item = self.iter.next();
-        if item.is_some() {
-            self.remaining = self.remaining.saturating_sub(1);
-        }
-        item
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.remaining, Some(self.remaining))
-    }
-}
-
-impl<I: Iterator> ExactSizeIterator for ExactIter<I> {
-    fn len(&self) -> usize {
-        self.remaining
     }
 }
 
