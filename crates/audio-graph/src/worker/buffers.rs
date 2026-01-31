@@ -26,7 +26,7 @@ impl AudioBuffers {
             println!("Allocating new audio buffers for {num_frames} frames");
             *buffers = AudioBlockSequential::new(buffers.num_channels(), num_frames);
         } else {
-            buffers.set_active_num_frames(num_frames);
+            buffers.set_num_frames_visible(num_frames);
         }
     }
 }

@@ -1,7 +1,7 @@
 #![allow(unused)]
 use bevy_ecs::prelude::*;
 
-use audio_blocks::{AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, AudioBlockOps};
+use audio_blocks::{AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, AudioBlockOpsMut};
 
 use crate::{
     Processor,
@@ -104,8 +104,7 @@ impl AudioGraphWorker {
         }
 
         let num_frames = data.len() / self.num_channels as usize;
-        let mut block =
-            AudioBlockInterleavedViewMut::from_slice(data, self.num_channels, num_frames);
+        let mut block = AudioBlockInterleavedViewMut::from_slice(data, self.num_channels);
 
         if let Some(output) = self.output {
             self.graph.process(output, num_frames, &timestamp);
