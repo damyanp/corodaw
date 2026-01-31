@@ -17,16 +17,17 @@ use crate::{AgEvent, node};
 mod buffers;
 pub use crate::worker::buffers::{AudioBuffers, EventBuffers};
 
+pub struct ProcessContext<'a> {
+    pub graph: &'a Graph,
+    pub node: &'a AgNode,
+    pub num_frames: usize,
+    pub timestamp: &'a Duration,
+    pub out_audio_buffers: &'a mut AudioBlockSequential<f32>,
+    pub out_event_buffers: &'a mut [Vec<AgEvent>],
+}
+
 pub trait Processor: Send + Debug {
-    fn process(
-        &mut self,
-        graph: &Graph,
-        node: &AgNode,
-        num_frames: usize,
-        timestamp: &Duration,
-        out_audio_buffers: &mut AudioBlockSequential<f32>,
-        out_event_buffers: &mut [Vec<AgEvent>],
-    );
+    fn process(&mut self, ctx: ProcessContext);
 }
 
 #[derive(Default)]
@@ -108,14 +109,14 @@ impl Graph {
             let mut processors = self.processors.borrow_mut();
             let processor = processors.get_mut(node_entity);
 
-            processor.process(
-                self,
+            processor.process(ProcessContext {
+                graph: self,
                 node,
                 num_frames,
                 timestamp,
-                &mut out_audio_buffers,
+                out_audio_buffers: &mut out_audio_buffers,
                 out_event_buffers,
-            );
+            });
         }
     }
 

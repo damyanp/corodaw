@@ -23,16 +23,8 @@ use super::*;
 #[derive(Debug)]
 struct Constant(f32);
 impl Processor for Constant {
-    fn process(
-        &mut self,
-        graph: &Graph,
-        node: &AgNode,
-        _: usize,
-        _: &Duration,
-        out_audio_buffers: &mut AudioBlockSequential<f32>,
-        _: &mut [Vec<AgEvent>],
-    ) {
-        for out in out_audio_buffers.raw_data_mut() {
+    fn process(&mut self, ctx: ProcessContext) {
+        for out in ctx.out_audio_buffers.raw_data_mut() {
             *out = self.0;
         }
     }
@@ -42,27 +34,20 @@ impl Processor for Constant {
 struct SumInputs;
 
 impl Processor for SumInputs {
-    fn process(
-        &mut self,
-        graph: &Graph,
-        node: &AgNode,
-        _: usize,
-        _: &Duration,
-        out_audio_buffers: &mut AudioBlockSequential<f32>,
-        _: &mut [Vec<AgEvent>],
-    ) {
-        out_audio_buffers.channel_mut(0).fill(0.0);
+    fn process(&mut self, ctx: ProcessContext) {
+        ctx.out_audio_buffers.channel_mut(0).fill(0.0);
 
-        let inputs = node
+        let inputs = ctx
+            .node
             .desc
             .inputs
             .iter()
-            .map(|id| &graph.nodes[id])
+            .map(|id| &ctx.graph.nodes[id])
             .map(|node| node.output_audio_buffers.get());
 
         for input in inputs {
             let input = input.channel(0);
-            for (input, mut output) in input.iter().zip(out_audio_buffers.channel_iter_mut(0)) {
+            for (input, mut output) in input.iter().zip(ctx.out_audio_buffers.channel_iter_mut(0)) {
                 *output += *input;
             }
         }
@@ -74,16 +59,8 @@ struct LogProcessor {
     log: Arc<RwLock<Vec<Entity>>>,
 }
 impl Processor for LogProcessor {
-    fn process(
-        &mut self,
-        graph: &Graph,
-        node: &AgNode,
-        _: usize,
-        _: &Duration,
-        _: &mut AudioBlockSequential<f32>,
-        _: &mut [Vec<AgEvent>],
-    ) {
-        self.log.write().unwrap().push(node.entity);
+    fn process(&mut self, ctx: ProcessContext) {
+        self.log.write().unwrap().push(ctx.node.entity);
     }
 }
 
@@ -346,16 +323,8 @@ struct EventSource {
     events: VecDeque<crate::AgEvent>,
 }
 impl Processor for EventSource {
-    fn process(
-        &mut self,
-        graph: &Graph,
-        node: &AgNode,
-        _: usize,
-        timestamp: &Duration,
-        _: &mut AudioBlockSequential<f32>,
-        out_event_buffers: &mut [Vec<AgEvent>],
-    ) {
-        out_event_buffers[0].extend(self.events.iter().cloned());
+    fn process(&mut self, ctx: ProcessContext) {
+        ctx.out_event_buffers[0].extend(self.events.iter().cloned());
     }
 }
 
@@ -372,17 +341,9 @@ struct EventSink {
     events: Arc<RwLock<VecDeque<crate::AgEvent>>>,
 }
 impl Processor for EventSink {
-    fn process(
-        &mut self,
-        graph: &Graph,
-        node: &AgNode,
-        _: usize,
-        timestamp: &Duration,
-        _: &mut AudioBlockSequential<f32>,
-        _: &mut [Vec<crate::AgEvent>],
-    ) {
-        for input_connection in &node.desc.event_channels.connections {
-            let input_node = graph.get_node(input_connection.src);
+    fn process(&mut self, ctx: ProcessContext) {
+        for input_connection in &ctx.node.desc.event_channels.connections {
+            let input_node = ctx.graph.get_node(input_connection.src);
             let input_events =
                 &input_node.output_event_buffers.get()[input_connection.src_channel as usize];
 

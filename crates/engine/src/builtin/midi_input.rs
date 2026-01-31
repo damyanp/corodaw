@@ -2,8 +2,7 @@ use std::{collections::VecDeque, time::Duration};
 
 use bevy_ecs::prelude::*;
 
-use audio_blocks::AudioBlockSequential;
-use audio_graph::{AgEvent, AgNode, Graph, Node, Processor};
+use audio_graph::{AgEvent, Node, ProcessContext, Processor};
 use derivative::Derivative;
 
 use crate::midi::MidiReceiver;
@@ -50,17 +49,9 @@ impl Default for MidiInputProcessor {
 }
 
 impl Processor for MidiInputProcessor {
-    fn process(
-        &mut self,
-        _: &Graph,
-        _: &AgNode,
-        _: usize,
-        timestamp: &Duration,
-        _: &mut AudioBlockSequential<f32>,
-        out_event_buffers: &mut [Vec<AgEvent>],
-    ) {
-        self.receive_midi_events(timestamp);
-        out_event_buffers[0].extend(self.events.iter().cloned());
+    fn process(&mut self, ctx: ProcessContext) {
+        self.receive_midi_events(ctx.timestamp);
+        ctx.out_event_buffers[0].extend(self.events.iter().cloned());
         self.events.clear();
     }
 }

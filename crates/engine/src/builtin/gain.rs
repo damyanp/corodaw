@@ -1,10 +1,7 @@
 use bevy_ecs::prelude::*;
 use crossbeam::channel::{self, Receiver, Sender};
-use std::time::Duration;
 
-use audio_blocks::AudioBlockSequential;
-
-use audio_graph::{AgEvent, AgNode, Connection, Graph, Node, Processor};
+use audio_graph::{Connection, Node, ProcessContext, Processor};
 
 #[derive(Debug)]
 pub struct GainControl {
@@ -44,28 +41,20 @@ struct GainControlProcessor {
 }
 
 impl Processor for GainControlProcessor {
-    fn process(
-        &mut self,
-        graph: &Graph,
-        node: &AgNode,
-        _: usize,
-        _: &Duration,
-        out_audio_buffers: &mut AudioBlockSequential<f32>,
-        _: &mut [Vec<AgEvent>],
-    ) {
+    fn process(&mut self, ctx: ProcessContext) {
         self.process_messages();
 
-        for (output_channel, output_buffer) in out_audio_buffers.channels_mut().enumerate() {
+        for (output_channel, output_buffer) in ctx.out_audio_buffers.channels_mut().enumerate() {
             output_buffer.fill(0.0);
 
             for Connection {
                 channel,
                 src,
                 src_channel,
-            } in &node.desc.audio_channels.connections
+            } in &ctx.node.desc.audio_channels.connections
             {
                 if *channel == output_channel as u16 {
-                    let input_node = graph.get_node(*src);
+                    let input_node = ctx.graph.get_node(*src);
                     let input_buffers = input_node.output_audio_buffers.get();
                     let input_buffer = input_buffers.channel(*src_channel);
 

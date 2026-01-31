@@ -1,6 +1,5 @@
 use std::{fmt::Debug, time::Duration};
 
-use audio_blocks::AudioBlockSequential;
 use clack_host::{
     events::event_types::MidiEvent,
     prelude::{
@@ -11,7 +10,7 @@ use clack_host::{
 };
 
 use crate::plugins::ClapPlugin;
-use audio_graph::{AgEvent, AgNode, Connection, Graph, Processor};
+use audio_graph::{AgNode, Connection, Graph, ProcessContext, Processor};
 
 pub struct ClapPluginProcessor {
     plugin_audio_processor: PluginAudioProcessor<ClapPlugin>,
@@ -55,16 +54,8 @@ impl ClapPluginProcessor {
 }
 
 impl Processor for ClapPluginProcessor {
-    fn process(
-        &mut self,
-        graph: &Graph,
-        node: &AgNode,
-        _: usize,
-        timestamp: &Duration,
-        out_audio_buffers: &mut AudioBlockSequential<f32>,
-        _: &mut [Vec<AgEvent>],
-    ) {
-        self.update_input_events(graph, node, timestamp);
+    fn process(&mut self, ctx: ProcessContext) {
+        self.update_input_events(ctx.graph, ctx.node, ctx.timestamp);
 
         let processor = if self.plugin_audio_processor.is_started() {
             self.plugin_audio_processor.as_started_mut()
@@ -82,7 +73,7 @@ impl Processor for ClapPluginProcessor {
 
         let mut audio_outputs =
             self.audio_ports
-                .with_output_buffers(out_audio_buffers.channels_mut().map(|channel| {
+                .with_output_buffers(ctx.out_audio_buffers.channels_mut().map(|channel| {
                     AudioPortBuffer {
                         latency: 0,
                         channels: AudioPortBufferType::f32_output_only(std::iter::once(channel)),
