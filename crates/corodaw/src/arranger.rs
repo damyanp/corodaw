@@ -61,11 +61,8 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             .inner_margin(Margin::same(5))
             .outer_margin(Margin::same(0))
             .show(ui, |ui| {
-                ui.vertical_centered_justified(|ui| {
-                    ui.set_min_size(ui.available_size());
-                    ui.horizontal(|ui| {
-                        ui.take_available_width();
-
+                ui.horizontal_centered(|ui| {
+                    ui.vertical_centered(|ui| {
                         mute_solo_arm_buttons(&mut messages, entity, state, ui);
 
                         ui.add_space(1.0);
