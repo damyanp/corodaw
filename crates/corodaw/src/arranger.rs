@@ -53,7 +53,9 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             .get(index)
             .expect("ChannelOrder index out of bounds");
 
-        let (entity, name, state, gain_control, audio_view) = self.channels.get(entity).unwrap();
+        let Ok((entity, name, state, gain_control, audio_view)) = self.channels.get(entity) else {
+            return;
+        };
 
         let mut messages: Vec<ChannelMessage> = Vec::new();
 
@@ -135,6 +137,29 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
 
     fn move_channel(&mut self, index: usize, destination: usize) {
         self.channel_order.as_mut().move_channel(index, destination);
+    }
+
+    fn show_channel_menu(&mut self, index: usize, ui: &mut Ui) {
+        let entity = *self
+            .channel_order
+            .as_ref()
+            .channel_order
+            .get(index)
+            .expect("ChannelOrder index out of bounds");
+
+        let (_entity, name, _state, _gain_control, _audio_view) =
+            self.channels.get(entity).unwrap();
+
+        ui.label(name.as_str());
+        ui.separator();
+        if ui.button("Add Channel").clicked() {
+            self.on_add_channel((index + 1).min(self.num_channels()));
+        }
+    }
+
+    fn show_strip_menu(&mut self, _: usize, ui: &mut Ui) {
+        // nothing
+        ui.close();
     }
 }
 

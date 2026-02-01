@@ -88,6 +88,19 @@ impl App {
                 };
                 self.0.channels.insert(destination, channel);
             }
+
+            fn show_channel_menu(&mut self, index: usize, ui: &mut Ui) {
+                let number = self.0.channels[index];
+                ui.label(format!("Channel {number}"));
+                ui.separator();
+                if ui.button("Add channel").clicked() {
+                    self.on_add_channel(index);
+                }
+            }
+
+            fn show_strip_menu(&mut self, _: usize, ui: &mut Ui) {
+                ui.label("Context menu for strip");
+            }
         }
 
         ArrangerWidget::new("arranger").show(TestArranger(self), ui);
@@ -119,12 +132,12 @@ impl eframe::App for App {
             ui.heading("Corodaw widgets");
 
             CollapsingHeader::new("Arranger")
-                .default_open(false)
+                .default_open(true)
                 .show(ui, |ui| {
                     self.test_arranger(ui);
                 });
             CollapsingHeader::new("Meters")
-                .default_open(true)
+                .default_open(false)
                 .show(ui, |ui| {
                     self.test_meters(ui);
                 });

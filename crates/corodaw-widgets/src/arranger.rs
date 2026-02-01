@@ -28,6 +28,8 @@ pub trait ArrangerDataProvider {
     fn show_strip(&mut self, index: usize, ui: &mut Ui);
     fn on_add_channel(&mut self, index: usize);
     fn move_channel(&mut self, index: usize, destination: usize);
+    fn show_channel_menu(&mut self, index: usize, ui: &mut Ui);
+    fn show_strip_menu(&mut self, index: usize, ui: &mut Ui);
 }
 
 pub struct ArrangerWidget {
@@ -149,15 +151,26 @@ impl ArrangerWidget {
                 dropped = true;
             }
 
-            ui.scope_builder(
-                UiBuilder::new()
-                    .max_rect(strip_rect)
-                    .layout(Layout::centered_and_justified(Direction::TopDown)),
-                |ui| {
-                    ui.take_available_space();
-                    data.show_strip(i, ui);
-                },
-            );
+            r.context_menu(|ui| {
+                data.show_channel_menu(i, ui);
+            });
+
+            let r = ui
+                .scope_builder(
+                    UiBuilder::new()
+                        .max_rect(strip_rect)
+                        .layout(Layout::centered_and_justified(Direction::TopDown))
+                        .sense(Sense::all()),
+                    |ui| {
+                        ui.take_available_space();
+                        data.show_strip(i, ui);
+                    },
+                )
+                .response;
+
+            r.context_menu(|ui| {
+                data.show_strip_menu(i, ui);
+            });
 
             channels_rect.set_top(channel_rect.bottom() + gap);
             strips_rect.set_top(strip_rect.bottom() + gap);
