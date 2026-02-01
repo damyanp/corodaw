@@ -4,7 +4,7 @@ use crossbeam::channel::{self, Receiver, Sender};
 
 use audio_graph::{Connection, Node, ProcessContext, Processor, StateValue};
 
-use crate::builtin::vu::VuMeter;
+use crate::builtin::peak::PeakMeter;
 
 #[derive(Debug)]
 pub struct GainControl {
@@ -42,7 +42,7 @@ impl GainControl {
 struct GainControlProcessor {
     receiver: Receiver<f32>,
     gain: f32,
-    vu_meters: Vec<VuMeter>,
+    vu_meters: Vec<PeakMeter>,
 }
 
 impl Processor for GainControlProcessor {
