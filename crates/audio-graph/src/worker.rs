@@ -15,15 +15,21 @@ use fixedbitset::FixedBitSet;
 use crate::{AgEvent, node};
 
 mod buffers;
-pub use crate::worker::buffers::{AudioBuffers, EventBuffers};
+pub use buffers::{AudioBuffers, EventBuffers};
+
+mod state;
+use state::StateBuffer;
+pub use state::{StateBufferGuard, StateTracker, StateValue};
 
 pub struct ProcessContext<'a> {
     pub graph: &'a Graph,
     pub node: &'a AgNode,
     pub num_frames: usize,
+    pub sample_rate: u32,
     pub timestamp: &'a Duration,
     pub out_audio_buffers: &'a mut AudioBlockSequential<f32>,
     pub out_event_buffers: &'a mut [Vec<AgEvent>],
+    pub state: &'a mut StateBuffer,
 }
 
 pub trait Processor: Send + Debug {
@@ -92,7 +98,14 @@ impl Graph {
         &self.nodes[&node_entity]
     }
 
-    pub fn process(&mut self, node_entity: Entity, num_frames: usize, timestamp: &Duration) {
+    pub fn process(
+        &mut self,
+        node_entity: Entity,
+        num_frames: usize,
+        sample_rate: u32,
+        timestamp: &Duration,
+        state: &mut StateBuffer,
+    ) {
         let ordered = self.build_breadth_first_traversal(node_entity);
         for node_entity in ordered {
             let node = self.get_node(node_entity);
@@ -113,9 +126,11 @@ impl Graph {
                 graph: self,
                 node,
                 num_frames,
+                sample_rate,
                 timestamp,
                 out_audio_buffers: &mut out_audio_buffers,
                 out_event_buffers,
+                state,
             });
         }
     }

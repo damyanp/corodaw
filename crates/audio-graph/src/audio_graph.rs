@@ -4,9 +4,9 @@ use bevy_ecs::prelude::*;
 use audio_blocks::{AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, AudioBlockOpsMut};
 
 use crate::{
-    Processor,
+    Processor, StateBufferGuard,
     node::{self, OutputNode},
-    worker::Graph,
+    worker::{Graph, StateTracker},
 };
 use std::{
     cell::RefCell,
@@ -17,12 +17,14 @@ use std::{
 pub struct AudioGraph {
     modified: bool,
     sender: Sender<AudioGraphMessage>,
+    state_tracker: StateTracker,
 }
 
 /// This is the part of the audio graph that does audio processing, so it lives
 /// on the audio thread.
 pub struct AudioGraphWorker {
     receiver: Receiver<AudioGraphMessage>,
+    state_tracker: StateTracker,
     num_channels: u16,
     sample_rate: u32,
     pub(crate) graph: Graph,
@@ -38,23 +40,30 @@ enum AudioGraphMessage {
 impl AudioGraph {
     pub fn new() -> (AudioGraph, AudioGraphWorker) {
         let (sender, receiver) = channel();
+        let state_tracker = StateTracker::default();
 
         let audio_graph = AudioGraph {
             modified: false,
             sender,
+            state_tracker: state_tracker.clone(),
         };
 
-        (audio_graph, AudioGraphWorker::new(receiver))
+        (audio_graph, AudioGraphWorker::new(receiver, state_tracker))
     }
 
     pub fn set_processor(&self, entity: Entity, processor: Box<dyn Processor>) {
         self.sender
             .send(AudioGraphMessage::SetProcessor(entity, processor));
     }
+
+    pub fn get_state_buffer(&mut self) -> StateBufferGuard {
+        self.state_tracker.get_buffer()
+    }
 }
 
 pub(crate) fn update(
-    audio_graph: NonSendMut<AudioGraph>,
+    mut commands: Commands,
+    mut audio_graph: NonSendMut<AudioGraph>,
     mut changed_nodes: Query<(Entity, Ref<node::Node>)>,
     output_node: Option<Single<(Entity, &OutputNode)>>,
 ) {
@@ -77,9 +86,10 @@ pub(crate) fn update(
 }
 
 impl AudioGraphWorker {
-    fn new(receiver: Receiver<AudioGraphMessage>) -> Self {
+    fn new(receiver: Receiver<AudioGraphMessage>, state_tracker: StateTracker) -> Self {
         Self {
             receiver,
+            state_tracker,
             graph: Default::default(),
             output: None,
             num_channels: 0,
@@ -103,11 +113,19 @@ impl AudioGraphWorker {
             }
         }
 
+        let mut buffer = self.state_tracker.get_buffer_mut();
+
         let num_frames = data.len() / self.num_channels as usize;
         let mut block = AudioBlockInterleavedViewMut::from_slice(data, self.num_channels);
 
         if let Some(output) = self.output {
-            self.graph.process(output, num_frames, &timestamp);
+            self.graph.process(
+                output,
+                num_frames,
+                self.sample_rate,
+                &timestamp,
+                &mut buffer,
+            );
 
             let output_node = self.graph.get_node(output);
             let output_buffers = output_node.output_audio_buffers.get();

@@ -12,7 +12,9 @@ pub use node::{
     Connection, Node, OutputNode, connect_audio, connect_event, disconnect_event_input_channel,
     set_processor,
 };
-pub use worker::{AgNode, Graph, ProcessContext, Processor};
+pub use worker::{
+    AgNode, Graph, ProcessContext, Processor, StateBufferGuard, StateTracker, StateValue,
+};
 
 pub struct AudioGraphPlugin;
 impl Plugin for AudioGraphPlugin {

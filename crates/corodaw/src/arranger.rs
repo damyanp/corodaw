@@ -1,18 +1,21 @@
+use audio_graph::{StateBufferGuard, StateValue};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
 use corodaw_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{
-    Button, Color32, Frame, Id, Key, Label, Margin, Popup, RichText, Sense, Slider, Stroke,
-    TextEdit, Ui,
+    Button, Color32, Frame, Id, Key, Label, Margin, Popup, ProgressBar, RichText, Sense, Slider,
+    Stroke, TextEdit, Ui,
 };
+use eframe::emath;
 use project::{
-    AvailablePlugin, ChannelAudioView, ChannelControl, ChannelData, ChannelMessage, ChannelOrder,
-    ChannelState,
+    AvailablePlugin, ChannelAudioView, ChannelControl, ChannelData, ChannelGainControl,
+    ChannelMessage, ChannelOrder, ChannelState,
 };
 
 #[derive(SystemParam)]
+#[expect(clippy::type_complexity)]
 pub struct ArrangerData<'w, 's> {
     commands: Commands<'w, 's>,
     channels: Query<
@@ -22,11 +25,13 @@ pub struct ArrangerData<'w, 's> {
             Entity,
             &'static Name,
             &'static ChannelState,
+            Option<&'static ChannelGainControl>,
             Option<&'static ChannelAudioView>,
         ),
     >,
     available_plugins: Query<'w, 's, &'static AvailablePlugin>,
     channel_order: Single<'w, 's, &'static mut ChannelOrder>,
+    state_buffer: NonSend<'w, StateBufferGuard>,
     messages: MessageWriter<'w, ChannelMessage>,
 }
 
@@ -47,7 +52,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             .get(index)
             .expect("ChannelOrder index out of bounds");
 
-        let (entity, name, state, audio_view) = self.channels.get(entity).unwrap();
+        let (entity, name, state, gain_control, audio_view) = self.channels.get(entity).unwrap();
 
         let mut messages: Vec<ChannelMessage> = Vec::new();
 
@@ -67,7 +72,13 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                         show_channel_name_editor(&mut messages, entity, name, ui);
                         ui.add_space(1.0);
 
-                        show_gain_slider(&mut messages, entity, state, ui);
+                        show_gain_slider(
+                            &mut messages,
+                            entity,
+                            state,
+                            ui,
+                            gain_control.and_then(|gc| self.state_buffer.get(&gc.0.entity)),
+                        );
                     });
                     ui.horizontal(|ui| {
                         let input_button_response;
@@ -191,18 +202,37 @@ fn show_gain_slider(
     entity: Entity,
     state: &ChannelState,
     ui: &mut Ui,
+    vu: Option<&StateValue>,
 ) {
     let mut gain_value = state.gain_value;
-    ui.spacing_mut().slider_width = ui.available_size().x;
-    if ui
-        .add(Slider::new(&mut gain_value, 0.0..=1.0).show_value(false))
-        .changed()
-    {
-        messages.push(ChannelMessage {
-            channel: entity,
-            control: ChannelControl::SetGain(gain_value),
-        });
-    }
+    ui.vertical(|ui| {
+        ui.spacing_mut().slider_width = ui.available_size().x;
+        if ui
+            .add(Slider::new(&mut gain_value, 0.0..=1.0).show_value(false))
+            .changed()
+        {
+            messages.push(ChannelMessage {
+                channel: entity,
+                control: ChannelControl::SetGain(gain_value),
+            });
+        }
+
+        if let Some(vu) = vu {
+            let map =
+                |vu: f32| emath::remap(20.0 * (vu.max(1e-6)).log10(), -120.0..=4.0, 0.0..=1.0);
+
+            match vu {
+                StateValue::None => (),
+                StateValue::Mono(v) => {
+                    ui.add(ProgressBar::new(map(*v)));
+                }
+                StateValue::Stereo(l, r) => {
+                    ui.add(ProgressBar::new(map(*l)));
+                    ui.add(ProgressBar::new(map(*r)));
+                }
+            }
+        }
+    });
 }
 
 fn show_gui_button(

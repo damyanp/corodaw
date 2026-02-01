@@ -242,7 +242,7 @@ pub struct ChannelAudioView {
 
 #[derive(Component)]
 #[require(ChannelState)]
-pub struct ChannelGainControl(GainControl);
+pub struct ChannelGainControl(pub GainControl);
 
 impl ChannelAudioView {
     pub fn has_gui(&self) -> bool {

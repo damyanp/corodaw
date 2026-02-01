@@ -1,5 +1,6 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
+use audio_graph::{AudioGraph, StateBufferGuard};
 use bevy_ecs::system::RunSystemOnce;
 use eframe::{
     UserEvent,
@@ -46,11 +47,16 @@ impl eframe::App for Corodaw {
                 ui.disable();
             }
 
-            self.app
-                .borrow_mut()
-                .world_mut()
-                .run_system_once_with(arranger_ui, ui)
-                .unwrap();
+            let mut app = self.app.borrow_mut();
+            let world = app.world_mut();
+
+            world.remove_non_send_resource::<StateBufferGuard>();
+            let state_buffer = world
+                .non_send_resource_mut::<AudioGraph>()
+                .get_state_buffer();
+            world.insert_non_send_resource(state_buffer);
+
+            world.run_system_once_with(arranger_ui, ui).unwrap();
         });
     }
 }

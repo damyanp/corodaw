@@ -1131,6 +1131,7 @@ dependencies = [
 name = "corodaw"
 version = "0.1.0"
 dependencies = [
+ "audio-graph",
  "bevy_app",
  "bevy_ecs",
  "corodaw-widgets",

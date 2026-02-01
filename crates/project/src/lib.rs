@@ -9,7 +9,8 @@ mod project;
 
 pub use app::make_app;
 pub use channel::{
-    ChannelAudioView, ChannelControl, ChannelData, ChannelMessage, ChannelState, new_channel,
+    ChannelAudioView, ChannelControl, ChannelData, ChannelGainControl, ChannelMessage,
+    ChannelState, new_channel,
 };
 pub use found_plugin::AvailablePlugin;
 pub use project::{ChannelOrder, Project};

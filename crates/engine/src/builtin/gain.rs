@@ -1,7 +1,10 @@
+use audio_blocks::AudioBlock;
 use bevy_ecs::prelude::*;
 use crossbeam::channel::{self, Receiver, Sender};
 
-use audio_graph::{Connection, Node, ProcessContext, Processor};
+use audio_graph::{Connection, Node, ProcessContext, Processor, StateValue};
+
+use crate::builtin::vu::VuMeter;
 
 #[derive(Debug)]
 pub struct GainControl {
@@ -22,6 +25,7 @@ impl GainControl {
                 Box::new(GainControlProcessor {
                     receiver,
                     gain: initial_gain,
+                    vu_meters: Default::default(),
                 }),
             );
         });
@@ -38,13 +42,23 @@ impl GainControl {
 struct GainControlProcessor {
     receiver: Receiver<f32>,
     gain: f32,
+    vu_meters: Vec<VuMeter>,
 }
 
 impl Processor for GainControlProcessor {
     fn process(&mut self, ctx: ProcessContext) {
         self.process_messages();
 
-        for (output_channel, output_buffer) in ctx.out_audio_buffers.channels_mut().enumerate() {
+        let num_channels = ctx.out_audio_buffers.num_channels();
+        self.vu_meters
+            .resize_with(num_channels as usize, Default::default);
+
+        for ((output_channel, output_buffer), vu_meter) in ctx
+            .out_audio_buffers
+            .channels_mut()
+            .enumerate()
+            .zip(self.vu_meters.iter_mut())
+        {
             output_buffer.fill(0.0);
 
             for Connection {
@@ -63,7 +77,16 @@ impl Processor for GainControlProcessor {
                     }
                 }
             }
+
+            vu_meter.update(ctx.sample_rate, output_buffer.iter().as_slice());
         }
+
+        let value = match self.vu_meters.len() {
+            0 => StateValue::None,
+            1 => StateValue::Mono(self.vu_meters[0].value()),
+            _ => StateValue::Stereo(self.vu_meters[0].value(), self.vu_meters[1].value()),
+        };
+        ctx.state.insert(ctx.node.entity, value);
     }
 }
 
