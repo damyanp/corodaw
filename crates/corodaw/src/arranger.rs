@@ -3,12 +3,12 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
 use corodaw_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
+use corodaw_widgets::meter::Meter;
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{
-    Button, Color32, Frame, Id, Key, Label, Margin, Popup, ProgressBar, RichText, Sense, Slider,
-    Stroke, TextEdit, Ui,
+    Button, Color32, Frame, Id, Key, Label, Margin, Popup, RichText, Sense, Slider, Stroke,
+    TextEdit, Ui,
 };
-use eframe::emath;
 use project::{
     AvailablePlugin, ChannelAudioView, ChannelControl, ChannelData, ChannelGainControl,
     ChannelMessage, ChannelOrder, ChannelState,
@@ -217,21 +217,20 @@ fn show_gain_slider(
             });
         }
 
-        if let Some(vu) = vu {
-            let map =
-                |vu: f32| emath::remap(20.0 * (vu.max(1e-6)).log10(), -120.0..=4.0, 0.0..=1.0);
-
-            match vu {
-                StateValue::None => (),
-                StateValue::Mono(v) => {
-                    ui.add(ProgressBar::new(map(*v)));
-                }
-                StateValue::Stereo(l, r) => {
-                    ui.add(ProgressBar::new(map(*l)));
-                    ui.add(ProgressBar::new(map(*r)));
+        ui.horizontal(|ui| {
+            if let Some(vu) = vu {
+                match vu {
+                    StateValue::None => (),
+                    StateValue::Mono(v) => {
+                        ui.add(Meter::new(*v));
+                    }
+                    StateValue::Stereo(l, r) => {
+                        ui.add(Meter::new(*l));
+                        ui.add(Meter::new(*r));
+                    }
                 }
             }
-        }
+        });
     });
 }
 
