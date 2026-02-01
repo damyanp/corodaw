@@ -137,6 +137,56 @@ impl StateBuffer {
 mod test {
     use super::*;
 
+    fn entity(id: u32) -> Entity {
+        Entity::from_raw_u32(id).expect("test entity id should be valid")
+    }
+
     #[test]
-    fn test_state_tracker() {}
+    fn reader_starts_empty() {
+        let (mut reader, _writer) = state_tracker();
+
+        reader.swap_buffers();
+
+        assert_eq!(reader.get(&entity(1)), None);
+    }
+
+    #[test]
+    fn reader_sees_written_values_after_swaps() {
+        let (mut reader, mut writer) = state_tracker();
+
+        writer.insert(entity(1), StateValue::Mono(0.5));
+        writer.insert(entity(2), StateValue::Stereo(0.1, 0.2));
+
+        writer.swap_buffers();
+        reader.swap_buffers();
+
+        assert_eq!(reader.get(&entity(1)), Some(&StateValue::Mono(0.5)));
+        assert_eq!(reader.get(&entity(2)), Some(&StateValue::Stereo(0.1, 0.2)));
+    }
+
+    #[test]
+    fn reader_does_not_see_values_without_writer_swap() {
+        let (mut reader, mut writer) = state_tracker();
+
+        writer.insert(entity(3), StateValue::Mono(1.0));
+
+        reader.swap_buffers();
+
+        assert_eq!(reader.get(&entity(3)), None);
+    }
+
+    #[test]
+    fn latest_write_wins_before_reader_swap() {
+        let (mut reader, mut writer) = state_tracker();
+
+        writer.insert(entity(4), StateValue::Mono(0.25));
+        writer.swap_buffers();
+
+        writer.insert(entity(4), StateValue::Mono(0.75));
+        writer.swap_buffers();
+
+        reader.swap_buffers();
+
+        assert_eq!(reader.get(&entity(4)), Some(&StateValue::Mono(0.75)));
+    }
 }
