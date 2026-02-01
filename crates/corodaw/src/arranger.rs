@@ -6,9 +6,10 @@ use corodaw_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
 use corodaw_widgets::meter::Meter;
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{
-    Button, Color32, Frame, Id, Key, Label, Margin, Popup, RichText, Sense, Slider, Stroke,
-    TextEdit, Ui,
+    Align, Button, Color32, Frame, Id, Key, Label, Layout, Margin, Popup, RichText, Sense, Slider,
+    Stroke, StrokeKind, TextEdit, Ui, vec2,
 };
+use egui_extras::{Size, StripBuilder};
 use project::{
     AvailablePlugin, ChannelAudioView, ChannelControl, ChannelData, ChannelGainControl,
     ChannelMessage, ChannelOrder, ChannelState,
@@ -56,47 +57,65 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
 
         let mut messages: Vec<ChannelMessage> = Vec::new();
 
+        let peaks = gain_control.and_then(|gc| self.state_reader.get(&gc.0.entity));
+
         Frame::new()
             .stroke(Stroke::new(1.0, Color32::WHITE))
             .inner_margin(Margin::same(5))
             .outer_margin(Margin::same(0))
             .show(ui, |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.vertical_centered(|ui| {
-                        mute_solo_arm_buttons(&mut messages, entity, state, ui);
+                StripBuilder::new(ui)
+                    .size(Size::remainder())
+                    .size(Size::exact(20.0))
+                    .horizontal(|mut strip| {
+                        strip.strip(|builder| {
+                            builder
+                                .size(Size::remainder())
+                                .size(Size::remainder())
+                                .vertical(|mut strip| {
+                                    strip.cell(|ui| {
+                                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                                            mute_solo_arm_buttons(&mut messages, entity, state, ui);
+                                            show_channel_name_editor(
+                                                &mut messages,
+                                                entity,
+                                                name,
+                                                ui,
+                                            );
+                                        });
+                                    });
+                                    strip.cell(|ui| {
+                                        ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
+                                            let input_button_response;
 
-                        ui.add_space(1.0);
-                        show_channel_name_editor(&mut messages, entity, name, ui);
-                        ui.add_space(1.0);
+                                            if let Some(audio_view) = audio_view {
+                                                input_button_response = ui.button("🎵");
+                                                show_gui_button(
+                                                    &mut messages,
+                                                    entity,
+                                                    audio_view,
+                                                    ui,
+                                                );
+                                            } else {
+                                                input_button_response = ui.button("?");
+                                            }
 
-                        show_gain_slider(
-                            &mut messages,
-                            entity,
-                            state,
-                            ui,
-                            gain_control.and_then(|gc| self.state_reader.get(&gc.0.entity)),
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        let input_button_response;
+                                            Popup::menu(&input_button_response).show(|ui| {
+                                                show_available_plugins_menu(
+                                                    &mut self.commands,
+                                                    entity,
+                                                    self.available_plugins,
+                                                    ui,
+                                                );
+                                            });
 
-                        if let Some(audio_view) = audio_view {
-                            input_button_response = ui.button("🎵");
-                            show_gui_button(&mut messages, entity, audio_view, ui);
-                        } else {
-                            input_button_response = ui.button("?");
-                        }
-
-                        Popup::menu(&input_button_response).show(|ui| {
-                            show_available_plugins_menu(
-                                &mut self.commands,
-                                entity,
-                                self.available_plugins,
-                                ui,
-                            );
+                                            show_gain_slider(&mut messages, entity, state, ui);
+                                        });
+                                    });
+                                });
                         });
+                        strip.cell(|ui| show_meters(peaks, ui));
                     });
-                });
             });
 
         self.messages.write_batch(messages);
@@ -180,12 +199,18 @@ fn show_channel_name_editor(
             edit_value = None;
         }
     } else {
-        let response = ui.add(Label::new(name.as_str()).sense(Sense::click()));
-        if response.clicked() {
-            edit_value = Some(name.as_str().to_owned());
-            select_all = true;
-            ui.ctx().memory_mut(|m| m.request_focus(name_edit_id));
-        }
+        ui.with_layout(Layout::top_down_justified(Align::Min), |ui| {
+            let response = ui.add(
+                Label::new(name.as_str())
+                    .sense(Sense::click())
+                    .wrap_mode(eframe::egui::TextWrapMode::Truncate),
+            );
+            if response.clicked() {
+                edit_value = Some(name.as_str().to_owned());
+                select_all = true;
+                ui.ctx().memory_mut(|m| m.request_focus(name_edit_id));
+            }
+        });
     }
 
     ui.ctx().data_mut(|d| {
@@ -199,7 +224,6 @@ fn show_gain_slider(
     entity: Entity,
     state: &ChannelState,
     ui: &mut Ui,
-    vu: Option<&StateValue>,
 ) {
     let mut gain_value = state.gain_value;
     ui.vertical(|ui| {
@@ -213,21 +237,28 @@ fn show_gain_slider(
                 control: ChannelControl::SetGain(gain_value),
             });
         }
+    });
+}
 
-        ui.horizontal(|ui| {
-            if let Some(vu) = vu {
-                match vu {
-                    StateValue::None => (),
-                    StateValue::Mono(v) => {
-                        ui.add(Meter::new(*v));
-                    }
-                    StateValue::Stereo(l, r) => {
-                        ui.add(Meter::new(*l));
-                        ui.add(Meter::new(*r));
-                    }
-                }
-            }
-        });
+fn show_meters(peaks: Option<&StateValue>, ui: &mut Ui) {
+    ui.painter().rect_stroke(
+        ui.available_rect_before_wrap(),
+        0.0,
+        Stroke::new(1.0, Color32::RED),
+        StrokeKind::Inside,
+    );
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
+
+        let (l, r) = match peaks.unwrap_or(&StateValue::None) {
+            StateValue::None => (0.0, 0.0),
+            StateValue::Mono(v) => (*v, *v),
+            StateValue::Stereo(l, r) => (*l, *r),
+        };
+
+        let h = ui.available_height();
+        ui.add(Meter::new(l).height(h));
+        ui.add(Meter::new(r).height(h));
     });
 }
 
