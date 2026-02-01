@@ -19,7 +19,7 @@ pub use buffers::{AudioBuffers, EventBuffers};
 
 mod state;
 use state::StateBuffer;
-pub use state::{StateBufferGuard, StateTracker, StateValue};
+pub use state::{StateReader, StateValue, StateWriter, state_tracker};
 
 pub struct ProcessContext<'a> {
     pub graph: &'a Graph,

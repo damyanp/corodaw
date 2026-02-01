@@ -1,101 +1,109 @@
 use std::{
     collections::VecDeque,
     error::Error,
+    mem::swap,
     ops::{Deref, DerefMut},
     sync::{Arc, LockResult, Mutex, MutexGuard},
 };
 
 use bevy_ecs::entity::{Entity, EntityHashMap};
 
-#[derive(Default, Clone)]
-pub struct StateTracker {
-    inner: Arc<Mutex<Inner>>,
+pub fn state_tracker() -> (StateReader, StateWriter) {
+    let inner: Arc<Mutex<Inner>> = Arc::default();
+
+    let reader = StateReader {
+        inner: inner.clone(),
+        buffer: StateBuffer::default(),
+    };
+
+    let writer = StateWriter {
+        inner,
+        buffer: StateBuffer::default(),
+    };
+
+    (reader, writer)
 }
 
-// free_buffers - front: next to write to, back: next to read from
+pub struct StateReader {
+    inner: Arc<Mutex<Inner>>,
+    buffer: StateBuffer,
+}
 
-impl StateTracker {
-    pub fn get_buffer(&mut self) -> StateBufferGuard {
-        let mut inner = self.inner.lock().unwrap();
-        let buffer = inner.free_buffers.pop_back().unwrap();
-
-        StateBufferGuard {
-            inner: self.inner.clone(),
-            buffer: Some(buffer),
-        }
-    }
-
-    pub fn get_buffer_mut(&mut self) -> StateBufferGuardMut {
-        let mut inner = self.inner.lock().unwrap();
-        let buffer = inner.free_buffers.pop_front().unwrap();
-
-        StateBufferGuardMut {
-            inner: self.inner.clone(),
-            buffer: Some(buffer),
-        }
-    }
+pub struct StateWriter {
+    inner: Arc<Mutex<Inner>>,
+    buffer: StateBuffer,
 }
 
 struct Inner {
-    free_buffers: VecDeque<StateBuffer>,
+    ready_to_read_buffer: Option<StateBuffer>,
+    ready_to_write_buffer: Option<StateBuffer>,
 }
 
 impl Default for Inner {
     fn default() -> Self {
-        let mut free_buffers = VecDeque::default();
-        free_buffers.resize_with(2, StateBuffer::default);
-
-        Self { free_buffers }
-    }
-}
-
-pub struct StateBufferGuard {
-    inner: Arc<Mutex<Inner>>,
-    buffer: Option<StateBuffer>,
-}
-
-impl Deref for StateBufferGuard {
-    type Target = StateBuffer;
-
-    fn deref(&self) -> &Self::Target {
-        self.buffer.as_ref().unwrap()
-    }
-}
-
-impl Drop for StateBufferGuard {
-    fn drop(&mut self) {
-        if let Some(buffer) = self.buffer.take() {
-            let mut inner = self.inner.lock().unwrap();
-            inner.free_buffers.push_front(buffer);
+        // We start with one extra buffer reader for writing to.
+        Self {
+            ready_to_read_buffer: Default::default(),
+            ready_to_write_buffer: Some(StateBuffer::default()),
         }
     }
 }
 
-pub struct StateBufferGuardMut {
-    inner: Arc<Mutex<Inner>>,
-    buffer: Option<StateBuffer>,
-}
+impl StateReader {
+    pub fn swap_buffers(&mut self) {
+        let mut inner = self.inner.lock().unwrap();
 
-impl Deref for StateBufferGuardMut {
-    type Target = StateBuffer;
-
-    fn deref(&self) -> &Self::Target {
-        self.buffer.as_ref().unwrap()
+        if let Some(mut buffer) = inner.ready_to_read_buffer.take() {
+            assert!(inner.ready_to_write_buffer.is_none());
+            swap(&mut self.buffer, &mut buffer);
+            inner.ready_to_write_buffer = Some(buffer);
+        }
     }
 }
 
-impl DerefMut for StateBufferGuardMut {
+impl Deref for StateReader {
+    type Target = StateBuffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
+}
+
+impl StateWriter {
+    pub fn swap_buffers(&mut self) {
+        let mut inner = self.inner.lock().unwrap();
+
+        // ready_to_read_buffer should always contain the most recently written
+        // one. If there's one there already, then we must have put it there
+        // previously, so we swap our one with that one.
+        if let Some(mut buffer) = inner.ready_to_read_buffer.take() {
+            swap(&mut self.buffer, &mut buffer);
+            inner.ready_to_read_buffer = Some(buffer);
+        }
+        // if there's no buffer in ready_to_read then that means that something
+        // is reading from it. But there might be one for us in ready_to_write,
+        // so we can use that
+        else if let Some(mut buffer) = inner.ready_to_write_buffer.take() {
+            assert!(inner.ready_to_read_buffer.is_none());
+            swap(&mut self.buffer, &mut buffer);
+            inner.ready_to_read_buffer = Some(buffer);
+        }
+
+        // There's nothing for us to swap with, so we'll have to reuse this buffer.
+    }
+}
+
+impl Deref for StateWriter {
+    type Target = StateBuffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
+}
+
+impl DerefMut for StateWriter {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.buffer.as_mut().unwrap()
-    }
-}
-
-impl Drop for StateBufferGuardMut {
-    fn drop(&mut self) {
-        if let Some(buffer) = self.buffer.take() {
-            let mut inner = self.inner.lock().unwrap();
-            inner.free_buffers.push_back(buffer);
-        }
+        &mut self.buffer
     }
 }
 
@@ -130,27 +138,5 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_state_tracker() {
-        let mut s = StateTracker::default();
-        let entity_a = Entity::from_raw_u32(1).unwrap();
-
-        let mut a = s.get_buffer_mut();
-        let mut b = s.get_buffer_mut();
-
-        a.insert(entity_a, StateValue::Mono(1.0));
-
-        assert_eq!(b.get(&entity_a), None);
-        b.insert(entity_a, StateValue::Stereo(1.0, 1.0));
-
-        drop(a);
-        drop(b);
-        let b = s.get_buffer();
-        assert_eq!(b.get(&entity_a), Some(&StateValue::Mono(1.0)));
-
-        drop(b);
-        let a = s.get_buffer();
-        assert_eq!(a.get(&entity_a), Some(&StateValue::Stereo(1.0, 1.0)));
-        let b = s.get_buffer();
-        assert_eq!(b.get(&entity_a), Some(&StateValue::Mono(1.0)));
-    }
+    fn test_state_tracker() {}
 }

@@ -13,15 +13,18 @@ pub use node::{
     set_processor,
 };
 pub use worker::{
-    AgNode, Graph, ProcessContext, Processor, StateBufferGuard, StateTracker, StateValue,
+    AgNode, Graph, ProcessContext, Processor, StateReader, StateValue, StateWriter, state_tracker,
 };
 
 pub struct AudioGraphPlugin;
 impl Plugin for AudioGraphPlugin {
     fn build(&self, app: &mut App) {
-        let (audio_graph, audio_graph_worker) = AudioGraph::new();
+        let (state_reader, state_writer) = state_tracker();
+
+        let (audio_graph, audio_graph_worker) = AudioGraph::new(state_writer);
         app.insert_non_send_resource(audio_graph)
             .insert_non_send_resource(audio_graph_worker)
+            .insert_non_send_resource(state_reader)
             .add_systems(Update, audio_graph::update);
     }
 }

@@ -1,4 +1,4 @@
-use audio_graph::{StateBufferGuard, StateValue};
+use audio_graph::{StateReader, StateValue};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
@@ -31,7 +31,7 @@ pub struct ArrangerData<'w, 's> {
     >,
     available_plugins: Query<'w, 's, &'static AvailablePlugin>,
     channel_order: Single<'w, 's, &'static mut ChannelOrder>,
-    state_buffer: NonSend<'w, StateBufferGuard>,
+    state_reader: NonSend<'w, StateReader>,
     messages: MessageWriter<'w, ChannelMessage>,
 }
 
@@ -77,7 +77,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                             entity,
                             state,
                             ui,
-                            gain_control.and_then(|gc| self.state_buffer.get(&gc.0.entity)),
+                            gain_control.and_then(|gc| self.state_reader.get(&gc.0.entity)),
                         );
                     });
                     ui.horizontal(|ui| {
