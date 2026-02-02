@@ -108,7 +108,11 @@ impl ClapPluginProcessor {
             src, src_channel, ..
         } = node.desc.event_channels.connections[0];
 
-        let events = &graph.get_node(src).output_event_buffers.get()[src_channel as usize];
+        let Some(node) = graph.get_node(src) else {
+            return;
+        };
+
+        let events = &node.output_event_buffers.get()[src_channel as usize];
 
         for event in events {
             let mut data: [u8; 3] = Default::default();

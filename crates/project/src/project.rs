@@ -25,4 +25,11 @@ impl ChannelOrder {
         };
         self.channel_order.insert(destination, channel);
     }
+
+    pub fn delete_channel(&self, commands: &mut Commands, index: usize) {
+        let channel = self.channel_order[index];
+        if let Ok(mut entity) = commands.get_spawned_entity(channel) {
+            entity.despawn();
+        }
+    }
 }

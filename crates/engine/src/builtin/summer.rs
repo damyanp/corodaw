@@ -34,7 +34,9 @@ impl Processor for SummerProcessor {
                 .filter(|c| c.channel == output_channel as u16);
 
             for input in inputs {
-                let input_node = ctx.graph.get_node(input.src);
+                let Some(input_node) = ctx.graph.get_node(input.src) else {
+                    continue;
+                };
                 let input_buffers = input_node.output_audio_buffers.get();
                 let input_buffer = &input_buffers.channel(input.src_channel);
 

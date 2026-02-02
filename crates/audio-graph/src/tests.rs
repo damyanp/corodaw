@@ -344,8 +344,8 @@ impl Processor for EventSink {
     fn process(&mut self, ctx: ProcessContext) {
         for input_connection in &ctx.node.desc.event_channels.connections {
             let input_node = ctx.graph.get_node(input_connection.src);
-            let input_events =
-                &input_node.output_event_buffers.get()[input_connection.src_channel as usize];
+            let input_events = &input_node.unwrap().output_event_buffers.get()
+                [input_connection.src_channel as usize];
 
             self.events
                 .write()

@@ -81,7 +81,13 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub(crate) fn update(&mut self, changed: Vec<(Entity, node::Node)>) {
+    pub(crate) fn update(&mut self, changed: Vec<(Entity, node::Node)>, removed: Vec<Entity>) {
+        if !removed.is_empty() {
+            for node in removed {
+                self.nodes.remove(&node);
+            }
+        }
+
         for (entity, node) in changed {
             match self.nodes.entry(entity) {
                 Entry::Occupied(mut entry) => {
@@ -94,8 +100,8 @@ impl Graph {
         }
     }
 
-    pub fn get_node(&self, node_entity: Entity) -> &AgNode {
-        &self.nodes[&node_entity]
+    pub fn get_node(&self, node_entity: Entity) -> Option<&AgNode> {
+        self.nodes.get(&node_entity)
     }
 
     pub fn process(
@@ -108,7 +114,9 @@ impl Graph {
     ) {
         let ordered = self.build_breadth_first_traversal(node_entity);
         for node_entity in ordered {
-            let node = self.get_node(node_entity);
+            let Some(node) = self.get_node(node_entity) else {
+                continue;
+            };
 
             node.output_audio_buffers.prepare_for_processing(num_frames);
 
@@ -144,7 +152,9 @@ impl Graph {
 
         let mut heap: BinaryHeap<Reverse<Entity>> = BinaryHeap::with_capacity(self.nodes.len());
         for node_entity in reachable.iter() {
-            let node = self.get_node(*node_entity);
+            let Some(node) = self.get_node(*node_entity) else {
+                continue;
+            };
             for input_entity in node.desc.inputs.iter() {
                 if !outputs.contains_key(input_entity) {
                     outputs.insert(*input_entity, Vec::default());
@@ -191,7 +201,9 @@ impl Graph {
         while let Some(node) = stack.pop() {
             if !reachable.contains(&node) {
                 reachable.insert(node);
-                let node = self.get_node(node);
+                let Some(node) = self.get_node(node) else {
+                    continue;
+                };
                 stack.extend_from_slice(node.desc.inputs.as_slice());
             }
         }

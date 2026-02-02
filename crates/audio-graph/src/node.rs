@@ -1,6 +1,11 @@
 #![allow(unused)]
 
-use bevy_ecs::{prelude::*, query::QueryEntityError, world::error::EntityMutableFetchError};
+use bevy_ecs::{
+    lifecycle::HookContext,
+    prelude::*,
+    query::QueryEntityError,
+    world::{DeferredWorld, error::EntityMutableFetchError},
+};
 
 use crate::{AudioGraph, worker::Processor};
 use thiserror::Error;

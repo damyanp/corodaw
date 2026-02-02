@@ -68,7 +68,9 @@ impl Processor for GainControlProcessor {
             } in &ctx.node.desc.audio_channels.connections
             {
                 if *channel == output_channel as u16 {
-                    let input_node = ctx.graph.get_node(*src);
+                    let Some(input_node) = ctx.graph.get_node(*src) else {
+                        continue;
+                    };
                     let input_buffers = input_node.output_audio_buffers.get();
                     let input_buffer = input_buffers.channel(*src_channel);
 

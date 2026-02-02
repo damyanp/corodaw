@@ -1,5 +1,7 @@
 use audio_graph::Connection;
 use bevy_app::prelude::*;
+use bevy_ecs::lifecycle::HookContext;
+use bevy_ecs::world::DeferredWorld;
 use bevy_ecs::{name::Name, prelude::*};
 
 use engine::builtin::{MidiInputNode, Summer};
@@ -154,6 +156,7 @@ fn set_plugin(
     });
 
     if let Some(new_gain_control) = new_gain_control {
+        channel_entity.add_child(new_gain_control.0.entity);
         channel_entity.insert(new_gain_control);
     }
 
@@ -162,6 +165,7 @@ fn set_plugin(
         gui_handle: Default::default(),
     };
 
+    channel_entity.add_child(plugin_node_id);
     channel_entity.insert((channel_audio_view, InputNode(plugin_node_id)));
 }
 
@@ -204,6 +208,10 @@ fn update_channels(
     }
 }
 
+fn on_channel_despawned(mut world: DeferredWorld, context: HookContext) {
+    println!("channel despawned {:?}", context);
+}
+
 #[derive(Component)]
 struct InputNode(pub Entity);
 
@@ -240,9 +248,14 @@ pub struct ChannelAudioView {
     gui_handle: Option<GuiHandle>,
 }
 
-#[derive(Component)]
+#[derive(Component, Debug)]
 #[require(ChannelState)]
 pub struct ChannelGainControl(pub GainControl);
+
+fn on_gain_control_replace(mut world: DeferredWorld, context: HookContext) {
+    let g = world.get::<ChannelGainControl>(context.entity);
+    println!("on_gain_control_replace {:?} - {:?}", context, g);
+}
 
 impl ChannelAudioView {
     pub fn has_gui(&self) -> bool {

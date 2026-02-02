@@ -152,6 +152,12 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
 
         ui.label(name.as_str());
         ui.separator();
+        if ui.button("Delete").clicked() {
+            self.channel_order
+                .as_mut()
+                .delete_channel(&mut self.commands, index);
+        }
+        ui.separator();
         if ui.button("Add Channel").clicked() {
             self.on_add_channel((index + 1).min(self.num_channels()));
         }

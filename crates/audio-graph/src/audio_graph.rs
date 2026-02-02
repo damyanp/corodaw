@@ -4,7 +4,7 @@ use bevy_ecs::prelude::*;
 use audio_blocks::{AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, AudioBlockOpsMut};
 
 use crate::{
-    Processor,
+    Node, Processor,
     node::{self, OutputNode},
     state_tracker,
     worker::{Graph, StateReader, StateWriter},
@@ -32,9 +32,12 @@ pub struct AudioGraphWorker {
 }
 
 enum AudioGraphMessage {
-    ChangedNodes(Vec<(Entity, node::Node)>),
     SetProcessor(Entity, Box<dyn Processor>),
-    SetOutputNode(Option<Entity>),
+    UpdateGraph {
+        changed: Vec<(Entity, Node)>,
+        removed: Vec<Entity>,
+        output_node: Option<Entity>,
+    },
 }
 
 impl AudioGraph {
@@ -59,8 +62,11 @@ pub(crate) fn update(
     mut commands: Commands,
     mut audio_graph: NonSendMut<AudioGraph>,
     mut changed_nodes: Query<(Entity, Ref<node::Node>)>,
+    mut removed_nodes: RemovedComponents<node::Node>,
     output_node: Option<Single<(Entity, &OutputNode)>>,
 ) {
+    let removed = Vec::from_iter(removed_nodes.read());
+
     let mut changed = Vec::default();
 
     for (entity, node) in &mut changed_nodes {
@@ -71,12 +77,11 @@ pub(crate) fn update(
 
     let output_node = output_node.map(|s| s.0);
 
-    audio_graph
-        .sender
-        .send(AudioGraphMessage::ChangedNodes(changed));
-    audio_graph
-        .sender
-        .send(AudioGraphMessage::SetOutputNode(output_node));
+    audio_graph.sender.send(AudioGraphMessage::UpdateGraph {
+        changed,
+        removed,
+        output_node,
+    });
 }
 
 impl AudioGraphWorker {
@@ -99,8 +104,14 @@ impl AudioGraphWorker {
     pub fn tick(&mut self, data: &mut [f32], timestamp: Duration) {
         for message in self.receiver.try_iter() {
             match message {
-                AudioGraphMessage::ChangedNodes(nodes) => self.graph.update(nodes),
-                AudioGraphMessage::SetOutputNode(output) => self.output = output,
+                AudioGraphMessage::UpdateGraph {
+                    changed,
+                    removed,
+                    output_node,
+                } => {
+                    self.graph.update(changed, removed);
+                    self.output = output_node;
+                }
                 AudioGraphMessage::SetProcessor(entity, processor) => {
                     self.graph.processors.borrow_mut().set(entity, processor);
                 }
@@ -121,33 +132,34 @@ impl AudioGraphWorker {
                 &mut self.state_writer,
             );
 
-            let output_node = self.graph.get_node(output);
-            let output_buffers = output_node.output_audio_buffers.get();
+            if let Some(output_node) = self.graph.get_node(output) {
+                let output_buffers = output_node.output_audio_buffers.get();
 
-            if output_buffers.num_channels() == block.num_channels() {
-                let output_buffers = output_buffers.frames_iter();
-                let frames_dest = block.frames_iter_mut();
+                if output_buffers.num_channels() == block.num_channels() {
+                    let output_buffers = output_buffers.frames_iter();
+                    let frames_dest = block.frames_iter_mut();
 
-                for (output_channel, dest_channel) in output_buffers.zip(frames_dest) {
-                    for (output_frame, mut dest_frame) in output_channel.zip(dest_channel) {
-                        *dest_frame = *output_frame;
+                    for (output_channel, dest_channel) in output_buffers.zip(frames_dest) {
+                        for (output_frame, mut dest_frame) in output_channel.zip(dest_channel) {
+                            *dest_frame = *output_frame;
+                        }
                     }
-                }
-            } else if output_buffers.num_channels() == 1 {
-                let frames_dest = block.channels_iter_mut();
-                for dest_channel in frames_dest {
-                    for (output_frame, mut dest_frame) in
-                        output_buffers.channel_iter(0).zip(dest_channel)
-                    {
-                        *dest_frame = *output_frame;
+                } else if output_buffers.num_channels() == 1 {
+                    let frames_dest = block.channels_iter_mut();
+                    for dest_channel in frames_dest {
+                        for (output_frame, mut dest_frame) in
+                            output_buffers.channel_iter(0).zip(dest_channel)
+                        {
+                            *dest_frame = *output_frame;
+                        }
                     }
+                } else {
+                    panic!(
+                        "Don't know how to convert from {} channels to {} channels",
+                        output_buffers.num_channels(),
+                        block.num_channels()
+                    );
                 }
-            } else {
-                panic!(
-                    "Don't know how to convert from {} channels to {} channels",
-                    output_buffers.num_channels(),
-                    block.num_channels()
-                );
             }
         } else {
             block.fill_with(0.0);
