@@ -119,8 +119,11 @@ impl Node {
         before != self.inputs.len()
     }
 
-    pub fn has_event_connected(&self) -> bool {
-        !self.event_channels.connections.is_empty()
+    pub fn has_event_connected(&self, input_node: Entity) -> bool {
+        self.event_channels
+            .connections
+            .iter()
+            .any(|connection| connection.src == input_node)
     }
 }
 
@@ -178,19 +181,19 @@ where
     Ok(())
 }
 
-pub fn disconnect_event_input_channel(
+pub fn disconnect_event_input_from_node(
     world: &mut World,
     node: Entity,
-    input_channel: u16,
+    input_node: Entity,
 ) -> Result<(), AudioGraphDescError> {
-    disconnect_channel(world, node, input_channel, |node| &mut node.event_channels)?;
+    disconnect_channel_from_node(world, node, input_node, |node| &mut node.event_channels)?;
     Ok(())
 }
 
-fn disconnect_channel<F>(
+fn disconnect_channel_from_node<F>(
     world: &mut World,
     node: Entity,
-    input_channel: u16,
+    input_node: Entity,
     get_channels: F,
 ) -> Result<(), AudioGraphDescError>
 where
@@ -201,7 +204,7 @@ where
         .ok_or(AudioGraphDescError::InvalidEntity(node))?;
     get_channels(&mut dest)
         .connections
-        .retain(|connection| connection.channel != input_channel);
+        .retain(|connection| connection.src != input_node);
     Ok(())
 }
 

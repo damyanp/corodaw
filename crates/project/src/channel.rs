@@ -196,9 +196,9 @@ fn update_channels(
         let Ok(input_node) = nodes.get(input_node_id) else {
             continue;
         };
+        let midi_input = midi_input.entity;
         if state.armed {
-            let midi_input = midi_input.entity;
-            if !input_node.has_event_connected() {
+            if !input_node.has_event_connected(midi_input) {
                 commands.queue(move |world: &mut World| {
                     audio_graph::connect_event(
                         world,
@@ -208,9 +208,10 @@ fn update_channels(
                     .unwrap();
                 });
             }
-        } else if input_node.has_event_connected() {
+        } else if input_node.has_event_connected(midi_input) {
             commands.queue(move |world: &mut World| {
-                audio_graph::disconnect_event_input_channel(world, input_node_id, 0).unwrap();
+                audio_graph::disconnect_event_input_from_node(world, input_node_id, midi_input)
+                    .unwrap();
             });
         }
     }
