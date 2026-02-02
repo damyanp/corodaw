@@ -103,6 +103,25 @@ impl Node {
         nodes.dedup();
         self.inputs = nodes;
     }
+
+    pub(crate) fn disconnect_node(&mut self, node: &Entity) -> bool {
+        self.audio_channels
+            .connections
+            .retain(|connection| connection.src != *node);
+        self.event_channels
+            .connections
+            .retain(|connection| connection.src != *node);
+
+        let before = self.inputs.len();
+
+        self.update_input_nodes();
+
+        before != self.inputs.len()
+    }
+
+    pub fn has_event_connected(&self) -> bool {
+        !self.event_channels.connections.is_empty()
+    }
 }
 
 pub fn set_processor(world_mut: &mut World, entity: Entity, processor: Box<dyn Processor>) {

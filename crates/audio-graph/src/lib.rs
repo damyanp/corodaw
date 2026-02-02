@@ -25,7 +25,7 @@ impl Plugin for AudioGraphPlugin {
         app.insert_non_send_resource(audio_graph)
             .insert_non_send_resource(audio_graph_worker)
             .insert_non_send_resource(state_reader)
-            .add_systems(Update, audio_graph::update);
+            .add_systems(Update, (audio_graph::pre_update, audio_graph::update));
     }
 }
 

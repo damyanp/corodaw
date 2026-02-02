@@ -101,7 +101,11 @@ impl Graph {
     }
 
     pub fn get_node(&self, node_entity: Entity) -> Option<&AgNode> {
-        self.nodes.get(&node_entity)
+        let v = self.nodes.get(&node_entity);
+        if v.is_none() {
+            println!("** WARNING: asked for non-existent node {node_entity:?}");
+        }
+        v
     }
 
     pub fn process(

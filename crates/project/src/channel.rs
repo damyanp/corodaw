@@ -1,7 +1,5 @@
-use audio_graph::Connection;
+use audio_graph::{Connection, Node};
 use bevy_app::prelude::*;
-use bevy_ecs::lifecycle::HookContext;
-use bevy_ecs::world::DeferredWorld;
 use bevy_ecs::{name::Name, prelude::*};
 
 use engine::builtin::{MidiInputNode, Summer};
@@ -185,6 +183,7 @@ fn sync_channel_order(
 fn update_channels(
     mut commands: Commands,
     channels: Query<(&ChannelState, &InputNode, &ChannelGainControl)>,
+    nodes: Query<&Node>,
     midi_input: NonSend<MidiInputNode>,
 ) {
     let has_soloed = channels.iter().any(|(d, _, _)| d.soloed);
@@ -193,23 +192,28 @@ fn update_channels(
         let gain = if muted { 0.0 } else { state.gain_value };
         gain_control.0.set_gain(gain);
 
-        let input_node = input_node.0;
+        let input_node_id = input_node.0;
+        let Ok(input_node) = nodes.get(input_node_id) else {
+            continue;
+        };
         if state.armed {
             let midi_input = midi_input.entity;
-            commands.queue(move |world: &mut World| {
-                audio_graph::connect_event(world, input_node, Connection::new(0, midi_input, 0))
+            if !input_node.has_event_connected() {
+                commands.queue(move |world: &mut World| {
+                    audio_graph::connect_event(
+                        world,
+                        input_node_id,
+                        Connection::new(0, midi_input, 0),
+                    )
                     .unwrap();
-            });
-        } else {
+                });
+            }
+        } else if input_node.has_event_connected() {
             commands.queue(move |world: &mut World| {
-                audio_graph::disconnect_event_input_channel(world, input_node, 0).unwrap();
+                audio_graph::disconnect_event_input_channel(world, input_node_id, 0).unwrap();
             });
         }
     }
-}
-
-fn on_channel_despawned(mut world: DeferredWorld, context: HookContext) {
-    println!("channel despawned {:?}", context);
 }
 
 #[derive(Component)]
@@ -251,11 +255,6 @@ pub struct ChannelAudioView {
 #[derive(Component, Debug)]
 #[require(ChannelState)]
 pub struct ChannelGainControl(pub GainControl);
-
-fn on_gain_control_replace(mut world: DeferredWorld, context: HookContext) {
-    let g = world.get::<ChannelGainControl>(context.entity);
-    println!("on_gain_control_replace {:?} - {:?}", context, g);
-}
 
 impl ChannelAudioView {
     pub fn has_gui(&self) -> bool {

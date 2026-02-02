@@ -11,6 +11,7 @@ use crate::{
 };
 use std::{
     cell::RefCell,
+    ops::DerefMut,
     sync::mpsc::{Receiver, Sender, channel},
     time::Duration,
 };
@@ -58,10 +59,35 @@ impl AudioGraph {
     }
 }
 
+pub(crate) fn pre_update(
+    mut removed_nodes: RemovedComponents<Node>,
+    mut nodes: Query<(Entity, &mut Node)>,
+) {
+    if removed_nodes.is_empty() {
+        return;
+    }
+
+    let removed: Vec<_> = removed_nodes.read().collect();
+
+    for r in removed.iter() {
+        println!("** {:?} removed", r);
+    }
+
+    for (entity, mut node) in nodes {
+        if node.inputs.iter().any(|input| removed.contains(input)) {
+            for n in removed.iter() {
+                if node.deref_mut().disconnect_node(n) {
+                    println!("** {:?} removed input from {:?}", entity, n);
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn update(
     mut commands: Commands,
     mut audio_graph: NonSendMut<AudioGraph>,
-    mut changed_nodes: Query<(Entity, Ref<node::Node>)>,
+    mut changed_nodes: Query<(Entity, Ref<node::Node>, Option<&Name>)>,
     mut removed_nodes: RemovedComponents<node::Node>,
     output_node: Option<Single<(Entity, &OutputNode)>>,
 ) {
@@ -69,8 +95,9 @@ pub(crate) fn update(
 
     let mut changed = Vec::default();
 
-    for (entity, node) in &mut changed_nodes {
+    for (entity, node, name) in &mut changed_nodes {
         if node.is_changed() {
+            println!("{:?} ({:?}) is changed", entity, name);
             changed.push((entity, node.clone()));
         }
     }
