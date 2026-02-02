@@ -111,13 +111,18 @@ impl App {
             let count = 32;
             let step = 0.15;
 
-            ui.add(Meter::new((self.perlin_x * 0.01) % 1.0));
+            ui.add(Meter::new(&[(self.perlin_x * 0.01) % 1.0]));
 
             for i in 0..count {
                 let x = self.perlin_x + i as f32 * step;
                 let v = self.perlin.noise(x);
 
-                ui.add(Meter::new(v));
+                if i % 2 == 0 {
+                    let v2 = self.perlin.noise(x + 1.0);
+                    ui.add(Meter::new(&[v, v2]));
+                } else {
+                    ui.add(Meter::new(&[v]));
+                }
             }
         });
 

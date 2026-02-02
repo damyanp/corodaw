@@ -7,7 +7,7 @@ use corodaw_widgets::meter::Meter;
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{
     Align, Button, Color32, Frame, Id, Key, Label, Layout, Margin, Popup, RichText, Sense, Slider,
-    Stroke, StrokeKind, TextEdit, Ui, vec2,
+    Stroke, TextEdit, Ui, vec2,
 };
 use egui_extras::{Size, StripBuilder};
 use project::{
@@ -272,24 +272,17 @@ fn show_gain_slider(
 }
 
 fn show_meters(peaks: Option<&StateValue>, ui: &mut Ui) {
-    ui.painter().rect_stroke(
-        ui.available_rect_before_wrap(),
-        0.0,
-        Stroke::new(1.0, Color32::RED),
-        StrokeKind::Inside,
-    );
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
 
-        let (l, r) = match peaks.unwrap_or(&StateValue::None) {
-            StateValue::None => (0.0, 0.0),
-            StateValue::Mono(v) => (*v, *v),
-            StateValue::Stereo(l, r) => (*l, *r),
+        let values: &[f32] = match peaks.unwrap_or(&StateValue::None) {
+            StateValue::None => &[],
+            StateValue::Mono(v) => &[*v],
+            StateValue::Stereo(l, r) => &[*l, *r],
         };
 
         let h = ui.available_height();
-        ui.add(Meter::new(l).height(h));
-        ui.add(Meter::new(r).height(h));
+        ui.add(Meter::new(values).height(h).width(ui.available_width()));
     });
 }
 
