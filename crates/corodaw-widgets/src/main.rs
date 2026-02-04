@@ -2,7 +2,9 @@ use corodaw_widgets::{
     arranger::{ArrangerDataProvider, ArrangerWidget},
     meter::Meter,
 };
-use eframe::egui::{self, Align2, CollapsingHeader, Color32, FontId, Ui, Vec2};
+use eframe::egui::{
+    self, Align2, CollapsingHeader, Color32, FontId, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2,
+};
 
 fn main() {
     let mut native_options = eframe::NativeOptions::default();
@@ -25,7 +27,7 @@ struct App {
 
 impl App {
     fn new(_: &eframe::CreationContext<'_>) -> Self {
-        let channels = vec![0, 1];
+        let channels = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let perlin = Perlin1D::new(1337);
         Self {
             channels,
@@ -70,9 +72,41 @@ impl App {
             }
 
             fn show_strip(&mut self, _: usize, ui: &mut Ui) {
-                let r = ui.available_rect_before_wrap();
+                let strip_rect = ui.available_rect_before_wrap();
+
+                let r = Rect::from_min_size(
+                    pos2(strip_rect.min.x, strip_rect.min.y),
+                    vec2(100.0 * 50.0, strip_rect.height()),
+                );
+                let _ = ui.allocate_rect(r, Sense::empty());
+
                 let p = ui.painter();
-                p.rect_filled(r, 2.0, Color32::DARK_RED);
+                p.rect_filled(r, 10.0, Color32::DARK_GREEN);
+                p.vline(r.max.x, r.y_range(), Stroke::new(2.0, Color32::WHITE));
+                p.text(
+                    pos2(r.max.x, r.min.y),
+                    Align2::CENTER_TOP,
+                    format!("{}", r.max.x),
+                    FontId::default(),
+                    Color32::WHITE,
+                );
+                for i in 0..100 {
+                    let x = r.min.x + i as f32 * 50.0;
+                    let pos = pos2(x, r.center().y);
+
+                    p.rect_filled(
+                        Rect::from_center_size(pos, vec2(40.0, 40.0)),
+                        5.0,
+                        Color32::DARK_RED,
+                    );
+                    p.text(
+                        pos,
+                        Align2::CENTER_CENTER,
+                        format!("{}", i * 50),
+                        FontId::default(),
+                        Color32::WHITE,
+                    );
+                }
             }
 
             fn on_add_channel(&mut self, index: usize) {

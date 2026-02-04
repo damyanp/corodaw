@@ -1,9 +1,12 @@
+use std::f32;
+
 use eframe::{
     egui::{
         Align, Align2, Color32, Context, CursorIcon, Direction, FontId, Id, Layout, NumExt,
-        PointerButton, Rect, Sense, Stroke, TextStyle, Ui, UiBuilder, pos2, vec2,
+        PointerButton, Rect, ScrollArea, Sense, Stroke, TextStyle, Ui, UiBuilder, pos2,
+        scroll_area::ScrollBarVisibility, vec2,
     },
-    emath,
+    emath::{self},
 };
 
 #[derive(Clone, Debug, Copy)]
@@ -62,130 +65,34 @@ impl ArrangerWidget {
             pos2(rect.right(), rect.top() + timestrip_height),
         );
 
-        let mut channels_rect = Rect::from_min_max(
+        let channels_rect = Rect::from_min_max(
             pos2(rect.min.x, timestrip_rect.max.y + gap),
             pos2(rect.min.x + width, rect.max.y),
         );
 
-        let mut strips_rect = Rect::from_min_max(
+        let strips_rect = Rect::from_min_max(
             pos2(channels_rect.max.x + gap, channels_rect.min.y),
             pos2(rect.max.x, rect.max.y),
         );
 
-        ui.painter().rect_filled(
-            timestrip_rect,
-            1.0,
-            ui.style().visuals.widgets.active.bg_fill,
-        );
-        ui.painter().text(
-            timestrip_rect.center(),
-            Align2::CENTER_CENTER,
-            "Time Strip",
-            FontId::default(),
-            ui.style().visuals.widgets.active.text_color(),
-        );
-
-        ui.painter().rect_filled(
-            channels_rect,
-            1.0,
-            ui.style().visuals.widgets.noninteractive.bg_fill,
-        );
-        ui.painter().rect_filled(
-            strips_rect,
-            1.0,
-            ui.style().visuals.widgets.noninteractive.bg_fill,
-        );
-
-        let num_channels = data.num_channels();
-
-        let mut drop_target = None;
-        let mut dropped = false;
-
-        for i in 0..num_channels {
-            let channel_height = data.channel_height(i);
-
-            let mut channel_rect = channels_rect;
-            channel_rect.set_height(channel_height);
-
-            let mut strip_rect = strips_rect;
-            strip_rect.set_height(channel_height);
-
-            if drag_info.is_some()
-                && let Some(pos) = ui.ctx().pointer_hover_pos()
-                && channels_rect.contains(pos)
-            {
-                let rect = channel_rect.expand2(vec2(0.0, gap));
-
-                let t = emath::remap(pos.y, rect.y_range(), 0.0..=1.0);
-
-                if (0.0..0.5).contains(&t) {
-                    drop_target = Some((i, rect.top() + gap / 2.0));
-                } else if t <= 1.0 {
-                    drop_target = Some((i + 1, rect.bottom() - gap / 2.0));
-                }
-            }
-
-            let r = ui
-                .scope_builder(
-                    UiBuilder::new()
-                        .max_rect(channel_rect)
-                        .layout(Layout::centered_and_justified(Direction::TopDown))
-                        .sense(Sense::all()),
-                    |ui| {
-                        ui.take_available_space();
-                        data.show_channel(i, ui);
-                    },
+        let r = ScrollArea::both()
+            .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
+            .scroll_bar_rect(strips_rect)
+            .show_viewport(ui, |ui, viewport| {
+                show_channels(
+                    &mut data,
+                    ui,
+                    drag_id,
+                    drag_info,
+                    gap,
+                    timestrip_rect,
+                    channels_rect,
+                    strips_rect,
+                    viewport,
                 )
-                .response;
-
-            if drag_info == Some(i) {
-                ui.painter()
-                    .rect_filled(channel_rect, 0.0, Color32::WHITE.gamma_multiply(0.25));
-            }
-
-            if r.drag_started_by(PointerButton::Primary) {
-                ui.data_mut(|data| {
-                    data.insert_temp(drag_id, i);
-                });
-            } else if r.drag_stopped() {
-                dropped = true;
-            }
-
-            r.context_menu(|ui| {
-                data.show_channel_menu(i, ui);
             });
 
-            let r = ui
-                .scope_builder(
-                    UiBuilder::new()
-                        .max_rect(strip_rect)
-                        .layout(Layout::centered_and_justified(Direction::TopDown))
-                        .sense(Sense::all()),
-                    |ui| {
-                        ui.take_available_space();
-                        data.show_strip(i, ui);
-                    },
-                )
-                .response;
-
-            r.context_menu(|ui| {
-                data.show_strip_menu(i, ui);
-            });
-
-            channels_rect.set_top(channel_rect.bottom() + gap);
-            strips_rect.set_top(strip_rect.bottom() + gap);
-        }
-
-        ui.scope_builder(
-            UiBuilder::new()
-                .layout(Layout::top_down(Align::Center))
-                .max_rect(channels_rect),
-            |ui| {
-                if ui.button("+").clicked() {
-                    data.on_add_channel(num_channels);
-                }
-            },
-        );
+        let (drop_target, dropped) = r.inner;
 
         if let Some((drop_index, drop_y)) = drop_target {
             if dropped {
@@ -213,6 +120,144 @@ impl ArrangerWidget {
             }
         }
     }
+}
+
+fn show_channels(
+    data: &mut impl ArrangerDataProvider,
+    ui: &mut Ui,
+    drag_id: Id,
+    drag_info: Option<usize>,
+    gap: f32,
+    timestrip_rect: Rect,
+    channels_rect: Rect,
+    strips_rect: Rect,
+    viewport: Rect,
+) -> (Option<(usize, f32)>, bool) {
+    ui.painter().rect_filled(
+        timestrip_rect,
+        1.0,
+        ui.style().visuals.widgets.active.bg_fill,
+    );
+    ui.painter().text(
+        timestrip_rect.center(),
+        Align2::CENTER_CENTER,
+        "Time Strip",
+        FontId::default(),
+        ui.style().visuals.widgets.active.text_color(),
+    );
+
+    ui.painter().rect_filled(
+        channels_rect,
+        1.0,
+        ui.style().visuals.widgets.noninteractive.bg_fill,
+    );
+    ui.painter().rect_filled(
+        strips_rect,
+        1.0,
+        ui.style().visuals.widgets.noninteractive.bg_fill,
+    );
+
+    let num_channels = data.num_channels();
+
+    let mut drop_target = None;
+    let mut dropped = false;
+
+    let mut y = channels_rect.min.y - viewport.min.y;
+
+    for i in 0..num_channels {
+        let channel_height = data.channel_height(i);
+
+        let channel_rect = Rect::from_min_size(
+            pos2(channels_rect.min.x, y),
+            vec2(channels_rect.width(), channel_height),
+        );
+
+        let strip_rect = Rect::from_min_size(
+            pos2(strips_rect.min.x - viewport.min.x, y),
+            vec2(viewport.width(), channel_height),
+        );
+
+        if drag_info.is_some()
+            && let Some(pos) = ui.ctx().pointer_hover_pos()
+            && channel_rect.contains(pos)
+        {
+            let rect = channel_rect.expand2(vec2(0.0, gap));
+
+            let t = emath::remap(pos.y, rect.y_range(), 0.0..=1.0);
+
+            if (0.0..0.5).contains(&t) {
+                drop_target = Some((i, rect.top() + gap / 2.0));
+            } else if t <= 1.0 {
+                drop_target = Some((i + 1, rect.bottom() - gap / 2.0));
+            }
+        }
+
+        let r = ui
+            .scope_builder(
+                UiBuilder::new()
+                    .max_rect(channel_rect)
+                    .layout(Layout::centered_and_justified(Direction::TopDown))
+                    .sense(Sense::all()),
+                |ui| {
+                    ui.take_available_space();
+                    ui.shrink_clip_rect(channels_rect);
+                    data.show_channel(i, ui);
+                },
+            )
+            .response;
+
+        if drag_info == Some(i) {
+            ui.painter()
+                .rect_filled(channel_rect, 0.0, Color32::WHITE.gamma_multiply(0.25));
+        }
+
+        if r.drag_started_by(PointerButton::Primary) {
+            ui.data_mut(|data| {
+                data.insert_temp(drag_id, i);
+            });
+        } else if r.drag_stopped() {
+            dropped = true;
+        }
+
+        r.context_menu(|ui| {
+            data.show_channel_menu(i, ui);
+        });
+
+        let r = ui
+            .scope_builder(
+                UiBuilder::new()
+                    .max_rect(strip_rect)
+                    .layout(Layout::top_down(Align::Min))
+                    .sense(Sense::all()),
+                |ui| {
+                    ui.take_available_space();
+                    ui.shrink_clip_rect(strips_rect);
+                    data.show_strip(i, ui);
+                },
+            )
+            .response;
+
+        r.context_menu(|ui| {
+            data.show_strip_menu(i, ui);
+        });
+
+        y += channel_height + gap;
+    }
+
+    ui.scope_builder(
+        UiBuilder::new()
+            .layout(Layout::top_down(Align::Center))
+            .max_rect(Rect::from_min_size(
+                pos2(channels_rect.min.x, y),
+                vec2(channels_rect.width(), f32::INFINITY),
+            )),
+        |ui| {
+            if ui.button("+").clicked() {
+                data.on_add_channel(num_channels);
+            }
+        },
+    );
+    (drop_target, dropped)
 }
 
 fn show_resize_bar(rect: Rect, default_width: f32, gap: f32, id: Id, ui: &mut Ui) -> f32 {
