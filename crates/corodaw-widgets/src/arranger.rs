@@ -196,10 +196,8 @@ fn show_channels(
             .scope_builder(
                 UiBuilder::new()
                     .max_rect(channel_rect)
-                    .layout(Layout::centered_and_justified(Direction::TopDown))
-                    .sense(Sense::all()),
+                    .layout(Layout::centered_and_justified(Direction::TopDown)),
                 |ui| {
-                    ui.take_available_space();
                     ui.shrink_clip_rect(channels_rect);
                     data.show_channel(i, ui);
                 },
@@ -227,10 +225,8 @@ fn show_channels(
             .scope_builder(
                 UiBuilder::new()
                     .max_rect(strip_rect)
-                    .layout(Layout::top_down(Align::Min))
-                    .sense(Sense::all()),
+                    .layout(Layout::top_down(Align::Min)),
                 |ui| {
-                    ui.take_available_space();
                     ui.shrink_clip_rect(strips_rect);
                     data.show_strip(i, ui);
                 },

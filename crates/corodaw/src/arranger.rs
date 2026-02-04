@@ -6,8 +6,8 @@ use corodaw_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
 use corodaw_widgets::meter::Meter;
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{
-    Align, Button, Color32, Frame, Id, Key, Label, Layout, Margin, Popup, RichText, Sense, Slider,
-    Stroke, TextEdit, Ui, vec2,
+    Align, Align2, Button, Color32, FontId, Frame, Id, Key, Label, Layout, Margin, Popup, Rect,
+    RichText, Sense, Slider, Stroke, TextEdit, Ui, pos2, vec2,
 };
 use egui_extras::{Size, StripBuilder};
 use project::{
@@ -124,9 +124,56 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
     }
 
     fn show_strip(&mut self, _: usize, ui: &mut Ui) {
-        let r = ui.available_rect_before_wrap();
-        ui.painter()
-            .rect_filled(r, 5.0, ui.style().visuals.widgets.inactive.bg_fill);
+        let strip_rect = ui.available_rect_before_wrap();
+
+        const MEASURES: usize = 32;
+        const BEATS_PER_MEASURE: usize = 4;
+        const BEAT_WIDTH: f32 = 20.0;
+
+        let r = Rect::from_min_size(
+            strip_rect.min,
+            vec2(
+                MEASURES as f32 * BEATS_PER_MEASURE as f32 * BEAT_WIDTH,
+                strip_rect.height(),
+            ),
+        );
+
+        ui.advance_cursor_after_rect(r);
+
+        let p = ui.painter();
+
+        p.rect_filled(r, 10.0, Color32::LIGHT_BLUE);
+
+        for measure in 0..MEASURES {
+            let x = r.min.x + (measure * BEATS_PER_MEASURE) as f32 * BEAT_WIDTH;
+
+            p.vline(
+                x,
+                strip_rect.shrink(30.0).y_range(),
+                Stroke::new(2.0, Color32::DARK_BLUE),
+            );
+
+            p.text(
+                pos2(x, strip_rect.top() + 10.0),
+                Align2::CENTER_TOP,
+                format!("{measure}"),
+                FontId::default(),
+                Color32::BLACK,
+            );
+
+            for beat in 1..BEATS_PER_MEASURE {
+                let x = x + beat as f32 * BEAT_WIDTH;
+
+                p.vline(
+                    x,
+                    strip_rect.shrink(30.0).y_range(),
+                    Stroke::new(1.0, Color32::DARK_BLUE),
+                );
+            }
+        }
+
+        // ui.painter()
+        //     .rect_filled(r, 5.0, ui.style().visuals.widgets.inactive.bg_fill);
     }
 
     fn on_add_channel(&mut self, index: usize) {

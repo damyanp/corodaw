@@ -74,10 +74,8 @@ impl App {
             fn show_strip(&mut self, _: usize, ui: &mut Ui) {
                 let strip_rect = ui.available_rect_before_wrap();
 
-                let r = Rect::from_min_size(
-                    pos2(strip_rect.min.x, strip_rect.min.y),
-                    vec2(100.0 * 50.0, strip_rect.height()),
-                );
+                let r =
+                    Rect::from_min_size(strip_rect.min, vec2(100.0 * 50.0, strip_rect.height()));
                 let _ = ui.allocate_rect(r, Sense::empty());
 
                 let p = ui.painter();
