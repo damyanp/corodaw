@@ -124,6 +124,7 @@ impl ArrangerWidget {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn show_channels(
     data: &mut impl ArrangerDataProvider,
     ui: &mut Ui,

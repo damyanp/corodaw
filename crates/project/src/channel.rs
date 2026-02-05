@@ -8,7 +8,7 @@ use engine::{
     builtin::GainControl,
     plugins::{ClapPluginManager, ClapPluginShared, discovery::FoundPlugin},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{AvailablePlugin, ChannelOrder, Id};
@@ -179,6 +179,8 @@ fn sync_channel_order_system(
     order
         .channel_order
         .retain(|entity| channels.get(*entity).is_ok());
+
+    // TODO: what is there are channels that aren't listed in channel_order?
 }
 
 fn update_channels_system(
@@ -221,13 +223,13 @@ fn update_channels_system(
 #[derive(Component)]
 struct InputNode(pub Entity);
 
-#[derive(Component, Debug, Clone, Serialize)]
+#[derive(Component, Debug, Clone, Serialize, Deserialize)]
 #[require(ChannelState)]
 pub struct ChannelData {
     pub plugin_id: String,
 }
 
-#[derive(Component, Debug, Clone, Serialize)]
+#[derive(Component, Debug, Clone, Serialize, Deserialize)]
 #[require(Id=Id(Uuid::new_v4()), Name)]
 pub struct ChannelState {
     pub gain_value: f32,

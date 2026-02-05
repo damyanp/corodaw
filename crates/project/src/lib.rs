@@ -13,7 +13,7 @@ pub use channel::{
     ChannelState, new_channel,
 };
 pub use found_plugin::AvailablePlugin;
-pub use project::{ChannelOrder, Project, SaveEvent};
+pub use project::{ChannelOrder, LoadEvent, Project, SaveEvent};
 
 #[derive(Component, Serialize, Deserialize)]
 struct Id(Uuid);

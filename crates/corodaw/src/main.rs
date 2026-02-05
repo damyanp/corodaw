@@ -7,7 +7,7 @@ use eframe::{
     UserEvent,
     egui::{self, Ui, vec2},
 };
-use project::{Project, SaveEvent};
+use project::{LoadEvent, Project, SaveEvent};
 use smol::{LocalExecutor, Task};
 use winit::event_loop::EventLoop;
 
@@ -83,7 +83,7 @@ impl Corodaw {
     fn main_menu_bar(&mut self, ui: &mut Ui) {
         ui.menu_button("File", |ui| {
             if ui.button("Open...").clicked() {
-                todo!()
+                self.open();
             }
             if ui.button("Save...").clicked() {
                 self.save();
@@ -93,6 +93,24 @@ impl Corodaw {
                 todo!();
             }
         });
+    }
+
+    fn open(&mut self) {
+        assert!(self.current_task.is_none());
+
+        let app = self.app.clone();
+        let task = self.executor.spawn(async move {
+            let file = rfd::AsyncFileDialog::new()
+                .add_filter("Corodaw Project", &["corodaw"])
+                .pick_file()
+                .await;
+
+            if let Some(file) = file {
+                app.borrow_mut().world_mut().trigger(LoadEvent::new(file));
+            }
+        });
+
+        self.current_task = Some(task);
     }
 
     fn save(&mut self) {

@@ -1,9 +1,10 @@
-use std::{fs::File, path::PathBuf};
+use std::{collections::HashMap, fs::File, path::PathBuf};
 
 use bevy_app::prelude::*;
-use bevy_ecs::{prelude::*, system::RunSystemOnce};
-use serde::Serialize;
+use bevy_ecs::{name::Name, prelude::*, system::RunSystemOnce};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use uuid::Uuid;
 
 use crate::{ChannelData, ChannelState, Id, new_channel};
 
@@ -56,6 +57,7 @@ impl Plugin for ProjectPlugin {
             .unwrap();
 
         app.add_observer(on_save_event);
+        app.add_observer(on_load_event);
     }
 }
 
@@ -68,6 +70,81 @@ impl SaveEvent {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
     }
+}
+
+#[derive(Event)]
+pub struct LoadEvent {
+    path: PathBuf,
+}
+
+impl LoadEvent {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+}
+
+#[derive(Deserialize)]
+struct Document {
+    channels: Vec<ChannelDocument>,
+    channel_order: Vec<Option<Uuid>>,
+}
+
+#[derive(Deserialize)]
+struct ChannelDocument {
+    name: Name,
+    data: Option<ChannelData>,
+    state: ChannelState,
+    id: Id,
+}
+
+fn on_load_event(
+    load_event: On<LoadEvent>,
+    mut commands: Commands,
+    project_query: Single<Entity, With<Project>>,
+    channels_query: Query<Entity, With<ChannelState>>,
+) {
+    println!("Load: {:?}", load_event.path);
+
+    let file = File::open(&load_event.path).unwrap();
+    let document: Document = serde_json::from_reader(file).unwrap();
+
+    for entity in &channels_query {
+        commands.entity(entity).despawn();
+    }
+
+    let project_entity = project_query.into_inner();
+    commands.entity(project_entity).despawn();
+
+    let channel_entities: HashMap<_, _> = document
+        .channels
+        .into_iter()
+        .map(|channel| {
+            let state = channel.state;
+
+            let id = channel.id.0;
+            let mut entity = commands.spawn((state, channel.name, channel.id));
+            if let Some(data) = channel.data {
+                entity.insert(data);
+            }
+            (id, entity.id())
+        })
+        .collect();
+
+    let ordered: Vec<_> = document
+        .channel_order
+        .into_iter()
+        .flatten()
+        .filter_map(|id| channel_entities.get(&id).copied())
+        .collect();
+
+    commands.spawn((
+        Project {
+            path: Some(load_event.path.clone()),
+        },
+        ChannelOrder {
+            channel_order: ordered,
+        },
+    ));
 }
 
 fn on_save_event(
