@@ -19,10 +19,10 @@ impl Plugin for ChannelBevyPlugin {
         app.add_message::<ChannelMessage>().add_systems(
             Update,
             (
-                handle_channel_messages,
-                set_plugins,
-                update_channels,
-                sync_channel_order,
+                handle_channel_messages_system,
+                set_plugins_system,
+                update_channels_system,
+                sync_channel_order_system,
             ),
         );
     }
@@ -36,7 +36,7 @@ pub fn new_channel() -> impl Bundle {
     )
 }
 
-fn handle_channel_messages(
+fn handle_channel_messages_system(
     mut channels: Query<(&mut ChannelState, &mut Name, Option<&mut ChannelAudioView>)>,
     mut messages: MessageReader<ChannelMessage>,
     clap_plugin_manager: NonSend<ClapPluginManager>,
@@ -69,7 +69,7 @@ fn handle_channel_messages(
     }
 }
 
-fn set_plugins(
+fn set_plugins_system(
     mut commands: Commands,
     available_plugins: Query<&AvailablePlugin>,
     clap_plugin_manager: NonSend<ClapPluginManager>,
@@ -168,7 +168,7 @@ fn set_plugin(
     channel_entity.insert((channel_audio_view, InputNode(plugin_node_id)));
 }
 
-fn sync_channel_order(
+fn sync_channel_order_system(
     mut orders: Query<&mut ChannelOrder>,
     channels: Query<Entity, With<ChannelState>>,
 ) {
@@ -181,7 +181,7 @@ fn sync_channel_order(
         .retain(|entity| channels.get(*entity).is_ok());
 }
 
-fn update_channels(
+fn update_channels_system(
     mut commands: Commands,
     channels: Query<(&ChannelState, &InputNode, &ChannelGainControl)>,
     nodes: Query<&Node>,

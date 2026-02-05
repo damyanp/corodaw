@@ -11,7 +11,7 @@ use project::{Project, SaveEvent};
 use smol::{LocalExecutor, Task};
 use winit::event_loop::EventLoop;
 
-use crate::arranger::arranger_ui;
+use crate::arranger::arranger_ui_system;
 
 mod arranger;
 
@@ -55,7 +55,7 @@ impl eframe::App for Corodaw {
 
             world.non_send_resource_mut::<StateReader>().swap_buffers();
 
-            world.run_system_once_with(arranger_ui, ui).unwrap();
+            world.run_system_once_with(arranger_ui_system, ui).unwrap();
         });
     }
 }

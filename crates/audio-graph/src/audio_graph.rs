@@ -59,7 +59,7 @@ impl AudioGraph {
     }
 }
 
-pub(crate) fn pre_update(
+pub(crate) fn pre_update_system(
     mut removed_nodes: RemovedComponents<Node>,
     mut nodes: Query<(Entity, &mut Node)>,
 ) {
@@ -84,7 +84,7 @@ pub(crate) fn pre_update(
     }
 }
 
-pub(crate) fn update(
+pub(crate) fn update_system(
     mut commands: Commands,
     mut audio_graph: NonSendMut<AudioGraph>,
     mut changed_nodes: Query<(Entity, Ref<node::Node>, Option<&Name>)>,
