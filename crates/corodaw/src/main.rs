@@ -1,11 +1,13 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use audio_graph::StateReader;
-use bevy_ecs::system::RunSystemOnce;
+use bevy_app::prelude::*;
+use bevy_ecs::{prelude::*, system::RunSystemOnce};
 use eframe::{
     UserEvent,
     egui::{self, Ui, vec2},
 };
+use project::{Project, SaveEvent};
 use smol::{LocalExecutor, Task};
 use winit::event_loop::EventLoop;
 
@@ -21,7 +23,8 @@ struct Corodaw {
 
 impl Default for Corodaw {
     fn default() -> Self {
-        let app = project::make_app();
+        let mut app = project::make_app();
+        app.add_systems(PostUpdate, set_titlebar_system);
 
         Self {
             app: Rc::new(RefCell::new(app)),
@@ -61,7 +64,12 @@ impl Corodaw {
     fn update_logic(&mut self, ctx: &egui::Context) {
         ctx.request_repaint(); // keep repainting so we keep updating logic
 
+        self.app.borrow_mut().insert_non_send_resource(ctx.clone());
         self.app.borrow_mut().update();
+        self.app
+            .borrow_mut()
+            .world_mut()
+            .remove_non_send_resource::<egui::Context>();
 
         while self.executor.try_tick() {}
 
@@ -90,19 +98,33 @@ impl Corodaw {
     fn save(&mut self) {
         assert!(self.current_task.is_none());
 
-        self.current_task = Some(self.executor.spawn(async move {
+        let app = self.app.clone();
+        let task = self.executor.spawn(async move {
             let file = rfd::AsyncFileDialog::new()
-                .add_filter("Corodaw Project", &[".cod"])
+                .add_filter("Corodaw Project", &["corodaw"])
                 .save_file()
                 .await;
 
-            let filename = file
-                .map(|fh| fh.file_name())
-                .unwrap_or("nothing".to_owned());
+            if let Some(file) = file {
+                app.borrow_mut().world_mut().trigger(SaveEvent::new(file));
+            }
+        });
 
-            println!("Chose: {}", filename);
-        }));
+        self.current_task = Some(task);
     }
+}
+
+fn set_titlebar_system(ctx: NonSend<egui::Context>, project: Single<&Project, Changed<Project>>) {
+    let project_name = if let Some(path) = &project.path {
+        path.file_name().unwrap().to_str().unwrap()
+    } else {
+        "<new project>"
+    };
+
+    ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
+        "Corodaw: {}",
+        project_name
+    )));
 }
 
 fn main() -> eframe::Result {

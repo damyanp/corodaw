@@ -8,6 +8,7 @@ use engine::{
     builtin::GainControl,
     plugins::{ClapPluginManager, ClapPluginShared, discovery::FoundPlugin},
 };
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{AvailablePlugin, ChannelOrder, Id};
@@ -220,13 +221,13 @@ fn update_channels(
 #[derive(Component)]
 struct InputNode(pub Entity);
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, Serialize)]
 #[require(ChannelState)]
 pub struct ChannelData {
     pub plugin_id: String,
 }
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, Serialize)]
 #[require(Id=Id(Uuid::new_v4()), Name)]
 pub struct ChannelState {
     pub gain_value: f32,

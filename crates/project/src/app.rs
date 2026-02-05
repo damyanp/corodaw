@@ -1,6 +1,5 @@
 use audio_graph::OutputNode;
 use bevy_app::prelude::*;
-use bevy_ecs::system::RunSystemOnce;
 use engine::{
     audio::Audio,
     builtin::{MidiInputNode, Summer},
@@ -8,12 +7,12 @@ use engine::{
 };
 
 use super::*;
-use crate::found_plugin::add_available_plugins;
+use crate::{found_plugin::add_available_plugins, project::ProjectPlugin};
 
 pub fn make_app() -> App {
     let mut app = App::new();
 
-    app.add_plugins(audio_graph::AudioGraphPlugin);
+    app.add_plugins((audio_graph::AudioGraphPlugin, ProjectPlugin));
 
     let audio_graph_worker = app.world_mut().remove_non_send_resource().unwrap();
     let audio = Audio::new(audio_graph_worker).unwrap();
@@ -27,17 +26,6 @@ pub fn make_app() -> App {
         .insert_non_send_resource(summer)
         .insert_non_send_resource(audio)
         .add_plugins(channel::ChannelBevyPlugin);
-
-    app.world_mut()
-        .spawn((project::Project, project::ChannelOrder::default()));
-
-    app.world_mut()
-        .run_system_once(
-            |mut commands: Commands, mut channel_order: Single<&mut project::ChannelOrder>| {
-                channel_order.as_mut().add_channel(&mut commands, 0);
-            },
-        )
-        .unwrap();
 
     add_available_plugins(app.world_mut());
 
