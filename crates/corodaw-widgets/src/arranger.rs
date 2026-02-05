@@ -78,6 +78,8 @@ impl ArrangerWidget {
         let r = ScrollArea::both()
             .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
             .scroll_bar_rect(strips_rect)
+            .on_hover_cursor(CursorIcon::Grab)
+            .on_drag_cursor(CursorIcon::Grabbing)
             .show_viewport(ui, |ui, viewport| {
                 show_channels(
                     &mut data,
@@ -196,7 +198,8 @@ fn show_channels(
             .scope_builder(
                 UiBuilder::new()
                     .max_rect(channel_rect)
-                    .layout(Layout::centered_and_justified(Direction::TopDown)),
+                    .layout(Layout::centered_and_justified(Direction::TopDown))
+                    .sense(Sense::click_and_drag()),
                 |ui| {
                     ui.shrink_clip_rect(channels_rect);
                     data.show_channel(i, ui);
@@ -246,7 +249,9 @@ fn show_channels(
             .max_rect(Rect::from_min_size(
                 pos2(channels_rect.min.x, y),
                 vec2(channels_rect.width(), f32::INFINITY),
-            )),
+            ))
+            // This sense is to prevent the scroll area from sensing events here
+            .sense(Sense::click_and_drag()),
         |ui| {
             if ui.button("+").clicked() {
                 data.on_add_channel(num_channels);
