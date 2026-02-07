@@ -148,6 +148,7 @@ fn on_load_event(
     ));
 }
 
+#[allow(clippy::type_complexity)]
 fn on_save_event(
     save_event: On<SaveEvent>,
     project_query: Single<(&mut Project, &ChannelOrder)>,

@@ -90,14 +90,9 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                                         ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                                             let input_button_response;
 
-                                            if let Some(audio_view) = audio_view {
+                                            if audio_view.is_some() {
                                                 input_button_response = ui.button("🎵");
-                                                show_gui_button(
-                                                    &mut messages,
-                                                    entity,
-                                                    audio_view,
-                                                    ui,
-                                                );
+                                                show_gui_button(&mut messages, entity, ui);
                                             } else {
                                                 input_button_response = ui.button("?");
                                             }
@@ -334,22 +329,13 @@ fn show_meters(peaks: Option<&StateValue>, ui: &mut Ui) {
     });
 }
 
-fn show_gui_button(
-    messages: &mut Vec<ChannelMessage>,
-    entity: Entity,
-    audio_view: &ChannelAudioView,
-    ui: &mut Ui,
-) {
-    let has_gui = audio_view.has_gui();
-
-    ui.add_enabled_ui(!has_gui, |ui| {
-        if ui.button("Show").clicked() {
-            messages.push(ChannelMessage {
-                channel: entity,
-                control: ChannelControl::ShowGui,
-            });
-        }
-    });
+fn show_gui_button(messages: &mut Vec<ChannelMessage>, entity: Entity, ui: &mut Ui) {
+    if ui.button("Show").clicked() {
+        messages.push(ChannelMessage {
+            channel: entity,
+            control: ChannelControl::ShowGui,
+        });
+    }
 }
 
 fn mute_solo_arm_buttons(

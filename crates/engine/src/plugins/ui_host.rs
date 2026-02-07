@@ -17,9 +17,9 @@ use windows::{
             AdjustWindowRect, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExA,
             DefWindowProcA, DispatchMessageW, GWL_STYLE, GWLP_USERDATA, GetClientRect,
             GetWindowLongPtrA, IDC_ARROW, LoadCursorW, MSG, PM_REMOVE, PeekMessageW,
-            RegisterClassA, SWP_ASYNCWINDOWPOS, SWP_NOMOVE, SetWindowLongPtrA, SetWindowPos,
-            TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_DESTROY, WM_SIZE, WNDCLASSA,
-            WS_OVERLAPPEDWINDOW, WS_SIZEBOX, WS_THICKFRAME, WS_VISIBLE,
+            RegisterClassA, SWP_ASYNCWINDOWPOS, SWP_NOMOVE, SetForegroundWindow, SetWindowLongPtrA,
+            SetWindowPos, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_DESTROY, WM_SIZE,
+            WNDCLASSA, WS_OVERLAPPEDWINDOW, WS_SIZEBOX, WS_THICKFRAME, WS_VISIBLE,
         },
     },
     core::{Error, PCSTR, s},
@@ -168,8 +168,11 @@ impl PluginUiHost {
 
     pub async fn show_gui(self: &Pin<Box<Self>>, clap_plugin: &Rc<ClapPlugin>) -> GuiHandle {
         let plugin_id = clap_plugin.get_id();
-        if self.plugin_to_window.borrow().contains_key(&plugin_id) {
-            todo!("bring the window to the front or something");
+        if let Some(window_handle) = self.plugin_to_window.borrow().get(&plugin_id) {
+            unsafe {
+                let _ = SetForegroundWindow(window_handle.0);
+            }
+            return GuiHandle(Arc::downgrade(window_handle));
         }
 
         let plugin_gui = clap_plugin
@@ -215,6 +218,10 @@ impl PluginUiHost {
         }
 
         plugin_gui.show(&mut plugin_handle).unwrap();
+
+        unsafe {
+            let _ = SetForegroundWindow(hwnd);
+        }
 
         let window_handle = Arc::new(WindowHandle(hwnd));
         let weak_window_handle = Arc::downgrade(&window_handle);
