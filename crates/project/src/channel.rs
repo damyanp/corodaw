@@ -51,15 +51,22 @@ fn handle_channel_messages_system(
         if let Ok((mut state, mut name, view)) = channels.get_mut(message.channel) {
             match &message.control {
                 ChannelControl::SetGain(value) => state.gain_value = *value,
-                ChannelControl::SetName(value) => *name = Name::new(value.clone()),
+                ChannelControl::SetName(value) => {
+                    *name = Name::new(value.clone());
+                    if let Some(channel_view) = view {
+                        let title = channel_view.window_title(value);
+                        clap_plugin_manager.set_title(channel_view.clap_plugin.plugin_id, title);
+                    }
+                }
                 ChannelControl::Mute(value) => state.muted = *value,
                 ChannelControl::Solo(value) => state.soloed = *value,
                 ChannelControl::Armed(value) => state.armed = *value,
                 ChannelControl::ShowGui => {
                     if let Some(mut channel_view) = view {
+                        let title = channel_view.window_title(name.as_str());
                         let gui_handle = futures::executor::block_on(async {
                             clap_plugin_manager
-                                .show_gui(channel_view.clap_plugin.plugin_id)
+                                .show_gui(channel_view.clap_plugin.plugin_id, title)
                                 .await
                                 .unwrap()
                         });
@@ -293,6 +300,10 @@ impl ChannelAudioView {
 
     pub fn plugin_id(&self) -> engine::plugins::ClapPluginId {
         self.clap_plugin.plugin_id
+    }
+
+    pub fn window_title(&self, channel_name: &str) -> String {
+        format!("{}: {channel_name}", self.clap_plugin.plugin_name)
     }
 }
 

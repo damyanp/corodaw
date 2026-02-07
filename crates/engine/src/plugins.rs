@@ -86,14 +86,24 @@ impl ClapPluginManager {
         futures::executor::block_on(async { receiver.await.unwrap() })
     }
 
-    pub fn show_gui(&self, clap_plugin_id: ClapPluginId) -> oneshot::Receiver<GuiHandle> {
+    pub fn show_gui(
+        &self,
+        clap_plugin_id: ClapPluginId,
+        title: String,
+    ) -> oneshot::Receiver<GuiHandle> {
         let (sender, receiver) = oneshot::channel();
 
         self.sender
-            .send(Message::ShowGui(clap_plugin_id, sender))
+            .send(Message::ShowGui(clap_plugin_id, title, sender))
             .unwrap();
 
         receiver
+    }
+
+    pub fn set_title(&self, clap_plugin_id: ClapPluginId, title: String) {
+        self.sender
+            .send(Message::SetTitle(clap_plugin_id, title))
+            .unwrap();
     }
 
     pub fn save_plugin_state(
@@ -179,17 +189,21 @@ impl PluginHostThread {
                             .borrow_mut()
                             .call_on_main_thread_callback();
                     }
-                    Message::ShowGui(clap_plugin_id, sender) => {
+                    Message::ShowGui(clap_plugin_id, title, sender) => {
                         let clap_plugin = self.get_plugin(clap_plugin_id);
 
                         let this = self.clone();
                         self.executor
                             .spawn(async move {
                                 println!("show gui!");
-                                let handle = this.plugin_ui_host.show_gui(&clap_plugin).await;
+                                let handle =
+                                    this.plugin_ui_host.show_gui(&clap_plugin, &title).await;
                                 sender.send(handle).unwrap();
                             })
                             .detach();
+                    }
+                    Message::SetTitle(clap_plugin_id, title) => {
+                        self.plugin_ui_host.set_title(clap_plugin_id, &title);
                     }
                     Message::ResizeHintsChanged(clap_plugin_id) => {
                         self.plugin_ui_host.resize_hints_changed(clap_plugin_id);
@@ -292,6 +306,7 @@ impl ClapPlugin {
         let shared = ClapPluginShared {
             channel: sender,
             plugin_id: clap_plugin_id,
+            plugin_name: plugin.name.clone(),
             extensions: Arc::default(),
         };
 
@@ -365,7 +380,8 @@ impl ClapPlugin {
 
 enum Message {
     CreatePlugin(FoundPlugin, oneshot::Sender<ClapPluginShared>),
-    ShowGui(ClapPluginId, oneshot::Sender<GuiHandle>),
+    ShowGui(ClapPluginId, String, oneshot::Sender<GuiHandle>),
+    SetTitle(ClapPluginId, String),
     RunOnMainThread(ClapPluginId),
     ResizeHintsChanged(ClapPluginId),
     RequestResize(ClapPluginId, GuiSize),
@@ -400,6 +416,7 @@ impl HostHandlers for ClapPlugin {
 pub struct ClapPluginShared {
     channel: Sender<Message>,
     pub plugin_id: ClapPluginId,
+    pub plugin_name: String,
     #[derivative(Debug = "ignore")]
     pub extensions: Arc<RwLock<Extensions>>,
 }

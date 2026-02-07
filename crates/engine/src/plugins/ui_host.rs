@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     collections::HashMap,
+    ffi::CString,
     hash::Hash,
     pin::Pin,
     rc::Rc,
@@ -18,8 +19,9 @@ use windows::{
             DefWindowProcA, DispatchMessageW, GWL_STYLE, GWLP_USERDATA, GetClientRect,
             GetWindowLongPtrA, IDC_ARROW, LoadCursorW, MSG, PM_REMOVE, PeekMessageW,
             RegisterClassA, SWP_ASYNCWINDOWPOS, SWP_NOMOVE, SetForegroundWindow, SetWindowLongPtrA,
-            SetWindowPos, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_DESTROY, WM_SIZE,
-            WNDCLASSA, WS_OVERLAPPEDWINDOW, WS_SIZEBOX, WS_THICKFRAME, WS_VISIBLE,
+            SetWindowPos, SetWindowTextA, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
+            WM_DESTROY, WM_SIZE, WNDCLASSA, WS_OVERLAPPEDWINDOW, WS_SIZEBOX, WS_THICKFRAME,
+            WS_VISIBLE,
         },
     },
     core::{Error, PCSTR, s},
@@ -166,7 +168,21 @@ impl PluginUiHost {
         }
     }
 
-    pub async fn show_gui(self: &Pin<Box<Self>>, clap_plugin: &Rc<ClapPlugin>) -> GuiHandle {
+    pub fn set_title(&self, clap_plugin_id: ClapPluginId, title: &str) {
+        let hwnd = self.plugin_to_window.borrow().get(&clap_plugin_id).cloned();
+        if let Some(hwnd) = hwnd {
+            let title = CString::new(title).unwrap_or_default();
+            unsafe {
+                let _ = SetWindowTextA(hwnd.0, PCSTR(title.as_ptr() as *const u8));
+            }
+        }
+    }
+
+    pub async fn show_gui(
+        self: &Pin<Box<Self>>,
+        clap_plugin: &Rc<ClapPlugin>,
+        title: &str,
+    ) -> GuiHandle {
         let plugin_id = clap_plugin.get_id();
         if let Some(window_handle) = self.plugin_to_window.borrow().get(&plugin_id) {
             unsafe {
@@ -203,7 +219,7 @@ impl PluginUiHost {
             .map(|h| h.can_resize_horizontally && h.can_resize_vertically)
             .unwrap_or(false);
 
-        let hwnd = self.create_window(initial_size, can_resize).unwrap();
+        let hwnd = self.create_window(initial_size, can_resize, title).unwrap();
         println!("got window handle: {:?}", hwnd);
 
         set_window_client_area(hwnd, initial_size);
@@ -262,7 +278,9 @@ impl PluginUiHost {
         self: &Pin<Box<Self>>,
         initial_size: GuiSize,
         can_resize: bool,
+        title: &str,
     ) -> windows::core::Result<HWND> {
+        let title = CString::new(title).unwrap_or_default();
         unsafe {
             let mut style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
             if !can_resize {
@@ -272,7 +290,7 @@ impl PluginUiHost {
             let hwnd = CreateWindowExA(
                 WINDOW_EX_STYLE::default(),
                 self.wndclass_name,
-                s!("This is a sample window"),
+                PCSTR(title.as_ptr() as *const u8),
                 style,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
