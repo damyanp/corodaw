@@ -11,6 +11,8 @@ use engine::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use base64::{Engine, engine::general_purpose};
+
 use crate::{AvailablePlugin, ChannelOrder, Id};
 
 pub struct ChannelBevyPlugin;
@@ -93,6 +95,11 @@ fn set_plugins_system(
 
         let channel_entity = commands.get_entity(entity).unwrap();
 
+        let plugin_state_bytes = data
+            .plugin_state
+            .as_deref()
+            .and_then(|s| general_purpose::STANDARD.decode(s).ok());
+
         set_plugin(
             &clap_plugin_manager,
             &summer,
@@ -100,6 +107,7 @@ fn set_plugins_system(
             channel_entity,
             found_plugin,
             gain_control,
+            plugin_state_bytes.as_deref(),
         );
     }
 }
@@ -111,8 +119,21 @@ fn set_plugin(
     mut channel_entity: EntityCommands<'_>,
     found_plugin: &FoundPlugin,
     gain_control: Option<&ChannelGainControl>,
+    plugin_state_data: Option<&[u8]>,
 ) {
     let clap_plugin = clap_plugin_manager.create_plugin_sync(found_plugin.clone());
+
+    if let Some(state_data) = plugin_state_data {
+        let result = futures::executor::block_on(async {
+            clap_plugin_manager
+                .load_plugin_state(clap_plugin.plugin_id, state_data.to_vec())
+                .await
+                .unwrap()
+        });
+        if let Err(e) = result {
+            eprintln!("Warning: failed to load plugin state: {e}");
+        }
+    }
 
     // TODO: destroy the old plugin and its graph node!
 
@@ -227,6 +248,8 @@ struct InputNode(pub Entity);
 #[require(ChannelState)]
 pub struct ChannelData {
     pub plugin_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_state: Option<String>,
 }
 
 #[derive(Component, Debug, Clone, Serialize, Deserialize)]
@@ -266,6 +289,10 @@ impl ChannelAudioView {
             .as_ref()
             .map(|h| h.is_visible())
             .unwrap_or(false)
+    }
+
+    pub fn plugin_id(&self) -> engine::plugins::ClapPluginId {
+        self.clap_plugin.plugin_id
     }
 }
 

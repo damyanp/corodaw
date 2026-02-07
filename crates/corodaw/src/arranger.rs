@@ -226,6 +226,7 @@ fn show_available_plugins_menu(
         if ui.button(found_plugin.name.as_str()).clicked() {
             commands.entity(channel_entity).insert(ChannelData {
                 plugin_id: found_plugin.id.clone(),
+                plugin_state: None,
             });
         }
     }

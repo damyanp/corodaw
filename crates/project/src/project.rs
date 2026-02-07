@@ -1,12 +1,13 @@
 use std::{collections::HashMap, fs::File, path::PathBuf};
 
+use base64::{Engine, engine::general_purpose};
 use bevy_app::prelude::*;
 use bevy_ecs::{name::Name, prelude::*, system::RunSystemOnce};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::{ChannelData, ChannelState, Id, new_channel};
+use crate::{ChannelAudioView, ChannelData, ChannelState, Id, new_channel};
 
 #[derive(Component, Default)]
 pub struct Project {
@@ -150,7 +151,14 @@ fn on_load_event(
 fn on_save_event(
     save_event: On<SaveEvent>,
     project_query: Single<(&mut Project, &ChannelOrder)>,
-    channels_query: Query<(&Name, Option<&ChannelData>, &ChannelState, &Id)>,
+    channels_query: Query<(
+        &Name,
+        Option<&ChannelData>,
+        &ChannelState,
+        &Id,
+        Option<&ChannelAudioView>,
+    )>,
+    clap_plugin_manager: NonSend<engine::plugins::ClapPluginManager>,
 ) {
     println!("Save: {:?}", save_event.path);
 
@@ -158,9 +166,25 @@ fn on_save_event(
 
     let channels: Vec<_> = channels_query
         .iter()
-        .map(
-            |(name, data, state, id)| json!({"name": name, "data": data, "state": state, "id": id}),
-        )
+        .map(|(name, data, state, id, view)| {
+            let data = match (data, view) {
+                (Some(data), Some(view)) => {
+                    let plugin_state = futures::executor::block_on(async {
+                        clap_plugin_manager
+                            .save_plugin_state(view.plugin_id())
+                            .await
+                            .ok()
+                            .flatten()
+                    });
+                    let mut data = data.clone();
+                    data.plugin_state =
+                        plugin_state.map(|bytes| general_purpose::STANDARD.encode(&bytes));
+                    Some(data)
+                }
+                (data, _) => data.cloned(),
+            };
+            json!({"name": name, "data": data, "state": state, "id": id})
+        })
         .collect();
 
     let channel_order: Vec<_> = channel_order

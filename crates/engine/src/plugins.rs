@@ -2,6 +2,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     ffi::CString,
+    io::Cursor,
     pin::Pin,
     rc::Rc,
     sync::{
@@ -17,6 +18,7 @@ use clack_extensions::{
     gui::{GuiSize, HostGui, HostGuiImpl, PluginGui},
     log::{HostLog, HostLogImpl},
     params::{HostParams, HostParamsImplMainThread, HostParamsImplShared},
+    state::{HostState, HostStateImpl, PluginState},
     timer::{HostTimer, PluginTimer},
 };
 use clack_host::{
@@ -91,6 +93,29 @@ impl ClapPluginManager {
             .send(Message::ShowGui(clap_plugin_id, sender))
             .unwrap();
 
+        receiver
+    }
+
+    pub fn save_plugin_state(
+        &self,
+        clap_plugin_id: ClapPluginId,
+    ) -> oneshot::Receiver<Option<Vec<u8>>> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Message::SaveState(clap_plugin_id, sender))
+            .unwrap();
+        receiver
+    }
+
+    pub fn load_plugin_state(
+        &self,
+        clap_plugin_id: ClapPluginId,
+        data: Vec<u8>,
+    ) -> oneshot::Receiver<Result<(), String>> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Message::LoadState(clap_plugin_id, data, sender))
+            .unwrap();
         receiver
     }
 }
@@ -180,6 +205,56 @@ impl PluginHostThread {
                         let num_outputs = processor.get_total_output_channels() as u16;
 
                         sender.send((num_inputs, num_outputs, processor)).unwrap();
+                    }
+                    Message::SaveState(clap_plugin_id, sender) => {
+                        let clap_plugin = self.get_plugin(clap_plugin_id);
+                        let state_ext = {
+                            let plugin = clap_plugin.plugin.borrow();
+                            plugin.access_shared_handler(|h: &ClapPluginShared| {
+                                h.extensions.read().unwrap().plugin_state
+                            })
+                        };
+                        let result = match state_ext {
+                            Some(state_ext) => {
+                                let mut buffer = Vec::new();
+                                let mut plugin = clap_plugin.plugin.borrow_mut();
+                                match state_ext.save(&mut plugin.plugin_handle(), &mut buffer) {
+                                    Ok(()) => Some(buffer),
+                                    Err(e) => {
+                                        eprintln!("Failed to save plugin state: {e}");
+                                        None
+                                    }
+                                }
+                            }
+                            None => {
+                                eprintln!(
+                                    "Warning: plugin {:?} does not support state extension",
+                                    clap_plugin_id
+                                );
+                                None
+                            }
+                        };
+                        sender.send(result).unwrap();
+                    }
+                    Message::LoadState(clap_plugin_id, data, sender) => {
+                        let clap_plugin = self.get_plugin(clap_plugin_id);
+                        let state_ext = {
+                            let plugin = clap_plugin.plugin.borrow();
+                            plugin.access_shared_handler(|h: &ClapPluginShared| {
+                                h.extensions.read().unwrap().plugin_state
+                            })
+                        };
+                        let result = match state_ext {
+                            Some(state_ext) => {
+                                let mut reader = Cursor::new(data);
+                                let mut plugin = clap_plugin.plugin.borrow_mut();
+                                state_ext
+                                    .load(&mut plugin.plugin_handle(), &mut reader)
+                                    .map_err(|e| format!("{e}"))
+                            }
+                            None => Err("Plugin does not support state extension".to_string()),
+                        };
+                        sender.send(result).unwrap();
                     }
                 },
             }
@@ -298,6 +373,8 @@ enum Message {
         ClapPluginId,
         oneshot::Sender<(u16, u16, Box<dyn Processor>)>,
     ),
+    SaveState(ClapPluginId, oneshot::Sender<Option<Vec<u8>>>),
+    LoadState(ClapPluginId, Vec<u8>, oneshot::Sender<Result<(), String>>),
 }
 
 impl HostHandlers for ClapPlugin {
@@ -313,7 +390,8 @@ impl HostHandlers for ClapPlugin {
             .register::<HostLog>()
             .register::<HostGui>()
             .register::<HostTimer>()
-            .register::<HostParams>();
+            .register::<HostParams>()
+            .register::<HostState>();
     }
 }
 
@@ -330,6 +408,7 @@ pub struct ClapPluginShared {
 pub struct Extensions {
     pub plugin_gui: Option<PluginGui>,
     pub audio_ports: Option<PluginAudioPorts>,
+    pub plugin_state: Option<PluginState>,
 }
 
 impl ClapPluginShared {
@@ -402,6 +481,12 @@ impl HostParamsImplShared for ClapPluginShared {
     }
 }
 
+impl<'a> HostStateImpl for ClapPluginMainThread<'a> {
+    fn mark_dirty(&mut self) {
+        println!("[host state] Plugin marked state as dirty");
+    }
+}
+
 unsafe impl Send for ClapPluginShared {}
 
 impl<'a> host::SharedHandler<'a> for ClapPluginShared {
@@ -409,6 +494,7 @@ impl<'a> host::SharedHandler<'a> for ClapPluginShared {
         let mut extensions = self.extensions.write().unwrap();
         extensions.audio_ports = instance.get_extension();
         extensions.plugin_gui = instance.get_extension();
+        extensions.plugin_state = instance.get_extension();
     }
 
     fn request_restart(&self) {

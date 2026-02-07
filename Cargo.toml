@@ -22,8 +22,10 @@ clack-extensions = { package = "clack-extensions", git = "https://github.com/pro
   "note-ports",
   "params",
   "raw-window-handle_06",
+  "state",
   "timer"
 ] }
+base64 = "0.22"
 clack-host = { package = "clack-host", git = "https://github.com/prokopyl/clack.git" }
 cpal = { version = "0.17.0", features = ["asio"] }
 derivative = "2.2.0"
