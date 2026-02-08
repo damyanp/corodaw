@@ -25,6 +25,7 @@ impl Plugin for ChannelBevyPlugin {
                 set_plugins_system,
                 update_channels_system,
                 sync_channel_order_system,
+                sync_plugin_window_titles_system.after(handle_channel_messages_system),
             ),
         );
     }
@@ -53,10 +54,6 @@ fn handle_channel_messages_system(
                 ChannelControl::SetGain(value) => state.gain_value = *value,
                 ChannelControl::SetName(value) => {
                     *name = Name::new(value.clone());
-                    if let Some(channel_view) = view {
-                        let title = channel_view.window_title(value);
-                        clap_plugin_manager.set_title(channel_view.clap_plugin.plugin_id, title);
-                    }
                 }
                 ChannelControl::Mute(value) => state.muted = *value,
                 ChannelControl::Solo(value) => state.soloed = *value,
@@ -74,6 +71,19 @@ fn handle_channel_messages_system(
                     }
                 }
             }
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn sync_plugin_window_titles_system(
+    channels: Query<(&Name, &ChannelAudioView), Or<(Changed<Name>, Changed<ChannelAudioView>)>>,
+    clap_plugin_manager: NonSend<ClapPluginManager>,
+) {
+    for (name, view) in &channels {
+        if view.has_gui() {
+            let title = view.window_title(name.as_str());
+            clap_plugin_manager.set_title(view.clap_plugin.plugin_id, title);
         }
     }
 }
