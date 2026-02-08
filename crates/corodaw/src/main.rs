@@ -2,35 +2,72 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use audio_graph::StateReader;
 use bevy_app::prelude::*;
-use bevy_ecs::{prelude::*, system::RunSystemOnce};
+use bevy_ecs::{
+    prelude::*,
+    system::{RunSystemOnce, command},
+    world::CommandQueue,
+};
 use eframe::{
     UserEvent,
-    egui::{self, Ui, vec2},
+    egui::{self, Button, MenuBar, Ui, vec2},
 };
-use project::{LoadEvent, Project, SaveEvent};
-use smol::{LocalExecutor, Task};
+use project::{CommandManager, LoadEvent, Project, SaveEvent};
+use smol::{LocalExecutor, Task, future};
 use winit::event_loop::EventLoop;
 
 use crate::arranger::arranger_ui_system;
 
 mod arranger;
 
+#[derive(Default)]
+struct Executor {
+    executor: LocalExecutor<'static>,
+    current_task: Option<Task<CommandQueue>>,
+}
+
+impl Executor {
+    pub fn is_active(&self) -> bool {
+        self.current_task.is_some()
+    }
+
+    pub fn spawn(&mut self, future: impl Future<Output = CommandQueue> + 'static) {
+        assert!(self.current_task.is_none());
+        self.current_task = Some(self.executor.spawn(future));
+    }
+}
+
 struct Corodaw {
     app: Rc<RefCell<bevy_app::App>>,
-    executor: LocalExecutor<'static>,
-    current_task: Option<Task<()>>,
 }
 
 impl Default for Corodaw {
     fn default() -> Self {
         let mut app = project::make_app();
+        app.add_systems(First, update_executor_system);
         app.add_systems(PostUpdate, set_titlebar_system);
+        app.insert_non_send_resource(Executor::default());
+        app.add_observer(on_menu_command);
 
         Self {
             app: Rc::new(RefCell::new(app)),
-            executor: LocalExecutor::new(),
-            current_task: None,
         }
+    }
+}
+
+fn update_executor_system(world: &mut World) {
+    let mut executor = world.non_send_resource_mut::<Executor>();
+    while executor.executor.try_tick() {}
+
+    if let Some(task) = &mut executor.current_task
+        && task.is_finished()
+    {
+        // I couldn't find a nice way to get it so these async tasks could
+        // mutate the World. Instead, we allow them to build up a CommandQueue
+        // that we can then apply when we're back into a Bevy system.
+        let task = executor.current_task.take().unwrap();
+
+        let mut c = future::block_on(task);
+        c.apply(world);
     }
 }
 
@@ -38,23 +75,27 @@ impl eframe::App for Corodaw {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.update_logic(ctx);
 
+        let mut app = self.app.borrow_mut();
+        let world = app.world_mut();
+
+        let executor: &Executor = world.non_send_resource();
+        let executor_is_active = executor.is_active();
+
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-            if self.current_task.is_some() {
+            if executor_is_active {
                 ui.disable();
             }
-            egui::MenuBar::new().ui(ui, |ui| self.main_menu_bar(ui));
+            world
+                .run_system_once_with(Self::menu_bar_system, ui)
+                .unwrap();
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            if self.current_task.is_some() {
+            if executor_is_active {
                 ui.disable();
             }
 
-            let mut app = self.app.borrow_mut();
-            let world = app.world_mut();
-
             world.non_send_resource_mut::<StateReader>().swap_buffers();
-
             world.run_system_once_with(arranger_ui_system, ui).unwrap();
         });
     }
@@ -70,66 +111,80 @@ impl Corodaw {
             .borrow_mut()
             .world_mut()
             .remove_non_send_resource::<egui::Context>();
+    }
 
-        while self.executor.try_tick() {}
+    fn menu_bar_system(
+        mut ui: InMut<Ui>,
+        mut commands: Commands,
+        command_manager: Single<&CommandManager>,
+    ) {
+        MenuBar::new().ui(&mut ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("Open...").clicked() {
+                    commands.trigger(MenuCommand::Open);
+                }
+                if ui.button("Save...").clicked() {
+                    commands.trigger(MenuCommand::Open);
+                }
+                ui.separator();
+                if ui.button("Quit").clicked() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+            ui.menu_button("Edit", |ui| {
+                if ui
+                    .add_enabled(command_manager.can_undo(), Button::new("Undo"))
+                    .clicked()
+                {
+                    // TOOD: undo
+                }
+                if ui
+                    .add_enabled(command_manager.can_redo(), Button::new("Redo"))
+                    .clicked()
+                {
+                    // TODO: redo
+                }
+            });
+        });
+    }
+}
 
-        if let Some(task) = &self.current_task
-            && task.is_finished()
-        {
-            self.current_task = None;
+#[derive(Event, Clone, Copy)]
+pub enum MenuCommand {
+    Open,
+    Save,
+}
+
+fn on_menu_command(command: On<MenuCommand>, mut executor: NonSendMut<Executor>) {
+    let command = *command;
+    executor.spawn(async move {
+        let mut command_queue = CommandQueue::default();
+
+        match command {
+            MenuCommand::Open => {
+                let file = rfd::AsyncFileDialog::new()
+                    .add_filter("Corodaw Project", &["corodaw"])
+                    .pick_file()
+                    .await;
+
+                if let Some(file) = file {
+                    command_queue.push(command::trigger(LoadEvent::new(file)));
+                }
+            }
+
+            MenuCommand::Save => {
+                let file = rfd::AsyncFileDialog::new()
+                    .add_filter("Corodaw Project", &["corodaw"])
+                    .save_file()
+                    .await;
+
+                if let Some(file) = file {
+                    command_queue.push(command::trigger(SaveEvent::new(file)));
+                }
+            }
         }
-    }
-
-    fn main_menu_bar(&mut self, ui: &mut Ui) {
-        ui.menu_button("File", |ui| {
-            if ui.button("Open...").clicked() {
-                self.open();
-            }
-            if ui.button("Save...").clicked() {
-                self.save();
-            }
-            ui.separator();
-            if ui.button("Quit").clicked() {
-                todo!();
-            }
-        });
-    }
-
-    fn open(&mut self) {
-        assert!(self.current_task.is_none());
-
-        let app = self.app.clone();
-        let task = self.executor.spawn(async move {
-            let file = rfd::AsyncFileDialog::new()
-                .add_filter("Corodaw Project", &["corodaw"])
-                .pick_file()
-                .await;
-
-            if let Some(file) = file {
-                app.borrow_mut().world_mut().trigger(LoadEvent::new(file));
-            }
-        });
-
-        self.current_task = Some(task);
-    }
-
-    fn save(&mut self) {
-        assert!(self.current_task.is_none());
-
-        let app = self.app.clone();
-        let task = self.executor.spawn(async move {
-            let file = rfd::AsyncFileDialog::new()
-                .add_filter("Corodaw Project", &["corodaw"])
-                .save_file()
-                .await;
-
-            if let Some(file) = file {
-                app.borrow_mut().world_mut().trigger(SaveEvent::new(file));
-            }
-        });
-
-        self.current_task = Some(task);
-    }
+        command_queue
+    });
 }
 
 fn set_titlebar_system(ctx: NonSend<egui::Context>, project: Single<&Project, Changed<Project>>) {

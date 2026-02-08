@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::{ChannelAudioView, ChannelData, ChannelState, Id, new_channel};
+use crate::{ChannelAudioView, ChannelData, ChannelState, CommandManager, Id, new_channel};
 
 #[derive(Component, Default)]
 pub struct Project {
@@ -46,8 +46,11 @@ impl ChannelOrder {
 pub struct ProjectPlugin;
 impl Plugin for ProjectPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn((Project::default(), ChannelOrder::default()));
+        app.world_mut().spawn((
+            Project::default(),
+            ChannelOrder::default(),
+            CommandManager::default(),
+        ));
 
         app.world_mut()
             .run_system_once(

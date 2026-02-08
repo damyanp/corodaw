@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 mod app;
 mod channel;
+mod commands;
 mod found_plugin;
 mod project;
 
@@ -12,6 +13,7 @@ pub use channel::{
     ChannelAudioView, ChannelControl, ChannelData, ChannelGainControl, ChannelMessage,
     ChannelState, new_channel,
 };
+pub use commands::*;
 pub use found_plugin::AvailablePlugin;
 pub use project::{ChannelOrder, LoadEvent, Project, SaveEvent};
 
