@@ -1168,9 +1168,11 @@ dependencies = [
  "eframe",
  "egui_extras",
  "engine",
+ "futures",
  "project",
  "rfd",
  "smol",
+ "uuid",
  "winit",
 ]
 

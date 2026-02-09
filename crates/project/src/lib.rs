@@ -9,13 +9,10 @@ mod found_plugin;
 mod project;
 
 pub use app::make_app;
-pub use channel::{
-    ChannelAudioView, ChannelControl, ChannelData, ChannelGainControl, ChannelMessage,
-    ChannelState, new_channel,
-};
+pub use channel::*;
 pub use commands::*;
 pub use found_plugin::AvailablePlugin;
 pub use project::{ChannelOrder, LoadEvent, Project, SaveEvent};
 
 #[derive(Component, Serialize, Deserialize)]
-struct Id(Uuid);
+pub struct Id(pub Uuid);

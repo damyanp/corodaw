@@ -10,10 +10,12 @@ use eframe::egui::{
     RichText, Sense, Slider, Stroke, TextEdit, Ui, pos2, vec2,
 };
 use egui_extras::{Size, StripBuilder};
+use engine::plugins::ClapPluginManager;
 use project::{
-    AvailablePlugin, ChannelAudioView, ChannelControl, ChannelData, ChannelGainControl,
-    ChannelMessage, ChannelOrder, ChannelState,
+    AvailablePlugin, ChannelAudioView, ChannelData, ChannelGainControl, ChannelOrder, ChannelState,
+    CommandManager, RenameChannelCommand,
 };
+use uuid::Uuid;
 
 #[derive(SystemParam)]
 #[expect(clippy::type_complexity)]
@@ -24,16 +26,18 @@ pub struct ArrangerData<'w, 's> {
         's,
         (
             Entity,
-            &'static Name,
-            &'static ChannelState,
+            &'static project::Id,
+            &'static mut Name,
+            &'static mut ChannelState,
             Option<&'static ChannelGainControl>,
-            Option<&'static ChannelAudioView>,
+            Option<&'static mut ChannelAudioView>,
         ),
     >,
     available_plugins: Query<'w, 's, &'static AvailablePlugin>,
     channel_order: Single<'w, 's, &'static mut ChannelOrder>,
     state_reader: NonSend<'w, StateReader>,
-    messages: MessageWriter<'w, ChannelMessage>,
+    clap_plugin_manager: NonSend<'w, ClapPluginManager>,
+    command_manager: NonSendMut<'w, CommandManager>,
 }
 
 impl ArrangerDataProvider for ArrangerData<'_, '_> {
@@ -53,11 +57,11 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             .get(index)
             .expect("ChannelOrder index out of bounds");
 
-        let Ok((entity, name, state, gain_control, audio_view)) = self.channels.get(entity) else {
+        let Ok((entity, channel, mut name, mut state, gain_control, audio_view)) =
+            self.channels.get_mut(entity)
+        else {
             return;
         };
-
-        let mut messages: Vec<ChannelMessage> = Vec::new();
 
         let peaks = gain_control.and_then(|gc| self.state_reader.get(&gc.0.entity));
 
@@ -77,11 +81,11 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                                 .vertical(|mut strip| {
                                     strip.cell(|ui| {
                                         ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                                            mute_solo_arm_buttons(&mut messages, entity, state, ui);
+                                            mute_solo_arm_buttons(channel.0, &mut state, ui);
                                             show_channel_name_editor(
-                                                &mut messages,
-                                                entity,
-                                                name,
+                                                channel.0,
+                                                &mut name,
+                                                &mut self.command_manager,
                                                 ui,
                                             );
                                         });
@@ -90,9 +94,15 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                                         ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                                             let input_button_response;
 
-                                            if audio_view.is_some() {
+                                            if let Some(mut audio_view) = audio_view {
                                                 input_button_response = ui.button("🎵");
-                                                show_gui_button(&mut messages, entity, ui);
+
+                                                let clap_plugin_manager = &self.clap_plugin_manager;
+                                                show_gui_button(
+                                                    &clap_plugin_manager,
+                                                    &mut audio_view,
+                                                    ui,
+                                                );
                                             } else {
                                                 input_button_response = ui.button("?");
                                             }
@@ -106,7 +116,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                                                 );
                                             });
 
-                                            show_gain_slider(&mut messages, entity, state, ui);
+                                            show_gain_slider(channel.0, &mut state, ui);
                                         });
                                     });
                                 });
@@ -114,8 +124,6 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                         strip.cell(|ui| show_meters(peaks, ui));
                     });
             });
-
-        self.messages.write_batch(messages);
     }
 
     fn show_strip(&mut self, _: usize, ui: &mut Ui) {
@@ -189,7 +197,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             .get(index)
             .expect("ChannelOrder index out of bounds");
 
-        let (_entity, name, _state, _gain_control, _audio_view) =
+        let (_, _entity, name, _state, _gain_control, _audio_view) =
             self.channels.get(entity).unwrap();
 
         ui.label(name.as_str());
@@ -228,20 +236,20 @@ fn show_available_plugins_menu(
 }
 
 fn show_channel_name_editor(
-    messages: &mut Vec<ChannelMessage>,
-    entity: Entity,
-    name: &Name,
+    channel: Uuid,
+    name: &mut Name,
+    command_manager: &mut CommandManager,
     ui: &mut Ui,
 ) {
     // When we click on the label we switch to letting us rename the channel
-    let name_edit_id = Id::new(("channel_name_edit", entity));
+    let name_edit_id = Id::new(("channel_name_edit", channel));
     let mut edit_value = ui
         .ctx()
         .data_mut(|d| d.get_temp::<Option<String>>(name_edit_id))
         .unwrap_or(None);
 
     // We want the text to be selected when the text box is initially created
-    let name_edit_select_all_id = Id::new(("channel_name_select_all", entity));
+    let name_edit_select_all_id = Id::new(("channel_name_select_all", channel));
     let mut select_all = ui
         .ctx()
         .data_mut(|d| d.get_temp::<bool>(name_edit_select_all_id))
@@ -265,10 +273,9 @@ fn show_channel_name_editor(
         } else if commit {
             let trimmed = value.trim();
             if !trimmed.is_empty() && trimmed != name.as_str() {
-                messages.push(ChannelMessage {
-                    channel: entity,
-                    control: ChannelControl::SetName(trimmed.to_owned()),
-                });
+                let undo = Box::new(RenameChannelCommand::new(channel, name.as_str().to_owned()));
+                name.set(trimmed.to_owned());
+                command_manager.add_undo(undo);
             }
             edit_value = None;
         }
@@ -293,12 +300,7 @@ fn show_channel_name_editor(
     });
 }
 
-fn show_gain_slider(
-    messages: &mut Vec<ChannelMessage>,
-    entity: Entity,
-    state: &ChannelState,
-    ui: &mut Ui,
-) {
+fn show_gain_slider(_channel: Uuid, state: &mut ChannelState, ui: &mut Ui) {
     let mut gain_value = state.gain_value;
     ui.vertical(|ui| {
         ui.spacing_mut().slider_width = ui.available_size().x;
@@ -306,10 +308,7 @@ fn show_gain_slider(
             .add(Slider::new(&mut gain_value, 0.0..=1.0).show_value(false))
             .changed()
         {
-            messages.push(ChannelMessage {
-                channel: entity,
-                control: ChannelControl::SetGain(gain_value),
-            });
+            state.gain_value = gain_value;
         }
     });
 }
@@ -329,47 +328,46 @@ fn show_meters(peaks: Option<&StateValue>, ui: &mut Ui) {
     });
 }
 
-fn show_gui_button(messages: &mut Vec<ChannelMessage>, entity: Entity, ui: &mut Ui) {
+fn show_gui_button(
+    clap_plugin_manager: &ClapPluginManager,
+    channel_audio_view: &mut ChannelAudioView,
+    ui: &mut Ui,
+) {
     if ui.button("Show").clicked() {
-        messages.push(ChannelMessage {
-            channel: entity,
-            control: ChannelControl::ShowGui,
+        // TODO: use the executor resource so we don't need a block_on here
+        let gui_handle = futures::executor::block_on(async {
+            clap_plugin_manager
+                .show_gui(channel_audio_view.plugin_id(), "<untitled>".to_owned())
+                .await
+                .unwrap()
         });
+        channel_audio_view.set_gui_handle(gui_handle);
     }
 }
 
-fn mute_solo_arm_buttons(
-    messages: &mut Vec<ChannelMessage>,
-    entity: Entity,
-    state: &ChannelState,
-    ui: &mut Ui,
-) {
-    let mut control_button =
-        |label: &str, color: Color32, selected: bool, control: fn(bool) -> ChannelControl| {
-            let color = if selected {
-                color
-            } else {
-                color.gamma_multiply(0.5)
-            };
-
-            if ui
-                .add(
-                    Button::new(RichText::new(label).color(Color32::BLACK))
-                        .fill(color)
-                        .selected(selected),
-                )
-                .clicked()
-            {
-                messages.push(ChannelMessage {
-                    channel: entity,
-                    control: control(!selected),
-                });
-            }
+fn mute_solo_arm_buttons(_channel: Uuid, state: &mut ChannelState, ui: &mut Ui) {
+    let mut control_button = |label: &str, color: Color32, selected: &mut bool| {
+        let color = if *selected {
+            color
+        } else {
+            color.gamma_multiply(0.5)
         };
 
-    control_button("M", Color32::ORANGE, state.muted, ChannelControl::Mute);
-    control_button("S", Color32::GREEN, state.soloed, ChannelControl::Solo);
-    control_button("R", Color32::DARK_RED, state.armed, ChannelControl::Armed);
+        if ui
+            .add(
+                Button::new(RichText::new(label).color(Color32::BLACK))
+                    .fill(color)
+                    .selected(*selected),
+            )
+            .clicked()
+        {
+            *selected = !*selected;
+        }
+    };
+
+    control_button("M", Color32::ORANGE, &mut state.muted);
+    control_button("S", Color32::GREEN, &mut state.soloed);
+    control_button("R", Color32::DARK_RED, &mut state.armed);
 }
 
 pub fn arranger_ui_system(mut ui: InMut<Ui>, data: ArrangerData) {

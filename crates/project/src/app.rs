@@ -25,7 +25,7 @@ pub fn make_app() -> App {
         .insert_non_send_resource(midi_input)
         .insert_non_send_resource(summer)
         .insert_non_send_resource(audio)
-        .add_plugins(channel::ChannelBevyPlugin);
+        .add_plugins((channel::ChannelBevyPlugin, CommandManagerBevyPlugin));
 
     add_available_plugins(app.world_mut());
 

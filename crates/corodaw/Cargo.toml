@@ -11,7 +11,9 @@ corodaw-widgets = { path = "../corodaw-widgets" }
 eframe.workspace = true
 egui_extras.workspace = true
 engine = { path = "../engine" }
+futures.workspace = true
 project = { path = "../project" }
 rfd = "0.17.2"
 smol.workspace = true
+uuid.workspace = true
 winit = "0.30.12"

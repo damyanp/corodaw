@@ -13,20 +13,21 @@ use uuid::Uuid;
 
 use base64::{Engine, engine::general_purpose};
 
+use crate::commands::Command;
 use crate::{AvailablePlugin, ChannelOrder, Id};
 
 pub struct ChannelBevyPlugin;
 impl Plugin for ChannelBevyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ChannelMessage>().add_systems(
+        app.add_systems(
             Update,
             (
-                handle_channel_messages_system,
                 set_plugins_system,
                 update_channels_system,
                 sync_channel_order_system,
-                sync_plugin_window_titles_system.after(handle_channel_messages_system),
-            ),
+                sync_plugin_window_titles_system,
+            )
+                .chain(),
         );
     }
 }
@@ -37,42 +38,6 @@ pub fn new_channel() -> impl Bundle {
         Name::new("unnamed channel"),
         Id(Uuid::new_v4()),
     )
-}
-
-fn handle_channel_messages_system(
-    mut channels: Query<(&mut ChannelState, &mut Name, Option<&mut ChannelAudioView>)>,
-    mut messages: MessageReader<ChannelMessage>,
-    clap_plugin_manager: NonSend<ClapPluginManager>,
-) {
-    if messages.is_empty() {
-        return;
-    }
-
-    for message in messages.read() {
-        if let Ok((mut state, mut name, view)) = channels.get_mut(message.channel) {
-            match &message.control {
-                ChannelControl::SetGain(value) => state.gain_value = *value,
-                ChannelControl::SetName(value) => {
-                    *name = Name::new(value.clone());
-                }
-                ChannelControl::Mute(value) => state.muted = *value,
-                ChannelControl::Solo(value) => state.soloed = *value,
-                ChannelControl::Armed(value) => state.armed = *value,
-                ChannelControl::ShowGui => {
-                    if let Some(mut channel_view) = view {
-                        let title = channel_view.window_title(name.as_str());
-                        let gui_handle = futures::executor::block_on(async {
-                            clap_plugin_manager
-                                .show_gui(channel_view.clap_plugin.plugin_id, title)
-                                .await
-                                .unwrap()
-                        });
-                        channel_view.gui_handle = Some(gui_handle);
-                    }
-                }
-            }
-        }
-    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -315,20 +280,38 @@ impl ChannelAudioView {
     pub fn window_title(&self, channel_name: &str) -> String {
         format!("{}: {channel_name}", self.clap_plugin.plugin_name)
     }
-}
 
-#[derive(Message, Debug)]
-pub struct ChannelMessage {
-    pub channel: Entity,
-    pub control: ChannelControl,
+    pub fn set_gui_handle(&mut self, gui_handle: GuiHandle) {
+        self.gui_handle = Some(gui_handle);
+    }
 }
 
 #[derive(Debug)]
-pub enum ChannelControl {
-    SetGain(f32),
-    SetName(String),
-    Mute(bool),
-    Solo(bool),
-    Armed(bool),
-    ShowGui,
+pub struct RenameChannelCommand {
+    channel: Uuid,
+    name: String,
+}
+
+impl RenameChannelCommand {
+    pub fn new(channel: Uuid, name: String) -> Self {
+        Self { channel, name }
+    }
+}
+
+impl Command for RenameChannelCommand {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+        let mut channels_query = world.query::<(&Id, &mut Name)>();
+
+        let channel = channels_query
+            .iter_mut(world)
+            .find(|(id, _)| id.0 == self.channel)
+            .map(|(_, name)| name);
+        if let Some(mut name) = channel {
+            let old_name = name.as_str().to_owned();
+            name.set(self.name.clone());
+            return Some(Box::new(RenameChannelCommand::new(self.channel, old_name)));
+        }
+
+        None
+    }
 }

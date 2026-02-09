@@ -46,11 +46,10 @@ impl ChannelOrder {
 pub struct ProjectPlugin;
 impl Plugin for ProjectPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Project::default(),
-            ChannelOrder::default(),
-            CommandManager::default(),
-        ));
+        app.world_mut()
+            .spawn((Project::default(), ChannelOrder::default()));
+
+        app.insert_non_send_resource(CommandManager::default());
 
         app.world_mut()
             .run_system_once(

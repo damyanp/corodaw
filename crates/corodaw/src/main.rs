@@ -11,7 +11,7 @@ use eframe::{
     UserEvent,
     egui::{self, Button, MenuBar, Ui, vec2},
 };
-use project::{CommandManager, LoadEvent, Project, SaveEvent};
+use project::{CommandManager, LoadEvent, Project, SaveEvent, UndoRedoEvent};
 use smol::{LocalExecutor, Task, future};
 use winit::event_loop::EventLoop;
 
@@ -46,7 +46,7 @@ impl Default for Corodaw {
         app.add_systems(First, update_executor_system);
         app.add_systems(PostUpdate, set_titlebar_system);
         app.insert_non_send_resource(Executor::default());
-        app.add_observer(on_menu_command);
+        app.add_observer(on_file_command);
 
         Self {
             app: Rc::new(RefCell::new(app)),
@@ -116,15 +116,15 @@ impl Corodaw {
     fn menu_bar_system(
         mut ui: InMut<Ui>,
         mut commands: Commands,
-        command_manager: Single<&CommandManager>,
+        command_manager: NonSendMut<CommandManager>,
     ) {
         MenuBar::new().ui(&mut ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.button("Open...").clicked() {
-                    commands.trigger(MenuCommand::Open);
+                    commands.trigger(FileCommand::Open);
                 }
                 if ui.button("Save...").clicked() {
-                    commands.trigger(MenuCommand::Open);
+                    commands.trigger(FileCommand::Save);
                 }
                 ui.separator();
                 if ui.button("Quit").clicked() {
@@ -136,13 +136,13 @@ impl Corodaw {
                     .add_enabled(command_manager.can_undo(), Button::new("Undo"))
                     .clicked()
                 {
-                    // TOOD: undo
+                    commands.trigger(UndoRedoEvent::Undo);
                 }
                 if ui
                     .add_enabled(command_manager.can_redo(), Button::new("Redo"))
                     .clicked()
                 {
-                    // TODO: redo
+                    commands.trigger(UndoRedoEvent::Redo);
                 }
             });
         });
@@ -150,18 +150,18 @@ impl Corodaw {
 }
 
 #[derive(Event, Clone, Copy)]
-pub enum MenuCommand {
+pub enum FileCommand {
     Open,
     Save,
 }
 
-fn on_menu_command(command: On<MenuCommand>, mut executor: NonSendMut<Executor>) {
+fn on_file_command(command: On<FileCommand>, mut executor: NonSendMut<Executor>) {
     let command = *command;
     executor.spawn(async move {
         let mut command_queue = CommandQueue::default();
 
         match command {
-            MenuCommand::Open => {
+            FileCommand::Open => {
                 let file = rfd::AsyncFileDialog::new()
                     .add_filter("Corodaw Project", &["corodaw"])
                     .pick_file()
@@ -171,8 +171,7 @@ fn on_menu_command(command: On<MenuCommand>, mut executor: NonSendMut<Executor>)
                     command_queue.push(command::trigger(LoadEvent::new(file)));
                 }
             }
-
-            MenuCommand::Save => {
+            FileCommand::Save => {
                 let file = rfd::AsyncFileDialog::new()
                     .add_filter("Corodaw Project", &["corodaw"])
                     .save_file()
