@@ -9,7 +9,6 @@ use engine::{
     plugins::{ClapPluginManager, ClapPluginShared, discovery::FoundPlugin},
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use base64::{Engine, engine::general_purpose};
 
@@ -36,7 +35,7 @@ pub fn new_channel() -> impl Bundle {
     (
         ChannelState::default(),
         Name::new("unnamed channel"),
-        Id(Uuid::new_v4()),
+        Id::new(),
     )
 }
 
@@ -235,7 +234,7 @@ pub struct ChannelData {
 }
 
 #[derive(Component, Debug, Clone, Serialize, Deserialize)]
-#[require(Id=Id(Uuid::new_v4()), Name)]
+#[require(Id=Id::new(), Name)]
 pub struct ChannelState {
     pub gain_value: f32,
     pub muted: bool,
@@ -288,30 +287,22 @@ impl ChannelAudioView {
 
 #[derive(Debug)]
 pub struct RenameChannelCommand {
-    channel: Uuid,
+    channel: Id,
     name: String,
 }
 
 impl RenameChannelCommand {
-    pub fn new(channel: Uuid, name: String) -> Self {
+    pub fn new(channel: Id, name: String) -> Self {
         Self { channel, name }
     }
 }
 
 impl Command for RenameChannelCommand {
     fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
-        let mut channels_query = world.query::<(&Id, &mut Name)>();
-
-        let channel = channels_query
-            .iter_mut(world)
-            .find(|(id, _)| id.0 == self.channel)
-            .map(|(_, name)| name);
-        if let Some(mut name) = channel {
-            let old_name = name.as_str().to_owned();
-            name.set(self.name.clone());
-            return Some(Box::new(RenameChannelCommand::new(self.channel, old_name)));
-        }
-
-        None
+        let entity = self.channel.find_entity(world)?;
+        let mut name = world.get_mut::<Name>(entity)?;
+        let old_name = name.as_str().to_owned();
+        name.set(self.name.clone());
+        Some(Box::new(RenameChannelCommand::new(self.channel, old_name)))
     }
 }

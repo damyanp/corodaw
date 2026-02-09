@@ -14,5 +14,25 @@ pub use commands::*;
 pub use found_plugin::AvailablePlugin;
 pub use project::{ChannelOrder, LoadEvent, Project, SaveEvent};
 
-#[derive(Component, Serialize, Deserialize)]
-pub struct Id(pub Uuid);
+#[derive(Component, Serialize, Deserialize, Hash, Eq, PartialEq, Clone, Copy, Debug)]
+pub struct Id(Uuid);
+
+impl Default for Id {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Id {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+
+    pub fn find_entity(&self, world: &mut World) -> Option<Entity> {
+        let mut query = world.query::<(Entity, &Id)>();
+        query
+            .iter(world)
+            .find(|(_, id)| **id == *self)
+            .map(|(entity, _)| entity)
+    }
+}

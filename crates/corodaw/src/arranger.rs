@@ -15,7 +15,6 @@ use project::{
     AvailablePlugin, ChannelAudioView, ChannelData, ChannelGainControl, ChannelOrder, ChannelState,
     CommandManager, RenameChannelCommand,
 };
-use uuid::Uuid;
 
 #[derive(SystemParam)]
 #[expect(clippy::type_complexity)]
@@ -81,9 +80,9 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                                 .vertical(|mut strip| {
                                     strip.cell(|ui| {
                                         ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                                            mute_solo_arm_buttons(channel.0, &mut state, ui);
+                                            mute_solo_arm_buttons(channel, &mut state, ui);
                                             show_channel_name_editor(
-                                                channel.0,
+                                                channel,
                                                 &mut name,
                                                 &mut self.command_manager,
                                                 ui,
@@ -99,7 +98,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
 
                                                 let clap_plugin_manager = &self.clap_plugin_manager;
                                                 show_gui_button(
-                                                    &clap_plugin_manager,
+                                                    clap_plugin_manager,
                                                     &mut audio_view,
                                                     ui,
                                                 );
@@ -116,7 +115,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                                                 );
                                             });
 
-                                            show_gain_slider(channel.0, &mut state, ui);
+                                            show_gain_slider(channel, &mut state, ui);
                                         });
                                     });
                                 });
@@ -236,7 +235,7 @@ fn show_available_plugins_menu(
 }
 
 fn show_channel_name_editor(
-    channel: Uuid,
+    channel: &project::Id,
     name: &mut Name,
     command_manager: &mut CommandManager,
     ui: &mut Ui,
@@ -273,7 +272,10 @@ fn show_channel_name_editor(
         } else if commit {
             let trimmed = value.trim();
             if !trimmed.is_empty() && trimmed != name.as_str() {
-                let undo = Box::new(RenameChannelCommand::new(channel, name.as_str().to_owned()));
+                let undo = Box::new(RenameChannelCommand::new(
+                    *channel,
+                    name.as_str().to_owned(),
+                ));
                 name.set(trimmed.to_owned());
                 command_manager.add_undo(undo);
             }
@@ -300,7 +302,7 @@ fn show_channel_name_editor(
     });
 }
 
-fn show_gain_slider(_channel: Uuid, state: &mut ChannelState, ui: &mut Ui) {
+fn show_gain_slider(_channel: &project::Id, state: &mut ChannelState, ui: &mut Ui) {
     let mut gain_value = state.gain_value;
     ui.vertical(|ui| {
         ui.spacing_mut().slider_width = ui.available_size().x;
@@ -345,7 +347,7 @@ fn show_gui_button(
     }
 }
 
-fn mute_solo_arm_buttons(_channel: Uuid, state: &mut ChannelState, ui: &mut Ui) {
+fn mute_solo_arm_buttons(_channel: &project::Id, state: &mut ChannelState, ui: &mut Ui) {
     let mut control_button = |label: &str, color: Color32, selected: &mut bool| {
         let color = if *selected {
             color

@@ -5,7 +5,6 @@ use bevy_app::prelude::*;
 use bevy_ecs::{name::Name, prelude::*, system::RunSystemOnce};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use uuid::Uuid;
 
 use crate::{ChannelAudioView, ChannelData, ChannelState, CommandManager, Id, new_channel};
 
@@ -89,7 +88,7 @@ impl LoadEvent {
 #[derive(Deserialize)]
 struct Document {
     channels: Vec<ChannelDocument>,
-    channel_order: Vec<Option<Uuid>>,
+    channel_order: Vec<Option<Id>>,
 }
 
 #[derive(Deserialize)]
@@ -124,7 +123,7 @@ fn on_load_event(
         .map(|channel| {
             let state = channel.state;
 
-            let id = channel.id.0;
+            let id = channel.id;
             let mut entity = commands.spawn((state, channel.name, channel.id));
             if let Some(data) = channel.data {
                 entity.insert(data);
