@@ -1,12 +1,9 @@
 use std::f32;
 
-use eframe::{
-    egui::{
-        Align, Align2, Color32, Context, CursorIcon, Direction, FontId, Id, Layout, NumExt,
-        PointerButton, Rect, ScrollArea, Sense, Stroke, TextStyle, Ui, UiBuilder, pos2,
-        scroll_area::ScrollBarVisibility, vec2,
-    },
-    emath::{self},
+use egui::{
+    Align, Align2, Color32, Context, CursorIcon, Direction, FontId, Id, Layout, NumExt,
+    PointerButton, Rect, ScrollArea, Sense, Stroke, TextStyle, Ui, UiBuilder, emath, pos2,
+    scroll_area::ScrollBarVisibility, vec2,
 };
 
 #[derive(Clone, Debug, Copy)]

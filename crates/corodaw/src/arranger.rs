@@ -4,8 +4,8 @@ use bevy_ecs::system::SystemParam;
 
 use corodaw_widgets::arranger::{ArrangerDataProvider, ArrangerWidget};
 use corodaw_widgets::meter::Meter;
-use eframe::egui::text::{CCursor, CCursorRange};
-use eframe::egui::{
+use egui::text::{CCursor, CCursorRange};
+use egui::{
     Align, Align2, Button, Color32, FontId, Frame, Id, Key, Label, Layout, Margin, Popup, Rect,
     RichText, Sense, Slider, Stroke, TextEdit, Ui, pos2, vec2,
 };
@@ -291,7 +291,7 @@ fn show_channel_name_editor(
             let response = ui.add(
                 Label::new(name.as_str())
                     .sense(Sense::click())
-                    .wrap_mode(eframe::egui::TextWrapMode::Truncate),
+                    .wrap_mode(egui::TextWrapMode::Truncate),
             );
             if response.clicked() {
                 edit_value = Some(name.as_str().to_owned());

@@ -1,4 +1,4 @@
-use eframe::egui::{Color32, Response, Sense, Stroke, StrokeKind, Ui, Widget, remap, vec2};
+use egui::{Color32, Response, Sense, Stroke, StrokeKind, Ui, Widget, remap, vec2};
 
 #[derive(Default)]
 pub struct Meter<'a> {

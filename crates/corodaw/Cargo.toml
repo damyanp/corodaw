@@ -5,10 +5,12 @@ edition = "2024"
 
 [dependencies]
 audio-graph = { path = "../audio-graph" }
+bevy.workspace = true
 bevy_app.workspace = true
 bevy_ecs.workspace = true
+bevy_egui.workspace = true
 corodaw-widgets = { path = "../corodaw-widgets" }
-eframe.workspace = true
+egui.workspace = true
 egui_extras.workspace = true
 engine = { path = "../engine" }
 futures.workspace = true
@@ -16,4 +18,3 @@ project = { path = "../project" }
 rfd = "0.17.2"
 smol.workspace = true
 uuid.workspace = true
-winit = "0.30.12"

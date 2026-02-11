@@ -1,19 +1,15 @@
-use std::{cell::RefCell, rc::Rc, time::Duration};
-
 use audio_graph::StateReader;
-use bevy_app::prelude::*;
+use bevy::prelude::*;
+use bevy_app::AppExit;
 use bevy_ecs::{
-    prelude::*,
+    message::MessageWriter,
     system::{RunSystemOnce, command},
     world::CommandQueue,
 };
-use eframe::{
-    UserEvent,
-    egui::{self, Button, MenuBar, Ui, vec2},
-};
+use bevy_egui::{EguiContext, EguiPlugin, EguiPrimaryContextPass, egui};
+use egui::{Button, MenuBar, Ui};
 use project::{CommandManager, LoadEvent, Project, SaveEvent, UndoRedoEvent};
 use smol::{LocalExecutor, Task, future};
-use winit::event_loop::EventLoop;
 
 use crate::arranger::arranger_ui_system;
 
@@ -36,24 +32,6 @@ impl Executor {
     }
 }
 
-struct Corodaw {
-    app: Rc<RefCell<bevy_app::App>>,
-}
-
-impl Default for Corodaw {
-    fn default() -> Self {
-        let mut app = project::make_app();
-        app.add_systems(First, update_executor_system);
-        app.add_systems(PostUpdate, set_titlebar_system);
-        app.insert_non_send_resource(Executor::default());
-        app.add_observer(on_file_command);
-
-        Self {
-            app: Rc::new(RefCell::new(app)),
-        }
-    }
-}
-
 fn update_executor_system(world: &mut World) {
     let mut executor = world.non_send_resource_mut::<Executor>();
     while executor.executor.try_tick() {}
@@ -71,82 +49,70 @@ fn update_executor_system(world: &mut World) {
     }
 }
 
-impl eframe::App for Corodaw {
-    fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
-        self.update_logic(ctx);
+fn ui_system(world: &mut World) {
+    let ctx: egui::Context = {
+        let mut query = world.query::<&mut EguiContext>();
+        let mut egui_ctx = query.single_mut(world).expect("Missing EguiContext");
+        egui_ctx.get_mut().clone()
+    };
 
-        let mut app = self.app.borrow_mut();
-        let world = app.world_mut();
+    ctx.request_repaint();
 
-        let executor: &Executor = world.non_send_resource();
-        let executor_is_active = executor.is_active();
+    let executor_is_active = world.non_send_resource::<Executor>().is_active();
 
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-            if executor_is_active {
-                ui.disable();
-            }
-            world
-                .run_system_once_with(Self::menu_bar_system, ui)
-                .unwrap();
-        });
+    egui::TopBottomPanel::top("menu").show(&ctx, |ui| {
+        if executor_is_active {
+            ui.disable();
+        }
+        world
+            .run_system_once_with(menu_bar_system, ui)
+            .unwrap();
+    });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if executor_is_active {
-                ui.disable();
-            }
+    egui::CentralPanel::default().show(&ctx, |ui| {
+        if executor_is_active {
+            ui.disable();
+        }
 
-            world.non_send_resource_mut::<StateReader>().swap_buffers();
-            world.run_system_once_with(arranger_ui_system, ui).unwrap();
-        });
-    }
+        world.non_send_resource_mut::<StateReader>().swap_buffers();
+        world.run_system_once_with(arranger_ui_system, ui).unwrap();
+    });
 }
 
-impl Corodaw {
-    fn update_logic(&mut self, ctx: &egui::Context) {
-        ctx.request_repaint(); // keep repainting so we keep updating logic
-
-        self.app.borrow_mut().insert_non_send_resource(ctx.clone());
-        self.app.borrow_mut().update();
-        self.app
-            .borrow_mut()
-            .world_mut()
-            .remove_non_send_resource::<egui::Context>();
-    }
-
-    fn menu_bar_system(
-        mut ui: InMut<Ui>,
-        mut commands: Commands,
-        command_manager: NonSendMut<CommandManager>,
-    ) {
-        MenuBar::new().ui(&mut ui, |ui| {
-            ui.menu_button("File", |ui| {
-                if ui.button("Open...").clicked() {
-                    commands.trigger(FileCommand::Open);
-                }
-                if ui.button("Save...").clicked() {
-                    commands.trigger(FileCommand::Save);
-                }
-                ui.separator();
-                if ui.button("Quit").clicked() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-            });
-            ui.menu_button("Edit", |ui| {
-                if ui
-                    .add_enabled(command_manager.can_undo(), Button::new("Undo"))
-                    .clicked()
-                {
-                    commands.trigger(UndoRedoEvent::Undo);
-                }
-                if ui
-                    .add_enabled(command_manager.can_redo(), Button::new("Redo"))
-                    .clicked()
-                {
-                    commands.trigger(UndoRedoEvent::Redo);
-                }
-            });
+fn menu_bar_system(
+    mut ui: InMut<Ui>,
+    mut commands: Commands,
+    command_manager: NonSendMut<CommandManager>,
+    mut app_exit: MessageWriter<AppExit>,
+) {
+    MenuBar::new().ui(&mut ui, |ui| {
+        ui.menu_button("File", |ui| {
+            if ui.button("Open...").clicked() {
+                commands.trigger(FileCommand::Open);
+            }
+            if ui.button("Save...").clicked() {
+                commands.trigger(FileCommand::Save);
+            }
+            ui.separator();
+            if ui.button("Quit").clicked() {
+                app_exit.write(AppExit::Success);
+            }
         });
-    }
+        ui.menu_button("Edit", |ui| {
+            if ui
+                .add_enabled(command_manager.can_undo(), Button::new("Undo"))
+                .clicked()
+            {
+                commands.trigger(UndoRedoEvent::Undo);
+            }
+            if ui
+                .add_enabled(command_manager.can_redo(), Button::new("Redo"))
+                .clicked()
+            {
+                commands.trigger(UndoRedoEvent::Redo);
+            }
+        });
+    });
 }
 
 #[derive(Event, Clone, Copy)]
@@ -186,43 +152,44 @@ fn on_file_command(command: On<FileCommand>, mut executor: NonSendMut<Executor>)
     });
 }
 
-fn set_titlebar_system(ctx: NonSend<egui::Context>, project: Single<&Project, Changed<Project>>) {
+fn set_titlebar_system(
+    mut window: Single<&mut Window>,
+    project: Single<&Project, Changed<Project>>,
+) {
     let project_name = if let Some(path) = &project.path {
         path.file_name().unwrap().to_str().unwrap()
     } else {
         "<new project>"
     };
 
-    ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
-        "Corodaw: {}",
-        project_name
-    )));
+    window.title = format!("Corodaw: {}", project_name);
 }
 
-fn main() -> eframe::Result {
-    let mut native_options = eframe::NativeOptions::default();
-    native_options.viewport = native_options.viewport.with_inner_size(vec2(800.0, 600.0));
+fn setup_camera(mut commands: Commands) {
+    commands.spawn(Camera2d);
+}
 
-    let mut eventloop = EventLoop::<UserEvent>::with_user_event().build()?;
+fn main() {
+    let mut app = project::make_app();
 
-    let mut app = eframe::create_native(
-        "Corodaw",
-        native_options,
-        Box::new(|_| Ok(Box::new(Corodaw::default()))),
-        &eventloop,
+    app.add_plugins(
+        DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Corodaw".into(),
+                resolution: (800u32, 600u32).into(),
+                ..default()
+            }),
+            ..default()
+        }),
     );
+    app.add_plugins(EguiPlugin::default());
 
-    #[allow(clippy::while_let_loop)]
-    loop {
-        match app.pump_eframe_app(&mut eventloop, Some(Duration::from_millis(16))) {
-            eframe::EframePumpStatus::Continue(_control_flow) => (),
-            eframe::EframePumpStatus::Exit(_) => {
-                break;
-            }
-        }
-    }
+    app.add_systems(Startup, setup_camera);
+    app.add_systems(First, update_executor_system);
+    app.add_systems(EguiPrimaryContextPass, ui_system);
+    app.add_systems(PostUpdate, set_titlebar_system);
+    app.insert_non_send_resource(Executor::default());
+    app.add_observer(on_file_command);
 
-    println!("[main] exit");
-
-    Ok(())
+    app.run();
 }
