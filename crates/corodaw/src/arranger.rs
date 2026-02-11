@@ -12,8 +12,8 @@ use eframe::egui::{
 use egui_extras::{Size, StripBuilder};
 use engine::plugins::ClapPluginManager;
 use project::{
-    AvailablePlugin, ChannelAudioView, ChannelData, ChannelGainControl, ChannelOrder, ChannelState,
-    CommandManager, RenameChannelCommand,
+    AvailablePlugin, ChannelAudioView, ChannelButton, ChannelButtonCommand, ChannelData,
+    ChannelGainControl, ChannelOrder, ChannelState, CommandManager, RenameChannelCommand,
 };
 
 #[derive(SystemParam)]
@@ -80,7 +80,12 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                                 .vertical(|mut strip| {
                                     strip.cell(|ui| {
                                         ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                                            mute_solo_arm_buttons(channel, &mut state, ui);
+                                            mute_solo_arm_buttons(
+                                                channel,
+                                                &mut state,
+                                                &mut self.command_manager,
+                                                ui,
+                                            );
                                             show_channel_name_editor(
                                                 channel,
                                                 &mut name,
@@ -347,9 +352,16 @@ fn show_gui_button(
     }
 }
 
-fn mute_solo_arm_buttons(_channel: &project::Id, state: &mut ChannelState, ui: &mut Ui) {
-    let mut control_button = |label: &str, color: Color32, selected: &mut bool| {
-        let color = if *selected {
+fn mute_solo_arm_buttons(
+    channel: &project::Id,
+    state: &mut ChannelState,
+    command_manager: &mut CommandManager,
+    ui: &mut Ui,
+) {
+    let mut control_button = |label: &str, color: Color32, button: ChannelButton| {
+        let selected = state.get_button(button);
+
+        let color = if selected {
             color
         } else {
             color.gamma_multiply(0.5)
@@ -359,17 +371,19 @@ fn mute_solo_arm_buttons(_channel: &project::Id, state: &mut ChannelState, ui: &
             .add(
                 Button::new(RichText::new(label).color(Color32::BLACK))
                     .fill(color)
-                    .selected(*selected),
+                    .selected(selected),
             )
             .clicked()
         {
-            *selected = !*selected;
+            let undo = Box::new(ChannelButtonCommand::new(*channel, button, selected));
+            state.set_button(button, !selected);
+            command_manager.add_undo(undo);
         }
     };
 
-    control_button("M", Color32::ORANGE, &mut state.muted);
-    control_button("S", Color32::GREEN, &mut state.soloed);
-    control_button("R", Color32::DARK_RED, &mut state.armed);
+    control_button("M", Color32::ORANGE, ChannelButton::Mute);
+    control_button("S", Color32::GREEN, ChannelButton::Solo);
+    control_button("R", Color32::DARK_RED, ChannelButton::Arm);
 }
 
 pub fn arranger_ui_system(mut ui: InMut<Ui>, data: ArrangerData) {

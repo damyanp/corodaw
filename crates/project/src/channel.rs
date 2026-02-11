@@ -253,6 +253,24 @@ impl Default for ChannelState {
     }
 }
 
+impl ChannelState {
+    pub fn get_button(&self, button: ChannelButton) -> bool {
+        match button {
+            ChannelButton::Mute => self.muted,
+            ChannelButton::Solo => self.soloed,
+            ChannelButton::Arm => self.armed,
+        }
+    }
+
+    pub fn set_button(&mut self, button: ChannelButton, value: bool) {
+        match button {
+            ChannelButton::Mute => self.muted = value,
+            ChannelButton::Solo => self.soloed = value,
+            ChannelButton::Arm => self.armed = value,
+        }
+    }
+}
+
 #[derive(Component)]
 #[require(ChannelState)]
 pub struct ChannelAudioView {
@@ -304,5 +322,43 @@ impl Command for RenameChannelCommand {
         let old_name = name.as_str().to_owned();
         name.set(self.name.clone());
         Some(Box::new(RenameChannelCommand::new(self.channel, old_name)))
+    }
+}
+
+#[derive(Debug)]
+pub struct ChannelButtonCommand {
+    channel: Id,
+    button: ChannelButton,
+    value: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ChannelButton {
+    Mute,
+    Solo,
+    Arm,
+}
+
+impl ChannelButtonCommand {
+    pub fn new(channel: Id, button: ChannelButton, value: bool) -> Self {
+        Self {
+            channel,
+            button,
+            value,
+        }
+    }
+}
+
+impl Command for ChannelButtonCommand {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+        let entity = self.channel.find_entity(world)?;
+        let mut state = world.get_mut::<ChannelState>(entity)?;
+        let old_value = state.get_button(self.button);
+        state.set_button(self.button, self.value);
+        Some(Box::new(ChannelButtonCommand::new(
+            self.channel,
+            self.button,
+            old_value,
+        )))
     }
 }
