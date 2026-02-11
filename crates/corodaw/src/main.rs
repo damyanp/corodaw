@@ -3,15 +3,15 @@ use bevy::prelude::*;
 use bevy_app::AppExit;
 use bevy_ecs::{
     message::MessageWriter,
-    system::{RunSystemOnce, command},
+    system::command,
     world::CommandQueue,
 };
-use bevy_egui::{EguiContext, EguiPlugin, EguiPrimaryContextPass, egui};
+use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use egui::{Button, MenuBar, Ui};
 use project::{CommandManager, LoadEvent, Project, SaveEvent, UndoRedoEvent};
 use smol::{LocalExecutor, Task, future};
 
-use crate::arranger::arranger_ui_system;
+use crate::arranger::arranger_ui;
 
 mod arranger;
 
@@ -49,43 +49,37 @@ fn update_executor_system(world: &mut World) {
     }
 }
 
-fn ui_system(world: &mut World) {
-    let ctx: egui::Context = {
-        let mut query = world.query::<&mut EguiContext>();
-        let mut egui_ctx = query.single_mut(world).expect("Missing EguiContext");
-        egui_ctx.get_mut().clone()
-    };
-
-    ctx.request_repaint();
-
-    let executor_is_active = world.non_send_resource::<Executor>().is_active();
-
-    egui::TopBottomPanel::top("menu").show(&ctx, |ui| {
-        if executor_is_active {
-            ui.disable();
-        }
-        world
-            .run_system_once_with(menu_bar_system, ui)
-            .unwrap();
-    });
-
-    egui::CentralPanel::default().show(&ctx, |ui| {
-        if executor_is_active {
-            ui.disable();
-        }
-
-        world.non_send_resource_mut::<StateReader>().swap_buffers();
-        world.run_system_once_with(arranger_ui_system, ui).unwrap();
-    });
+fn swap_buffers_system(mut state_reader: NonSendMut<StateReader>) {
+    state_reader.swap_buffers();
 }
 
 fn menu_bar_system(
-    mut ui: InMut<Ui>,
+    mut contexts: EguiContexts,
+    executor: NonSend<Executor>,
     mut commands: Commands,
     command_manager: NonSendMut<CommandManager>,
     mut app_exit: MessageWriter<AppExit>,
+) -> Result {
+    let ctx = contexts.ctx_mut()?;
+    ctx.request_repaint();
+
+    egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+        if executor.is_active() {
+            ui.disable();
+        }
+        menu_bar_ui(ui, &mut commands, &command_manager, &mut app_exit);
+    });
+
+    Ok(())
+}
+
+fn menu_bar_ui(
+    ui: &mut Ui,
+    commands: &mut Commands,
+    command_manager: &CommandManager,
+    app_exit: &mut MessageWriter<AppExit>,
 ) {
-    MenuBar::new().ui(&mut ui, |ui| {
+    MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
             if ui.button("Open...").clicked() {
                 commands.trigger(FileCommand::Open);
@@ -113,6 +107,23 @@ fn menu_bar_system(
             }
         });
     });
+}
+
+fn arranger_panel_system(
+    mut contexts: EguiContexts,
+    executor: NonSend<Executor>,
+    data: arranger::ArrangerData,
+) -> Result {
+    let ctx = contexts.ctx_mut()?;
+
+    egui::CentralPanel::default().show(ctx, |ui| {
+        if executor.is_active() {
+            ui.disable();
+        }
+        arranger_ui(data, ui);
+    });
+
+    Ok(())
 }
 
 #[derive(Event, Clone, Copy)]
@@ -186,7 +197,15 @@ fn main() {
 
     app.add_systems(Startup, setup_camera);
     app.add_systems(First, update_executor_system);
-    app.add_systems(EguiPrimaryContextPass, ui_system);
+    app.add_systems(
+        EguiPrimaryContextPass,
+        (
+            menu_bar_system,
+            swap_buffers_system,
+            arranger_panel_system,
+        )
+            .chain(),
+    );
     app.add_systems(PostUpdate, set_titlebar_system);
     app.insert_non_send_resource(Executor::default());
     app.add_observer(on_file_command);

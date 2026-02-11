@@ -386,6 +386,6 @@ fn mute_solo_arm_buttons(
     control_button("R", Color32::DARK_RED, ChannelButton::Arm);
 }
 
-pub fn arranger_ui_system(mut ui: InMut<Ui>, data: ArrangerData) {
-    ArrangerWidget::new("arranger").show(data, &mut ui);
+pub fn arranger_ui(data: ArrangerData, ui: &mut Ui) {
+    ArrangerWidget::new("arranger").show(data, ui);
 }
