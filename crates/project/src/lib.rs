@@ -1,4 +1,5 @@
 use bevy_ecs::prelude::*;
+use bevy_reflect::Reflect;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -14,7 +15,7 @@ pub use commands::*;
 pub use found_plugin::AvailablePlugin;
 pub use project::{ChannelOrder, LoadEvent, Project, SaveEvent};
 
-#[derive(Component, Serialize, Deserialize, Hash, Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(Component, Serialize, Deserialize, Hash, Eq, PartialEq, Clone, Copy, Debug, Reflect)]
 pub struct Id(Uuid);
 
 impl Default for Id {

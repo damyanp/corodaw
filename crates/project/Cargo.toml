@@ -8,6 +8,7 @@ audio-graph = { path = "../audio-graph" }
 base64.workspace = true
 bevy_app.workspace = true
 bevy_ecs.workspace = true
+bevy_reflect.workspace = true
 derivative.workspace = true
 engine = { path = "../engine" }
 futures.workspace = true

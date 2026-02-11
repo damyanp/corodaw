@@ -6,14 +6,15 @@ use bevy_ecs::{
     query::QueryEntityError,
     world::{DeferredWorld, error::EntityMutableFetchError},
 };
+use bevy_reflect::Reflect;
 
 use crate::{AudioGraph, worker::Processor};
 use thiserror::Error;
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
 pub struct OutputNode;
 
-#[derive(Component, Clone, Debug, Default)]
+#[derive(Component, Clone, Debug, Default, Reflect)]
 pub struct Node {
     pub inputs: Vec<Entity>,
     pub audio_channels: Ports,
@@ -21,7 +22,7 @@ pub struct Node {
     pub always_run: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Reflect)]
 pub struct Ports {
     pub connections: Vec<Connection>,
     pub num_inputs: u16,
@@ -54,7 +55,7 @@ impl Ports {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Reflect)]
 pub struct Connection {
     pub channel: u16,
     pub src: Entity,

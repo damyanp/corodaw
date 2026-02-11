@@ -3,17 +3,18 @@ use std::{collections::HashMap, fs::File, path::PathBuf};
 use base64::{Engine, engine::general_purpose};
 use bevy_app::prelude::*;
 use bevy_ecs::{name::Name, prelude::*, system::RunSystemOnce};
+use bevy_reflect::Reflect;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::{ChannelAudioView, ChannelData, ChannelState, CommandManager, Id, new_channel};
 
-#[derive(Component, Default)]
+#[derive(Component, Default, Reflect)]
 pub struct Project {
     pub path: Option<PathBuf>,
 }
 
-#[derive(Component, Default, Serialize)]
+#[derive(Component, Default, Serialize, Reflect)]
 pub struct ChannelOrder {
     pub channel_order: Vec<Entity>,
 }

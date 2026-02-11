@@ -7,6 +7,7 @@ use bevy_ecs::{
     world::CommandQueue,
 };
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
+use bevy_inspector_egui::bevy_inspector;
 use egui::{Button, MenuBar, Ui};
 use project::{CommandManager, LoadEvent, Project, SaveEvent, UndoRedoEvent};
 use smol::{LocalExecutor, Task, future};
@@ -53,12 +54,16 @@ fn swap_buffers_system(mut state_reader: NonSendMut<StateReader>) {
     state_reader.swap_buffers();
 }
 
+#[derive(Resource, Default)]
+struct InspectorEnabled(bool);
+
 fn menu_bar_system(
     mut contexts: EguiContexts,
     executor: NonSend<Executor>,
     mut commands: Commands,
     command_manager: NonSendMut<CommandManager>,
     mut app_exit: MessageWriter<AppExit>,
+    mut inspector_enabled: ResMut<InspectorEnabled>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     ctx.request_repaint();
@@ -67,7 +72,13 @@ fn menu_bar_system(
         if executor.is_active() {
             ui.disable();
         }
-        menu_bar_ui(ui, &mut commands, &command_manager, &mut app_exit);
+        menu_bar_ui(
+            ui,
+            &mut commands,
+            &command_manager,
+            &mut app_exit,
+            &mut inspector_enabled,
+        );
     });
 
     Ok(())
@@ -78,6 +89,7 @@ fn menu_bar_ui(
     commands: &mut Commands,
     command_manager: &CommandManager,
     app_exit: &mut MessageWriter<AppExit>,
+    inspector_enabled: &mut InspectorEnabled,
 ) {
     MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
@@ -106,6 +118,11 @@ fn menu_bar_ui(
                 commands.trigger(UndoRedoEvent::Redo);
             }
         });
+        ui.menu_button("View", |ui| {
+            if ui.checkbox(&mut inspector_enabled.0, "Inspector").clicked() {
+                ui.close();
+            }
+        });
     });
 }
 
@@ -124,6 +141,37 @@ fn arranger_panel_system(
     });
 
     Ok(())
+}
+
+fn world_inspector_system(world: &mut World) {
+    let enabled = world.resource::<InspectorEnabled>().0;
+    if !enabled {
+        return;
+    }
+
+    let egui_context = world
+        .query_filtered::<&mut bevy_egui::EguiContext, With<bevy_egui::PrimaryEguiContext>>()
+        .single(world);
+
+    let Ok(egui_context) = egui_context else {
+        return;
+    };
+    let mut egui_context = egui_context.clone();
+
+    let mut open = true;
+    egui::Window::new("World Inspector")
+        .default_size((320.0, 160.0))
+        .open(&mut open)
+        .show(egui_context.get_mut(), |ui| {
+            egui::ScrollArea::both().show(ui, |ui| {
+                bevy_inspector::ui_for_world(world, ui);
+                ui.allocate_space(ui.available_size());
+            });
+        });
+
+    if !open {
+        world.resource_mut::<InspectorEnabled>().0 = false;
+    }
 }
 
 #[derive(Event, Clone, Copy)]
@@ -194,6 +242,8 @@ fn main() {
         }),
     );
     app.add_plugins(EguiPlugin::default());
+    app.add_plugins(bevy_inspector_egui::DefaultInspectorConfigPlugin);
+    app.init_resource::<InspectorEnabled>();
 
     app.add_systems(Startup, setup_camera);
     app.add_systems(First, update_executor_system);
@@ -206,6 +256,7 @@ fn main() {
         )
             .chain(),
     );
+    app.add_systems(EguiPrimaryContextPass, world_inspector_system);
     app.add_systems(PostUpdate, set_titlebar_system);
     app.insert_non_send_resource(Executor::default());
     app.add_observer(on_file_command);

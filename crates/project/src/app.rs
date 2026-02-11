@@ -27,6 +27,20 @@ pub fn make_app() -> App {
         .insert_non_send_resource(audio)
         .add_plugins((channel::ChannelBevyPlugin, CommandManagerBevyPlugin));
 
+    // Register types for bevy-inspector-egui
+    app.register_type::<Id>()
+        .register_type::<Project>()
+        .register_type::<ChannelOrder>()
+        .register_type::<ChannelData>()
+        .register_type::<ChannelState>()
+        .register_type::<ChannelAudioView>()
+        .register_type::<ChannelGainControl>()
+        .register_type::<AvailablePlugin>()
+        .register_type::<audio_graph::OutputNode>()
+        .register_type::<audio_graph::Node>()
+        .register_type::<audio_graph::Connection>()
+        .register_type::<audio_graph::Ports>();
+
     add_available_plugins(app.world_mut());
 
     app

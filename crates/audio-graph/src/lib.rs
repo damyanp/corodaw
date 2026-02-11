@@ -9,8 +9,8 @@ mod worker;
 pub use audio_graph::{AudioGraph, AudioGraphWorker};
 pub use events::AgEvent;
 pub use node::{
-    Connection, Node, OutputNode, connect_audio, connect_event, disconnect_event_input_from_node,
-    set_processor,
+    Connection, Node, OutputNode, Ports, connect_audio, connect_event,
+    disconnect_event_input_from_node, set_processor,
 };
 pub use worker::{
     AgNode, Graph, ProcessContext, Processor, StateReader, StateValue, StateWriter, state_tracker,

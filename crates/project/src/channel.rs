@@ -1,6 +1,7 @@
 use audio_graph::{Connection, Node};
 use bevy_app::prelude::*;
 use bevy_ecs::{name::Name, prelude::*};
+use bevy_reflect::Reflect;
 
 use engine::builtin::{MidiInputNode, Summer};
 use engine::plugins::GuiHandle;
@@ -222,10 +223,10 @@ fn update_channels_system(
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
 struct InputNode(pub Entity);
 
-#[derive(Component, Debug, Clone, Serialize, Deserialize)]
+#[derive(Component, Debug, Clone, Serialize, Deserialize, Reflect)]
 #[require(ChannelState)]
 pub struct ChannelData {
     pub plugin_id: String,
@@ -233,7 +234,7 @@ pub struct ChannelData {
     pub plugin_state: Option<String>,
 }
 
-#[derive(Component, Debug, Clone, Serialize, Deserialize)]
+#[derive(Component, Debug, Clone, Serialize, Deserialize, Reflect)]
 #[require(Id=Id::new(), Name)]
 pub struct ChannelState {
     pub gain_value: f32,
@@ -271,16 +272,20 @@ impl ChannelState {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(from_reflect = false)]
 #[require(ChannelState)]
 pub struct ChannelAudioView {
+    #[reflect(ignore)]
     clap_plugin: ClapPluginShared,
+    #[reflect(ignore)]
     gui_handle: Option<GuiHandle>,
 }
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Reflect)]
+#[reflect(from_reflect = false)]
 #[require(ChannelState)]
-pub struct ChannelGainControl(pub GainControl);
+pub struct ChannelGainControl(#[reflect(ignore)] pub GainControl);
 
 impl ChannelAudioView {
     pub fn has_gui(&self) -> bool {
