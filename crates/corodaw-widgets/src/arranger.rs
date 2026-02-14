@@ -2,8 +2,9 @@ use std::f32;
 
 use egui::{
     Align, Align2, Color32, Context, CursorIcon, Direction, FontId, Id, Layout, NumExt,
-    PointerButton, Rect, ScrollArea, Sense, Stroke, TextStyle, Ui, UiBuilder, emath, pos2,
-    scroll_area::ScrollBarVisibility, vec2,
+    PointerButton, Rect, ScrollArea, Sense, Stroke, TextStyle, Ui, UiBuilder, Vec2, emath, pos2,
+    scroll_area::{ScrollBarVisibility, ScrollSource},
+    vec2,
 };
 
 #[derive(Clone, Debug, Copy)]
@@ -73,10 +74,9 @@ impl ArrangerWidget {
         );
 
         let r = ScrollArea::both()
-            .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
+            .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible)
             .scroll_bar_rect(strips_rect)
-            .on_hover_cursor(CursorIcon::Grab)
-            .on_drag_cursor(CursorIcon::Grabbing)
+            .scroll_source(ScrollSource::SCROLL_BAR | ScrollSource::MOUSE_WHEEL)
             .show_viewport(ui, |ui, viewport| {
                 show_channels(
                     &mut data,
@@ -91,7 +91,15 @@ impl ArrangerWidget {
                 )
             });
 
-        let (drop_target, dropped) = r.inner;
+        let ((drop_target, dropped), strip_drag_delta) = r.inner;
+
+        // Apply drag-to-pan from the strip area
+        if strip_drag_delta != Vec2::ZERO
+            && let Some(mut state) = egui::scroll_area::State::load(ui.ctx(), r.id)
+        {
+            state.offset -= strip_drag_delta;
+            state.store(ui.ctx(), r.id);
+        }
 
         if let Some((drop_index, drop_y)) = drop_target {
             if dropped {
@@ -132,7 +140,7 @@ fn show_channels(
     channels_rect: Rect,
     strips_rect: Rect,
     viewport: Rect,
-) -> (Option<(usize, f32)>, bool) {
+) -> ((Option<(usize, f32)>, bool), Vec2) {
     ui.painter().rect_filled(
         timestrip_rect,
         1.0,
@@ -161,6 +169,7 @@ fn show_channels(
 
     let mut drop_target = None;
     let mut dropped = false;
+    let mut strip_drag_delta = Vec2::ZERO;
 
     let mut y = channels_rect.min.y - viewport.min.y;
 
@@ -226,13 +235,21 @@ fn show_channels(
             .scope_builder(
                 UiBuilder::new()
                     .max_rect(strip_rect)
-                    .layout(Layout::top_down(Align::Min)),
+                    .layout(Layout::top_down(Align::Min))
+                    .sense(Sense::click_and_drag()),
                 |ui| {
                     ui.shrink_clip_rect(strips_rect);
                     data.show_strip(i, ui);
                 },
             )
             .response;
+
+        if r.dragged() {
+            ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+            strip_drag_delta += r.drag_delta();
+        } else if r.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::Grab);
+        }
 
         r.context_menu(|ui| {
             data.show_strip_menu(i, ui);
@@ -241,7 +258,7 @@ fn show_channels(
         y += channel_height + gap;
     }
 
-    ui.scope_builder(
+    let add_button_scope = ui.scope_builder(
         UiBuilder::new()
             .layout(Layout::top_down(Align::Center))
             .max_rect(Rect::from_min_size(
@@ -256,7 +273,22 @@ fn show_channels(
             }
         },
     );
-    (drop_target, dropped)
+
+    // Ensure content height fills at least the visible area so the horizontal
+    // scrollbar appears at the bottom of the window rather than after the last channel.
+    let content_bottom = add_button_scope.response.rect.bottom();
+    let min_bottom = channels_rect.min.y - viewport.min.y + channels_rect.height();
+    if content_bottom < min_bottom {
+        ui.allocate_rect(
+            Rect::from_min_max(
+                pos2(channels_rect.min.x, content_bottom),
+                pos2(channels_rect.max.x, min_bottom),
+            ),
+            Sense::empty(),
+        );
+    }
+
+    ((drop_target, dropped), strip_drag_delta)
 }
 
 fn show_resize_bar(rect: Rect, default_width: f32, gap: f32, id: Id, ui: &mut Ui) -> f32 {
