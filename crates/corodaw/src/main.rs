@@ -1,10 +1,9 @@
 use audio_graph::StateReader;
 use bevy::prelude::*;
-use bevy_app::AppExit;
-use bevy_ecs::{message::MessageWriter, system::command, world::CommandQueue};
+use bevy_ecs::{system::command, world::CommandQueue};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use bevy_inspector_egui::bevy_inspector;
-use egui::{Button, MenuBar, Ui};
+use egui::{Button, Ui};
 use project::{CommandManager, LoadEvent, Project, SaveEvent, UndoRedoEvent};
 use smol::{LocalExecutor, Task, future};
 
@@ -53,72 +52,58 @@ fn swap_buffers_system(mut state_reader: NonSendMut<StateReader>) {
 #[derive(Resource, Default)]
 struct InspectorEnabled(bool);
 
-fn menu_bar_system(
+fn toolbar_system(
     mut contexts: EguiContexts,
     executor: NonSend<Executor>,
     mut commands: Commands,
     command_manager: NonSendMut<CommandManager>,
-    mut app_exit: MessageWriter<AppExit>,
     mut inspector_enabled: ResMut<InspectorEnabled>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     ctx.request_repaint();
 
-    egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+    egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
         if executor.is_active() {
             ui.disable();
         }
-        menu_bar_ui(
-            ui,
-            &mut commands,
-            &command_manager,
-            &mut app_exit,
-            &mut inspector_enabled,
-        );
+        toolbar_ui(ui, &mut commands, &command_manager, &mut inspector_enabled);
     });
 
     Ok(())
 }
 
-fn menu_bar_ui(
+fn toolbar_ui(
     ui: &mut Ui,
     commands: &mut Commands,
     command_manager: &CommandManager,
-    app_exit: &mut MessageWriter<AppExit>,
     inspector_enabled: &mut InspectorEnabled,
 ) {
-    MenuBar::new().ui(ui, |ui| {
-        ui.menu_button("File", |ui| {
-            if ui.button("Open...").clicked() {
-                commands.trigger(FileCommand::Open);
-            }
-            if ui.button("Save...").clicked() {
-                commands.trigger(FileCommand::Save);
-            }
-            ui.separator();
-            if ui.button("Quit").clicked() {
-                app_exit.write(AppExit::Success);
-            }
-        });
-        ui.menu_button("Edit", |ui| {
-            if ui
-                .add_enabled(command_manager.can_undo(), Button::new("Undo"))
-                .clicked()
-            {
-                commands.trigger(UndoRedoEvent::Undo);
-            }
-            if ui
-                .add_enabled(command_manager.can_redo(), Button::new("Redo"))
-                .clicked()
-            {
-                commands.trigger(UndoRedoEvent::Redo);
-            }
-        });
-        ui.menu_button("View", |ui| {
-            if ui.checkbox(&mut inspector_enabled.0, "Inspector").clicked() {
-                ui.close();
-            }
-        });
+    ui.horizontal(|ui| {
+        if ui.button("Open…").clicked() {
+            commands.trigger(FileCommand::Open);
+        }
+        if ui.button("Save…").clicked() {
+            commands.trigger(FileCommand::Save);
+        }
+
+        ui.separator();
+
+        if ui
+            .add_enabled(command_manager.can_undo(), Button::new("Undo"))
+            .clicked()
+        {
+            commands.trigger(UndoRedoEvent::Undo);
+        }
+        if ui
+            .add_enabled(command_manager.can_redo(), Button::new("Redo"))
+            .clicked()
+        {
+            commands.trigger(UndoRedoEvent::Redo);
+        }
+
+        ui.separator();
+
+        ui.toggle_value(&mut inspector_enabled.0, "Inspector");
     });
 }
 
@@ -243,7 +228,7 @@ fn main() {
     app.add_systems(First, update_executor_system);
     app.add_systems(
         EguiPrimaryContextPass,
-        (menu_bar_system, swap_buffers_system, arranger_panel_system).chain(),
+        (toolbar_system, swap_buffers_system, arranger_panel_system).chain(),
     );
     app.add_systems(EguiPrimaryContextPass, world_inspector_system);
     app.add_systems(PostUpdate, set_titlebar_system);
