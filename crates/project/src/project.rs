@@ -172,7 +172,7 @@ fn on_save_event<T: PluginFactory>(
         Option<&ChannelData>,
         &ChannelState,
         &Id,
-        Option<&ChannelAudioView>,
+        Option<&ChannelAudioView<T::Plugin>>,
     )>,
     plugin_factory: NonSend<T>,
 ) {
@@ -187,7 +187,7 @@ fn on_save_event<T: PluginFactory>(
                 (Some(data), Some(view)) => {
                     let plugin_state = futures::executor::block_on(async {
                         plugin_factory
-                            .save_plugin_state(view.plugin_id())
+                            .save_plugin_state(view.plugin_id::<T>())
                             .await
                             .ok()
                             .flatten()

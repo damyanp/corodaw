@@ -4,10 +4,10 @@ use bevy_ecs::{name::Name, prelude::*};
 use bevy_reflect::Reflect;
 
 use engine::builtin::{MidiInputNode, Summer};
-use engine::plugins::GuiHandle;
+use engine::plugins::{ClapPluginId, GuiHandle};
 use engine::{
     builtin::GainControl,
-    plugins::{ClapPluginShared, PluginFactory, discovery::FoundPlugin},
+    plugins::{PluginFactory, discovery::FoundPlugin},
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +29,7 @@ impl<T: PluginFactory + 'static> Plugin for ChannelBevyPlugin<T> {
         app.add_systems(
             Update,
             (
-                remove_plugins_system,
+                remove_plugins_system::<T>,
                 set_plugins_system::<T>,
                 update_channels_system,
                 sync_channel_order_system,
@@ -50,18 +50,21 @@ pub fn new_channel() -> impl Bundle {
 
 #[allow(clippy::type_complexity)]
 fn sync_plugin_window_titles_system<T: PluginFactory>(
-    channels: Query<(&Name, &ChannelAudioView), Or<(Changed<Name>, Changed<ChannelAudioView>)>>,
+    channels: Query<
+        (&Name, &ChannelAudioView<T::Plugin>),
+        Or<(Changed<Name>, Changed<ChannelAudioView<T::Plugin>>)>,
+    >,
     plugin_factory: NonSend<T>,
 ) {
     for (name, view) in &channels {
         if view.has_gui() {
-            let title = view.window_title(name.as_str());
-            plugin_factory.set_title(view.clap_plugin.plugin_id, title);
+            let title = view.window_title::<T>(name.as_str());
+            plugin_factory.set_title(view.plugin_id::<T>(), title);
         }
     }
 }
 
-fn remove_plugins_system(
+fn remove_plugins_system<T: PluginFactory>(
     mut commands: Commands,
     mut removed: RemovedComponents<ChannelData>,
     channels: Query<Entity, (With<ChannelState>, Without<ChannelData>)>,
@@ -70,7 +73,7 @@ fn remove_plugins_system(
         if channels.get(entity).is_ok() {
             commands
                 .entity(entity)
-                .remove::<(ChannelAudioView, ChannelGainControl, InputNode)>();
+                .remove::<(ChannelAudioView<T::Plugin>, ChannelGainControl, InputNode)>();
         }
     }
 }
@@ -116,8 +119,8 @@ fn set_plugins_system<T: PluginFactory>(
     }
 }
 
-fn set_plugin(
-    plugin_factory: &impl PluginFactory,
+fn set_plugin<T: PluginFactory>(
+    plugin_factory: &T,
     summer: &Summer,
     state: &ChannelState,
     mut channel_entity: EntityCommands<'_>,
@@ -125,12 +128,13 @@ fn set_plugin(
     gain_control: Option<&ChannelGainControl>,
     plugin_state_data: Option<&[u8]>,
 ) {
-    let clap_plugin = plugin_factory.create_plugin_sync(found_plugin.clone());
+    let plugin = plugin_factory.create_plugin_sync(found_plugin.clone());
 
     if let Some(state_data) = plugin_state_data {
+        let plugin_id = T::plugin_id(&plugin);
         let result = futures::executor::block_on(async {
             plugin_factory
-                .load_plugin_state(clap_plugin.plugin_id, state_data.to_vec())
+                .load_plugin_state(plugin_id, state_data.to_vec())
                 .await
                 .unwrap()
         });
@@ -141,7 +145,7 @@ fn set_plugin(
 
     // TODO: destroy the old plugin and its graph node!
 
-    let (plugin_node, plugin_processor) = plugin_factory.create_audio_graph_node(&clap_plugin);
+    let (plugin_node, plugin_processor) = plugin_factory.create_audio_graph_node(&plugin);
 
     let commands = channel_entity.commands_mut();
     let plugin_node_id = commands.spawn(plugin_node).id();
@@ -185,7 +189,7 @@ fn set_plugin(
     }
 
     let channel_audio_view = ChannelAudioView {
-        clap_plugin,
+        plugin,
         gui_handle: Default::default(),
     };
 
@@ -294,13 +298,9 @@ impl ChannelState {
     }
 }
 
-#[derive(Component, Reflect)]
-#[reflect(from_reflect = false)]
-#[require(ChannelState)]
-pub struct ChannelAudioView {
-    #[reflect(ignore)]
-    clap_plugin: ClapPluginShared,
-    #[reflect(ignore)]
+#[derive(Component)]
+pub struct ChannelAudioView<P: Component> {
+    plugin: P,
     gui_handle: Option<GuiHandle>,
 }
 
@@ -309,7 +309,7 @@ pub struct ChannelAudioView {
 #[require(ChannelState)]
 pub struct ChannelGainControl(#[reflect(ignore)] pub GainControl);
 
-impl ChannelAudioView {
+impl<P: Component> ChannelAudioView<P> {
     pub fn has_gui(&self) -> bool {
         self.gui_handle
             .as_ref()
@@ -317,12 +317,12 @@ impl ChannelAudioView {
             .unwrap_or(false)
     }
 
-    pub fn plugin_id(&self) -> engine::plugins::ClapPluginId {
-        self.clap_plugin.plugin_id
+    pub fn plugin_id<T: PluginFactory<Plugin = P>>(&self) -> ClapPluginId {
+        T::plugin_id(&self.plugin)
     }
 
-    pub fn window_title(&self, channel_name: &str) -> String {
-        format!("{}: {channel_name}", self.clap_plugin.plugin_name)
+    pub fn window_title<T: PluginFactory<Plugin = P>>(&self, channel_name: &str) -> String {
+        format!("{}: {channel_name}", T::plugin_name(&self.plugin))
     }
 
     pub fn set_gui_handle(&mut self, gui_handle: GuiHandle) {
@@ -953,5 +953,136 @@ mod tests {
         // undo again
         undo.execute(&mut world);
         assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
+    }
+
+    // --- System-level test infrastructure ---
+
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use audio_graph::Processor;
+    use engine::plugins::ClapPluginId;
+
+    static NEXT_MOCK_PLUGIN_ID: AtomicUsize = AtomicUsize::new(1);
+
+    #[derive(Debug)]
+    struct NoOpProcessor;
+    impl Processor for NoOpProcessor {
+        fn process(&mut self, _ctx: audio_graph::ProcessContext) {}
+    }
+
+    #[derive(Component)]
+    struct MockPlugin {
+        plugin_id: ClapPluginId,
+        plugin_name: String,
+    }
+
+    struct MockPluginFactory {
+        plugins_created: Cell<usize>,
+    }
+
+    impl MockPluginFactory {
+        fn new() -> Self {
+            Self {
+                plugins_created: Cell::new(0),
+            }
+        }
+    }
+
+    impl PluginFactory for MockPluginFactory {
+        type Plugin = MockPlugin;
+
+        fn create_plugin_sync(&self, plugin: FoundPlugin) -> MockPlugin {
+            let id = NEXT_MOCK_PLUGIN_ID.fetch_add(1, Ordering::Relaxed);
+            self.plugins_created.set(self.plugins_created.get() + 1);
+            MockPlugin {
+                plugin_id: ClapPluginId::from_raw(id),
+                plugin_name: plugin.name,
+            }
+        }
+
+        fn plugin_id(plugin: &MockPlugin) -> ClapPluginId {
+            plugin.plugin_id
+        }
+
+        fn plugin_name(plugin: &MockPlugin) -> &str {
+            &plugin.plugin_name
+        }
+
+        fn load_plugin_state(
+            &self,
+            _clap_plugin_id: ClapPluginId,
+            _data: Vec<u8>,
+        ) -> futures::channel::oneshot::Receiver<Result<(), String>> {
+            let (sender, receiver) = futures::channel::oneshot::channel();
+            sender.send(Ok(())).unwrap();
+            receiver
+        }
+
+        fn set_title(&self, _clap_plugin_id: ClapPluginId, _title: String) {}
+
+        fn show_gui(
+            &self,
+            _clap_plugin_id: ClapPluginId,
+            _title: String,
+        ) -> futures::channel::oneshot::Receiver<engine::plugins::GuiHandle> {
+            unimplemented!("MockPluginFactory does not support show_gui")
+        }
+
+        fn save_plugin_state(
+            &self,
+            _clap_plugin_id: ClapPluginId,
+        ) -> futures::channel::oneshot::Receiver<Option<Vec<u8>>> {
+            let (sender, receiver) = futures::channel::oneshot::channel();
+            sender.send(None).unwrap();
+            receiver
+        }
+
+        fn create_audio_graph_node(
+            &self,
+            _plugin: &MockPlugin,
+        ) -> (audio_graph::Node, Box<dyn Processor>) {
+            let node = audio_graph::Node::default().audio(0, 2).event(1, 0);
+            (node, Box::new(NoOpProcessor))
+        }
+    }
+
+    fn setup_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(audio_graph::AudioGraphPlugin);
+
+        let summer = Summer::new(app.world_mut(), 2);
+        let midi_input = MidiInputNode::new(app.world_mut());
+        app.insert_non_send_resource(summer);
+        app.insert_non_send_resource(midi_input);
+        app.insert_non_send_resource(MockPluginFactory::new());
+
+        app.add_systems(
+            Update,
+            (
+                remove_plugins_system::<MockPluginFactory>,
+                set_plugins_system::<MockPluginFactory>,
+                update_channels_system,
+                sync_channel_order_system,
+                sync_plugin_window_titles_system::<MockPluginFactory>,
+            )
+                .chain(),
+        );
+
+        app.world_mut().spawn(ChannelOrder::default());
+
+        // Register test plugins
+        app.world_mut().spawn(AvailablePlugin(FoundPlugin {
+            id: "com.test.synth-a".to_owned(),
+            name: "Test Synth A".to_owned(),
+            path: Default::default(),
+        }));
+        app.world_mut().spawn(AvailablePlugin(FoundPlugin {
+            id: "com.test.synth-b".to_owned(),
+            name: "Test Synth B".to_owned(),
+            path: Default::default(),
+        }));
+
+        app
     }
 }

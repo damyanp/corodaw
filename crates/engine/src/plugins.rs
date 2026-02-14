@@ -47,6 +47,12 @@ mod ui_host;
 #[derive(Debug, Hash, Copy, Clone, Eq, PartialEq)]
 pub struct ClapPluginId(usize);
 
+impl ClapPluginId {
+    pub fn from_raw(id: usize) -> Self {
+        Self(id)
+    }
+}
+
 pub struct ClapPluginManager {
     sender: Sender<Message>,
     _plugin_host: JoinHandle<()>,
@@ -73,7 +79,13 @@ impl Default for ClapPluginManager {
 }
 
 pub trait PluginFactory {
-    fn create_plugin_sync(&self, plugin: FoundPlugin) -> ClapPluginShared;
+    type Plugin: Component;
+
+    fn create_plugin_sync(&self, plugin: FoundPlugin) -> Self::Plugin;
+
+    fn plugin_id(plugin: &Self::Plugin) -> ClapPluginId;
+
+    fn plugin_name(plugin: &Self::Plugin) -> &str;
 
     fn load_plugin_state(
         &self,
@@ -89,8 +101,7 @@ pub trait PluginFactory {
     fn save_plugin_state(&self, clap_plugin_id: ClapPluginId)
     -> oneshot::Receiver<Option<Vec<u8>>>;
 
-    fn create_audio_graph_node(&self, clap_plugin: &ClapPluginShared)
-    -> (Node, Box<dyn Processor>);
+    fn create_audio_graph_node(&self, plugin: &Self::Plugin) -> (Node, Box<dyn Processor>);
 }
 
 impl ClapPluginManager {
@@ -104,9 +115,19 @@ impl ClapPluginManager {
 }
 
 impl PluginFactory for ClapPluginManager {
+    type Plugin = ClapPluginShared;
+
     fn create_plugin_sync(&self, plugin: FoundPlugin) -> ClapPluginShared {
         let receiver = self.create_plugin(plugin);
         futures::executor::block_on(async { receiver.await.unwrap() })
+    }
+
+    fn plugin_id(plugin: &ClapPluginShared) -> ClapPluginId {
+        plugin.plugin_id
+    }
+
+    fn plugin_name(plugin: &ClapPluginShared) -> &str {
+        &plugin.plugin_name
     }
 
     fn show_gui(
@@ -152,11 +173,8 @@ impl PluginFactory for ClapPluginManager {
         receiver
     }
 
-    fn create_audio_graph_node(
-        &self,
-        clap_plugin: &ClapPluginShared,
-    ) -> (Node, Box<dyn Processor>) {
-        clap_plugin.create_audio_graph_node_sync()
+    fn create_audio_graph_node(&self, plugin: &ClapPluginShared) -> (Node, Box<dyn Processor>) {
+        plugin.create_audio_graph_node_sync()
     }
 }
 
@@ -441,7 +459,7 @@ impl HostHandlers for ClapPlugin {
     }
 }
 
-#[derive(Clone, Derivative)]
+#[derive(Clone, Component, Derivative)]
 #[derivative(Debug)]
 pub struct ClapPluginShared {
     channel: Sender<Message>,
@@ -535,6 +553,7 @@ impl<'a> HostStateImpl for ClapPluginMainThread<'a> {
 }
 
 unsafe impl Send for ClapPluginShared {}
+unsafe impl Sync for ClapPluginShared {}
 
 impl<'a> host::SharedHandler<'a> for ClapPluginShared {
     fn initializing(&self, instance: InitializingPluginHandle<'a>) {
