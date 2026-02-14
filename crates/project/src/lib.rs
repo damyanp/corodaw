@@ -16,6 +16,7 @@ pub use found_plugin::AvailablePlugin;
 pub use project::{ChannelOrder, LoadEvent, Project, SaveEvent};
 
 #[derive(Component, Serialize, Deserialize, Hash, Eq, PartialEq, Clone, Copy, Debug, Reflect)]
+#[reflect(opaque)]
 pub struct Id(Uuid);
 
 impl Default for Id {

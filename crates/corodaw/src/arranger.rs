@@ -12,8 +12,9 @@ use egui::{
 use egui_extras::{Size, StripBuilder};
 use engine::plugins::ClapPluginManager;
 use project::{
-    AvailablePlugin, ChannelAudioView, ChannelButton, ChannelButtonCommand, ChannelData,
-    ChannelGainControl, ChannelOrder, ChannelState, CommandManager, RenameChannelCommand,
+    AddChannelCommand, AvailablePlugin, ChannelAudioView, ChannelButton, ChannelButtonCommand,
+    ChannelData, ChannelGainControl, ChannelOrder, ChannelSnapshot, ChannelState, CommandManager,
+    DeleteChannelCommand, RenameChannelCommand,
 };
 
 #[derive(SystemParam)]
@@ -30,6 +31,7 @@ pub struct ArrangerData<'w, 's> {
             &'static mut ChannelState,
             Option<&'static ChannelGainControl>,
             Option<&'static mut ChannelAudioView>,
+            Option<&'static ChannelData>,
         ),
     >,
     available_plugins: Query<'w, 's, &'static AvailablePlugin>,
@@ -56,7 +58,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             .get(index)
             .expect("ChannelOrder index out of bounds");
 
-        let Ok((entity, channel, mut name, mut state, gain_control, audio_view)) =
+        let Ok((entity, channel, mut name, mut state, gain_control, audio_view, _channel_data)) =
             self.channels.get_mut(entity)
         else {
             return;
@@ -184,9 +186,18 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
     }
 
     fn on_add_channel(&mut self, index: usize) {
+        let snapshot = ChannelSnapshot::default();
+        let id = snapshot.id;
+        let entity = self
+            .commands
+            .spawn((snapshot.state, snapshot.name, snapshot.id))
+            .id();
         self.channel_order
             .as_mut()
-            .add_channel(&mut self.commands, index);
+            .channel_order
+            .insert(index, entity);
+        self.command_manager
+            .add_undo(Box::new(DeleteChannelCommand::new(id, index)));
     }
 
     fn move_channel(&mut self, index: usize, destination: usize) {
@@ -201,15 +212,23 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             .get(index)
             .expect("ChannelOrder index out of bounds");
 
-        let (_, _entity, name, _state, _gain_control, _audio_view) =
+        let (_, channel_id, name, state, _gain_control, _audio_view, channel_data) =
             self.channels.get(entity).unwrap();
 
         ui.label(name.as_str());
         ui.separator();
         if ui.button("Delete").clicked() {
+            let snapshot = ChannelSnapshot {
+                name: name.clone(),
+                state: state.clone(),
+                data: channel_data.cloned(),
+                id: *channel_id,
+            };
             self.channel_order
                 .as_mut()
                 .delete_channel(&mut self.commands, index);
+            self.command_manager
+                .add_undo(Box::new(AddChannelCommand::new(index, snapshot)));
         }
         ui.separator();
         if ui.button("Add Channel").clicked() {

@@ -367,3 +367,229 @@ impl Command for ChannelButtonCommand {
         )))
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct ChannelSnapshot {
+    pub name: Name,
+    pub state: ChannelState,
+    pub data: Option<ChannelData>,
+    pub id: Id,
+}
+
+impl Default for ChannelSnapshot {
+    fn default() -> Self {
+        Self {
+            name: Name::new("unnamed channel"),
+            state: ChannelState::default(),
+            data: None,
+            id: Id::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct AddChannelCommand {
+    index: usize,
+    snapshot: ChannelSnapshot,
+}
+
+impl AddChannelCommand {
+    pub fn new(index: usize, snapshot: ChannelSnapshot) -> Self {
+        Self { index, snapshot }
+    }
+}
+
+impl Command for AddChannelCommand {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+        let mut entity = world.spawn((
+            self.snapshot.state.clone(),
+            self.snapshot.name.clone(),
+            self.snapshot.id,
+        ));
+        if let Some(data) = &self.snapshot.data {
+            entity.insert(data.clone());
+        }
+        let entity_id = entity.id();
+
+        let mut query = world.query::<&mut ChannelOrder>();
+        let mut channel_order = query.single_mut(world).ok()?;
+        channel_order.channel_order.insert(self.index, entity_id);
+
+        Some(Box::new(DeleteChannelCommand::new(
+            self.snapshot.id,
+            self.index,
+        )))
+    }
+}
+
+#[derive(Debug)]
+pub struct DeleteChannelCommand {
+    channel: Id,
+    index: usize,
+}
+
+impl DeleteChannelCommand {
+    pub fn new(channel: Id, index: usize) -> Self {
+        Self { channel, index }
+    }
+}
+
+impl Command for DeleteChannelCommand {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+        let entity = self.channel.find_entity(world)?;
+
+        let name = world.get::<Name>(entity)?.clone();
+        let state = world.get::<ChannelState>(entity)?.clone();
+        let data = world.get::<ChannelData>(entity).cloned();
+        let id = *world.get::<Id>(entity)?;
+
+        let mut query = world.query::<&mut ChannelOrder>();
+        let mut channel_order = query.single_mut(world).ok()?;
+        channel_order
+            .channel_order
+            .retain(|&e| e != entity);
+
+        world.despawn(entity);
+
+        let snapshot = ChannelSnapshot {
+            name,
+            state,
+            data,
+            id,
+        };
+
+        Some(Box::new(AddChannelCommand::new(self.index, snapshot)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ChannelOrder;
+
+    fn setup_world() -> World {
+        let mut world = World::new();
+        world.spawn(ChannelOrder::default());
+        world
+    }
+
+    fn get_channel_order(world: &mut World) -> Vec<Entity> {
+        let mut query = world.query::<&ChannelOrder>();
+        query.single(world).unwrap().channel_order.clone()
+    }
+
+    #[test]
+    fn add_channel() {
+        let mut world = setup_world();
+        let snapshot = ChannelSnapshot::default();
+        let id = snapshot.id;
+
+        AddChannelCommand::new(0, snapshot).execute(&mut world);
+
+        let order = get_channel_order(&mut world);
+        assert_eq!(order.len(), 1);
+
+        let entity = id.find_entity(&mut world).unwrap();
+        assert_eq!(order[0], entity);
+        assert_eq!(world.get::<Name>(entity).unwrap().as_str(), "unnamed channel");
+        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
+        assert_eq!(*world.get::<Id>(entity).unwrap(), id);
+    }
+
+    #[test]
+    fn add_channel_returns_delete_inverse() {
+        let mut world = setup_world();
+        let snapshot = ChannelSnapshot::default();
+
+        let inverse = AddChannelCommand::new(0, snapshot).execute(&mut world).unwrap();
+        inverse.execute(&mut world);
+
+        let order = get_channel_order(&mut world);
+        assert_eq!(order.len(), 0);
+    }
+
+    #[test]
+    fn delete_channel() {
+        let mut world = setup_world();
+        let snapshot = ChannelSnapshot::default();
+        let id = snapshot.id;
+
+        AddChannelCommand::new(0, snapshot).execute(&mut world);
+
+        DeleteChannelCommand::new(id, 0).execute(&mut world);
+
+        let order = get_channel_order(&mut world);
+        assert_eq!(order.len(), 0);
+        assert!(id.find_entity(&mut world).is_none());
+    }
+
+    #[test]
+    fn delete_channel_returns_add_inverse() {
+        let mut world = setup_world();
+        let mut snapshot = ChannelSnapshot::default();
+        snapshot.name = Name::new("my channel");
+        snapshot.state.gain_value = 0.5;
+        let id = snapshot.id;
+
+        AddChannelCommand::new(0, snapshot).execute(&mut world);
+
+        let inverse = DeleteChannelCommand::new(id, 0).execute(&mut world).unwrap();
+        inverse.execute(&mut world);
+
+        let order = get_channel_order(&mut world);
+        assert_eq!(order.len(), 1);
+
+        let entity = id.find_entity(&mut world).unwrap();
+        assert_eq!(world.get::<Name>(entity).unwrap().as_str(), "my channel");
+        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 0.5);
+        assert_eq!(*world.get::<Id>(entity).unwrap(), id);
+    }
+
+    #[test]
+    fn add_delete_roundtrip() {
+        let mut world = setup_world();
+        let snapshot = ChannelSnapshot::default();
+        let id = snapshot.id;
+
+        // Add
+        let delete_cmd = AddChannelCommand::new(0, snapshot).execute(&mut world).unwrap();
+        assert_eq!(get_channel_order(&mut world).len(), 1);
+
+        // Delete (undo add)
+        let add_cmd = delete_cmd.execute(&mut world).unwrap();
+        assert_eq!(get_channel_order(&mut world).len(), 0);
+
+        // Re-add (redo add)
+        let delete_cmd = add_cmd.execute(&mut world).unwrap();
+        assert_eq!(get_channel_order(&mut world).len(), 1);
+        assert!(id.find_entity(&mut world).is_some());
+
+        // Re-delete (undo again)
+        delete_cmd.execute(&mut world);
+        assert_eq!(get_channel_order(&mut world).len(), 0);
+        assert!(id.find_entity(&mut world).is_none());
+    }
+
+    #[test]
+    fn delete_channel_with_data() {
+        let mut world = setup_world();
+        let snapshot = ChannelSnapshot {
+            data: Some(ChannelData {
+                plugin_id: "com.test.plugin".to_owned(),
+                plugin_state: Some("dGVzdA==".to_owned()),
+            }),
+            ..Default::default()
+        };
+        let id = snapshot.id;
+
+        AddChannelCommand::new(0, snapshot).execute(&mut world);
+
+        let inverse = DeleteChannelCommand::new(id, 0).execute(&mut world).unwrap();
+        inverse.execute(&mut world);
+
+        let entity = id.find_entity(&mut world).unwrap();
+        let data = world.get::<ChannelData>(entity).unwrap();
+        assert_eq!(data.plugin_id, "com.test.plugin");
+        assert_eq!(data.plugin_state.as_deref(), Some("dGVzdA=="));
+    }
+}
