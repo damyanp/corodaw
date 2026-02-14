@@ -14,7 +14,8 @@ use engine::plugins::ClapPluginManager;
 use project::{
     AddChannelCommand, AvailablePlugin, ChannelAudioView, ChannelButton, ChannelButtonCommand,
     ChannelData, ChannelGainControl, ChannelOrder, ChannelSnapshot, ChannelState, CommandManager,
-    DeleteChannelCommand, MoveChannelCommand, RenameChannelCommand, SetPluginCommand,
+    DeleteChannelCommand, MoveChannelCommand, RenameChannelCommand, SetGainCommand,
+    SetPluginCommand,
 };
 
 #[derive(SystemParam)]
@@ -125,7 +126,12 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                                                 );
                                             });
 
-                                            show_gain_slider(channel, &mut state, ui);
+                                            show_gain_slider(
+                                                channel,
+                                                &mut state,
+                                                &mut self.command_manager,
+                                                ui,
+                                            );
                                         });
                                     });
                                 });
@@ -336,15 +342,32 @@ fn show_channel_name_editor(
     });
 }
 
-fn show_gain_slider(_channel: &project::Id, state: &mut ChannelState, ui: &mut Ui) {
+fn show_gain_slider(
+    channel: &project::Id,
+    state: &mut ChannelState,
+    command_manager: &mut CommandManager,
+    ui: &mut Ui,
+) {
     let mut gain_value = state.gain_value;
+    let drag_start_id = Id::new(("gain_drag_start", channel));
     ui.vertical(|ui| {
         ui.spacing_mut().slider_width = ui.available_size().x;
-        if ui
-            .add(Slider::new(&mut gain_value, 0.0..=1.0).show_value(false))
-            .changed()
-        {
+        let response = ui.add(Slider::new(&mut gain_value, 0.0..=1.0).show_value(false));
+        if response.drag_started() {
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(drag_start_id, state.gain_value));
+        }
+        if response.changed() {
             state.gain_value = gain_value;
+        }
+        if response.drag_stopped() {
+            let start_value: Option<f32> = ui.ctx().data_mut(|d| d.get_temp(drag_start_id));
+            if let Some(start_value) = start_value
+                && start_value != state.gain_value
+            {
+                let undo = SetGainCommand::new(*channel, start_value);
+                command_manager.add_undo(Box::new(undo));
+            }
         }
     });
 }

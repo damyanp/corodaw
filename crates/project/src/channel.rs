@@ -531,6 +531,31 @@ impl Command for SetPluginCommand {
     }
 }
 
+#[derive(Debug)]
+pub struct SetGainCommand {
+    channel: Id,
+    gain_value: f32,
+}
+
+impl SetGainCommand {
+    pub fn new(channel: Id, gain_value: f32) -> Self {
+        Self {
+            channel,
+            gain_value,
+        }
+    }
+}
+
+impl Command for SetGainCommand {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+        let entity = self.channel.find_entity(world)?;
+        let mut state = world.get_mut::<ChannelState>(entity)?;
+        let old_value = state.gain_value;
+        state.gain_value = self.gain_value;
+        Some(Box::new(SetGainCommand::new(self.channel, old_value)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -869,5 +894,57 @@ mod tests {
         // undo again
         undo.execute(&mut world);
         assert!(world.get::<ChannelData>(entity).is_none());
+    }
+
+    #[test]
+    fn set_gain() {
+        let mut world = setup_world();
+        let snapshot = ChannelSnapshot::default();
+        let id = snapshot.id;
+        AddChannelCommand::new(0, snapshot).execute(&mut world);
+
+        SetGainCommand::new(id, 0.5).execute(&mut world);
+
+        let entity = id.find_entity(&mut world).unwrap();
+        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 0.5);
+    }
+
+    #[test]
+    fn set_gain_undo() {
+        let mut world = setup_world();
+        let snapshot = ChannelSnapshot::default();
+        let id = snapshot.id;
+        AddChannelCommand::new(0, snapshot).execute(&mut world);
+
+        let undo = SetGainCommand::new(id, 0.3).execute(&mut world).unwrap();
+        undo.execute(&mut world);
+
+        let entity = id.find_entity(&mut world).unwrap();
+        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
+    }
+
+    #[test]
+    fn set_gain_roundtrip() {
+        let mut world = setup_world();
+        let snapshot = ChannelSnapshot::default();
+        let id = snapshot.id;
+        AddChannelCommand::new(0, snapshot).execute(&mut world);
+
+        let entity = id.find_entity(&mut world).unwrap();
+
+        let undo = SetGainCommand::new(id, 0.7).execute(&mut world).unwrap();
+        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 0.7);
+
+        // undo
+        let redo = undo.execute(&mut world).unwrap();
+        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
+
+        // redo
+        let undo = redo.execute(&mut world).unwrap();
+        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 0.7);
+
+        // undo again
+        undo.execute(&mut world);
+        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
     }
 }
