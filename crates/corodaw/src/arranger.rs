@@ -14,7 +14,7 @@ use engine::plugins::ClapPluginManager;
 use project::{
     AddChannelCommand, AvailablePlugin, ChannelAudioView, ChannelButton, ChannelButtonCommand,
     ChannelData, ChannelGainControl, ChannelOrder, ChannelSnapshot, ChannelState, CommandManager,
-    DeleteChannelCommand, RenameChannelCommand,
+    DeleteChannelCommand, MoveChannelCommand, RenameChannelCommand,
 };
 
 #[derive(SystemParam)]
@@ -201,7 +201,8 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
     }
 
     fn move_channel(&mut self, index: usize, destination: usize) {
-        self.channel_order.as_mut().move_channel(index, destination);
+        let undo = MoveChannelCommand::new(index, destination).apply(self.channel_order.as_mut());
+        self.command_manager.add_undo(undo);
     }
 
     fn show_channel_menu(&mut self, index: usize, ui: &mut Ui) {

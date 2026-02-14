@@ -1,11 +1,7 @@
 use audio_graph::StateReader;
 use bevy::prelude::*;
 use bevy_app::AppExit;
-use bevy_ecs::{
-    message::MessageWriter,
-    system::command,
-    world::CommandQueue,
-};
+use bevy_ecs::{message::MessageWriter, system::command, world::CommandQueue};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use bevy_inspector_egui::bevy_inspector;
 use egui::{Button, MenuBar, Ui};
@@ -231,16 +227,14 @@ fn setup_camera(mut commands: Commands) {
 fn main() {
     let mut app = project::make_app();
 
-    app.add_plugins(
-        DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Corodaw".into(),
-                resolution: (800u32, 600u32).into(),
-                ..default()
-            }),
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "Corodaw".into(),
+            resolution: (800u32, 600u32).into(),
             ..default()
         }),
-    );
+        ..default()
+    }));
     app.add_plugins(EguiPlugin::default());
     app.add_plugins(bevy_inspector_egui::DefaultInspectorConfigPlugin);
     app.init_resource::<InspectorEnabled>();
@@ -249,12 +243,7 @@ fn main() {
     app.add_systems(First, update_executor_system);
     app.add_systems(
         EguiPrimaryContextPass,
-        (
-            menu_bar_system,
-            swap_buffers_system,
-            arranger_panel_system,
-        )
-            .chain(),
+        (menu_bar_system, swap_buffers_system, arranger_panel_system).chain(),
     );
     app.add_systems(EguiPrimaryContextPass, world_inspector_system);
     app.add_systems(PostUpdate, set_titlebar_system);
