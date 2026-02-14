@@ -10,7 +10,7 @@ use egui::{
     RichText, Sense, Slider, Stroke, TextEdit, Ui, pos2, vec2,
 };
 use egui_extras::{Size, StripBuilder};
-use engine::plugins::{ClapPluginManager, PluginFactory};
+use engine::plugins::{ClapPluginManager, ClapPluginShared, PluginFactory};
 use project::{
     AddChannelCommand, AvailablePlugin, ChannelAudioView, ChannelButton, ChannelButtonCommand,
     ChannelData, ChannelGainControl, ChannelOrder, ChannelSnapshot, ChannelState, CommandManager,
@@ -31,7 +31,7 @@ pub struct ArrangerData<'w, 's> {
             &'static mut Name,
             &'static mut ChannelState,
             Option<&'static ChannelGainControl>,
-            Option<&'static mut ChannelAudioView>,
+            Option<&'static mut ChannelAudioView<ClapPluginShared>>,
             Option<&'static ChannelData>,
         ),
     >,
@@ -388,14 +388,17 @@ fn show_meters(peaks: Option<&StateValue>, ui: &mut Ui) {
 
 fn show_gui_button(
     clap_plugin_manager: &ClapPluginManager,
-    channel_audio_view: &mut ChannelAudioView,
+    channel_audio_view: &mut ChannelAudioView<ClapPluginShared>,
     ui: &mut Ui,
 ) {
     if ui.button("Show").clicked() {
         // TODO: use the executor resource so we don't need a block_on here
         let gui_handle = futures::executor::block_on(async {
             clap_plugin_manager
-                .show_gui(channel_audio_view.plugin_id(), "<untitled>".to_owned())
+                .show_gui(
+                    channel_audio_view.plugin_id::<ClapPluginManager>(),
+                    "<untitled>".to_owned(),
+                )
                 .await
                 .unwrap()
         });

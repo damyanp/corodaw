@@ -39,7 +39,6 @@ pub fn make_app() -> App {
         .register_type::<ChannelOrder>()
         .register_type::<ChannelData>()
         .register_type::<ChannelState>()
-        .register_type::<ChannelAudioView>()
         .register_type::<ChannelGainControl>()
         .register_type::<AvailablePlugin>()
         .register_type::<audio_graph::OutputNode>()

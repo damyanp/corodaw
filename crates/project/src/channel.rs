@@ -4,10 +4,10 @@ use bevy_ecs::{name::Name, prelude::*};
 use bevy_reflect::Reflect;
 
 use engine::builtin::{MidiInputNode, Summer};
-use engine::plugins::GuiHandle;
+use engine::plugins::{ClapPluginId, GuiHandle};
 use engine::{
     builtin::GainControl,
-    plugins::{ClapPluginShared, PluginFactory, discovery::FoundPlugin},
+    plugins::{PluginFactory, discovery::FoundPlugin},
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +29,7 @@ impl<T: PluginFactory + 'static> Plugin for ChannelBevyPlugin<T> {
         app.add_systems(
             Update,
             (
-                remove_plugins_system,
+                remove_plugins_system::<T>,
                 set_plugins_system::<T>,
                 update_channels_system,
                 sync_channel_order_system,
@@ -50,31 +50,45 @@ pub fn new_channel() -> impl Bundle {
 
 #[allow(clippy::type_complexity)]
 fn sync_plugin_window_titles_system<T: PluginFactory>(
-    channels: Query<(&Name, &ChannelAudioView), Or<(Changed<Name>, Changed<ChannelAudioView>)>>,
+    channels: Query<
+        (&Name, &ChannelAudioView<T::Plugin>),
+        Or<(Changed<Name>, Changed<ChannelAudioView<T::Plugin>>)>,
+    >,
     plugin_factory: NonSend<T>,
 ) {
     for (name, view) in &channels {
         if view.has_gui() {
-            let title = view.window_title(name.as_str());
-            plugin_factory.set_title(view.clap_plugin.plugin_id, title);
+            let title = view.window_title::<T>(name.as_str());
+            plugin_factory.set_title(view.plugin_id::<T>(), title);
         }
     }
 }
 
-fn remove_plugins_system(
+#[allow(clippy::type_complexity)]
+fn remove_plugins_system<T: PluginFactory>(
     mut commands: Commands,
     mut removed: RemovedComponents<ChannelData>,
-    channels: Query<Entity, (With<ChannelState>, Without<ChannelData>)>,
+    channels: Query<
+        (Entity, Option<&ChannelAudioView<T::Plugin>>),
+        (With<ChannelState>, Without<ChannelData>),
+    >,
 ) {
     for entity in removed.read() {
-        if channels.get(entity).is_ok() {
+        if let Ok((entity, audio_view)) = channels.get(entity) {
+            // Despawn the plugin's audio graph node entity. The audio graph's
+            // pre_update_system will automatically disconnect it from any
+            // remaining nodes (e.g. the summer) on the next frame.
+            if let Some(audio_view) = audio_view {
+                commands.entity(audio_view.plugin_node).despawn();
+            }
             commands
                 .entity(entity)
-                .remove::<(ChannelAudioView, ChannelGainControl, InputNode)>();
+                .remove::<(ChannelAudioView<T::Plugin>, ChannelGainControl, InputNode)>();
         }
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn set_plugins_system<T: PluginFactory>(
     mut commands: Commands,
     available_plugins: Query<&AvailablePlugin>,
@@ -85,17 +99,24 @@ fn set_plugins_system<T: PluginFactory>(
             &ChannelState,
             &ChannelData,
             Option<&ChannelGainControl>,
+            Option<&ChannelAudioView<T::Plugin>>,
         ),
         Changed<ChannelData>,
     >,
     summer: NonSend<Summer>,
 ) {
-    for (entity, state, data, gain_control) in &channels {
+    for (entity, state, data, gain_control, old_audio_view) in &channels {
         let found_plugin = available_plugins
             .iter()
             .find(|p| p.0.id == data.plugin_id)
             .unwrap();
         let found_plugin = &found_plugin.0;
+
+        // Despawn the old plugin's audio graph node. The audio graph's
+        // pre_update_system will disconnect it from other nodes next frame.
+        if let Some(old_audio_view) = old_audio_view {
+            commands.entity(old_audio_view.plugin_node).despawn();
+        }
 
         let channel_entity = commands.get_entity(entity).unwrap();
 
@@ -116,8 +137,8 @@ fn set_plugins_system<T: PluginFactory>(
     }
 }
 
-fn set_plugin(
-    plugin_factory: &impl PluginFactory,
+fn set_plugin<T: PluginFactory>(
+    plugin_factory: &T,
     summer: &Summer,
     state: &ChannelState,
     mut channel_entity: EntityCommands<'_>,
@@ -125,12 +146,13 @@ fn set_plugin(
     gain_control: Option<&ChannelGainControl>,
     plugin_state_data: Option<&[u8]>,
 ) {
-    let clap_plugin = plugin_factory.create_plugin_sync(found_plugin.clone());
+    let plugin = plugin_factory.create_plugin_sync(found_plugin.clone());
 
     if let Some(state_data) = plugin_state_data {
+        let plugin_id = T::plugin_id(&plugin);
         let result = futures::executor::block_on(async {
             plugin_factory
-                .load_plugin_state(clap_plugin.plugin_id, state_data.to_vec())
+                .load_plugin_state(plugin_id, state_data.to_vec())
                 .await
                 .unwrap()
         });
@@ -139,9 +161,7 @@ fn set_plugin(
         }
     }
 
-    // TODO: destroy the old plugin and its graph node!
-
-    let (plugin_node, plugin_processor) = plugin_factory.create_audio_graph_node(&clap_plugin);
+    let (plugin_node, plugin_processor) = plugin_factory.create_audio_graph_node(&plugin);
 
     let commands = channel_entity.commands_mut();
     let plugin_node_id = commands.spawn(plugin_node).id();
@@ -185,7 +205,8 @@ fn set_plugin(
     }
 
     let channel_audio_view = ChannelAudioView {
-        clap_plugin,
+        plugin,
+        plugin_node: plugin_node_id,
         gui_handle: Default::default(),
     };
 
@@ -294,13 +315,10 @@ impl ChannelState {
     }
 }
 
-#[derive(Component, Reflect)]
-#[reflect(from_reflect = false)]
-#[require(ChannelState)]
-pub struct ChannelAudioView {
-    #[reflect(ignore)]
-    clap_plugin: ClapPluginShared,
-    #[reflect(ignore)]
+#[derive(Component)]
+pub struct ChannelAudioView<P: Component> {
+    plugin: P,
+    plugin_node: Entity,
     gui_handle: Option<GuiHandle>,
 }
 
@@ -309,7 +327,7 @@ pub struct ChannelAudioView {
 #[require(ChannelState)]
 pub struct ChannelGainControl(#[reflect(ignore)] pub GainControl);
 
-impl ChannelAudioView {
+impl<P: Component> ChannelAudioView<P> {
     pub fn has_gui(&self) -> bool {
         self.gui_handle
             .as_ref()
@@ -317,12 +335,12 @@ impl ChannelAudioView {
             .unwrap_or(false)
     }
 
-    pub fn plugin_id(&self) -> engine::plugins::ClapPluginId {
-        self.clap_plugin.plugin_id
+    pub fn plugin_id<T: PluginFactory<Plugin = P>>(&self) -> ClapPluginId {
+        T::plugin_id(&self.plugin)
     }
 
-    pub fn window_title(&self, channel_name: &str) -> String {
-        format!("{}: {channel_name}", self.clap_plugin.plugin_name)
+    pub fn window_title<T: PluginFactory<Plugin = P>>(&self, channel_name: &str) -> String {
+        format!("{}: {channel_name}", T::plugin_name(&self.plugin))
     }
 
     pub fn set_gui_handle(&mut self, gui_handle: GuiHandle) {
@@ -564,394 +582,4 @@ impl Command for SetGainCommand {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ChannelOrder;
-
-    fn setup_world() -> World {
-        let mut world = World::new();
-        world.spawn(ChannelOrder::default());
-        world
-    }
-
-    fn get_channel_order(world: &mut World) -> Vec<Entity> {
-        let mut query = world.query::<&ChannelOrder>();
-        query.single(world).unwrap().channel_order.clone()
-    }
-
-    #[test]
-    fn add_channel() {
-        let mut world = setup_world();
-        let snapshot = ChannelSnapshot::default();
-        let id = snapshot.id;
-
-        AddChannelCommand::new(0, snapshot).execute(&mut world);
-
-        let order = get_channel_order(&mut world);
-        assert_eq!(order.len(), 1);
-
-        let entity = id.find_entity(&mut world).unwrap();
-        assert_eq!(order[0], entity);
-        assert_eq!(
-            world.get::<Name>(entity).unwrap().as_str(),
-            "unnamed channel"
-        );
-        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
-        assert_eq!(*world.get::<Id>(entity).unwrap(), id);
-    }
-
-    #[test]
-    fn add_channel_returns_delete_undo() {
-        let mut world = setup_world();
-        let snapshot = ChannelSnapshot::default();
-
-        let undo = AddChannelCommand::new(0, snapshot)
-            .execute(&mut world)
-            .unwrap();
-        undo.execute(&mut world);
-
-        let order = get_channel_order(&mut world);
-        assert_eq!(order.len(), 0);
-    }
-
-    #[test]
-    fn delete_channel() {
-        let mut world = setup_world();
-        let snapshot = ChannelSnapshot::default();
-        let id = snapshot.id;
-
-        AddChannelCommand::new(0, snapshot).execute(&mut world);
-
-        DeleteChannelCommand::new(id, 0).execute(&mut world);
-
-        let order = get_channel_order(&mut world);
-        assert_eq!(order.len(), 0);
-        assert!(id.find_entity(&mut world).is_none());
-    }
-
-    #[test]
-    fn delete_channel_returns_add_undo() {
-        let mut world = setup_world();
-        let mut snapshot = ChannelSnapshot::default();
-        snapshot.name = Name::new("my channel");
-        snapshot.state.gain_value = 0.5;
-        let id = snapshot.id;
-
-        AddChannelCommand::new(0, snapshot).execute(&mut world);
-
-        let undo = DeleteChannelCommand::new(id, 0)
-            .execute(&mut world)
-            .unwrap();
-        undo.execute(&mut world);
-
-        let order = get_channel_order(&mut world);
-        assert_eq!(order.len(), 1);
-
-        let entity = id.find_entity(&mut world).unwrap();
-        assert_eq!(world.get::<Name>(entity).unwrap().as_str(), "my channel");
-        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 0.5);
-        assert_eq!(*world.get::<Id>(entity).unwrap(), id);
-    }
-
-    #[test]
-    fn add_delete_roundtrip() {
-        let mut world = setup_world();
-        let snapshot = ChannelSnapshot::default();
-        let id = snapshot.id;
-
-        // Add
-        let delete_cmd = AddChannelCommand::new(0, snapshot)
-            .execute(&mut world)
-            .unwrap();
-        assert_eq!(get_channel_order(&mut world).len(), 1);
-
-        // Delete (undo add)
-        let add_cmd = delete_cmd.execute(&mut world).unwrap();
-        assert_eq!(get_channel_order(&mut world).len(), 0);
-
-        // Re-add (redo add)
-        let delete_cmd = add_cmd.execute(&mut world).unwrap();
-        assert_eq!(get_channel_order(&mut world).len(), 1);
-        assert!(id.find_entity(&mut world).is_some());
-
-        // Re-delete (undo again)
-        delete_cmd.execute(&mut world);
-        assert_eq!(get_channel_order(&mut world).len(), 0);
-        assert!(id.find_entity(&mut world).is_none());
-    }
-
-    #[test]
-    fn delete_channel_with_data() {
-        let mut world = setup_world();
-        let snapshot = ChannelSnapshot {
-            data: Some(ChannelData {
-                plugin_id: "com.test.plugin".to_owned(),
-                plugin_state: Some("dGVzdA==".to_owned()),
-            }),
-            ..Default::default()
-        };
-        let id = snapshot.id;
-
-        AddChannelCommand::new(0, snapshot).execute(&mut world);
-
-        let undo = DeleteChannelCommand::new(id, 0)
-            .execute(&mut world)
-            .unwrap();
-        undo.execute(&mut world);
-
-        let entity = id.find_entity(&mut world).unwrap();
-        let data = world.get::<ChannelData>(entity).unwrap();
-        assert_eq!(data.plugin_id, "com.test.plugin");
-        assert_eq!(data.plugin_state.as_deref(), Some("dGVzdA=="));
-    }
-
-    fn setup_world_with_4_channels() -> (World, [Id; 4]) {
-        let mut world = setup_world();
-        let ids: [Id; 4] = std::array::from_fn(|_| Id::new());
-        let names = ["A", "B", "C", "D"];
-        for (i, (id, name)) in ids.iter().zip(names.iter()).enumerate() {
-            let snapshot = ChannelSnapshot {
-                name: Name::new(*name),
-                id: *id,
-                ..Default::default()
-            };
-            AddChannelCommand::new(i, snapshot).execute(&mut world);
-        }
-        (world, ids)
-    }
-
-    fn get_channel_ids(world: &mut World) -> Vec<Id> {
-        let order = get_channel_order(world);
-        order
-            .iter()
-            .map(|e| *world.get::<Id>(*e).unwrap())
-            .collect()
-    }
-
-    #[test]
-    fn move_forward() {
-        let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-        MoveChannelCommand::new(0, 2).execute(&mut world);
-        assert_eq!(get_channel_ids(&mut world), vec![b, a, c, d]);
-    }
-
-    #[test]
-    fn move_backward() {
-        let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-        MoveChannelCommand::new(2, 0).execute(&mut world);
-        assert_eq!(get_channel_ids(&mut world), vec![c, a, b, d]);
-    }
-
-    #[test]
-    fn move_forward_undo() {
-        let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-        let undo = MoveChannelCommand::new(0, 2).execute(&mut world).unwrap();
-        undo.execute(&mut world);
-        assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
-    }
-
-    #[test]
-    fn move_backward_undo() {
-        let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-        let undo = MoveChannelCommand::new(2, 0).execute(&mut world).unwrap();
-        undo.execute(&mut world);
-        assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
-    }
-
-    #[test]
-    fn move_roundtrip() {
-        let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-
-        // move(1, 3): [A, B, C, D] → [A, C, B, D]
-        let undo = MoveChannelCommand::new(1, 3).execute(&mut world).unwrap();
-        assert_eq!(get_channel_ids(&mut world), vec![a, c, b, d]);
-
-        // undo
-        let redo = undo.execute(&mut world).unwrap();
-        assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
-
-        // redo
-        let undo = redo.execute(&mut world).unwrap();
-        assert_eq!(get_channel_ids(&mut world), vec![a, c, b, d]);
-
-        // undo again
-        undo.execute(&mut world);
-        assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
-    }
-
-    #[test]
-    fn move_same_position() {
-        let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-        MoveChannelCommand::new(1, 1).execute(&mut world);
-        assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
-    }
-
-    #[test]
-    fn move_to_beginning() {
-        let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-        let undo = MoveChannelCommand::new(3, 0).execute(&mut world).unwrap();
-        assert_eq!(get_channel_ids(&mut world), vec![d, a, b, c]);
-        undo.execute(&mut world);
-        assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
-    }
-
-    #[test]
-    fn move_to_end() {
-        let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-        let undo = MoveChannelCommand::new(0, 4).execute(&mut world).unwrap();
-        assert_eq!(get_channel_ids(&mut world), vec![b, c, d, a]);
-        undo.execute(&mut world);
-        assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
-    }
-
-    fn make_channel_data(plugin_id: &str) -> ChannelData {
-        ChannelData {
-            plugin_id: plugin_id.to_owned(),
-            plugin_state: None,
-        }
-    }
-
-    #[test]
-    fn set_plugin() {
-        let mut world = setup_world();
-        let snapshot = ChannelSnapshot::default();
-        let id = snapshot.id;
-        AddChannelCommand::new(0, snapshot).execute(&mut world);
-
-        let data = make_channel_data("com.test.synth");
-        SetPluginCommand::new(id, Some(data)).execute(&mut world);
-
-        let entity = id.find_entity(&mut world).unwrap();
-        let data = world.get::<ChannelData>(entity).unwrap();
-        assert_eq!(data.plugin_id, "com.test.synth");
-    }
-
-    #[test]
-    fn set_plugin_undo() {
-        let mut world = setup_world();
-        let snapshot = ChannelSnapshot::default();
-        let id = snapshot.id;
-        AddChannelCommand::new(0, snapshot).execute(&mut world);
-
-        let data = make_channel_data("com.test.synth");
-        let undo = SetPluginCommand::new(id, Some(data))
-            .execute(&mut world)
-            .unwrap();
-        undo.execute(&mut world);
-
-        let entity = id.find_entity(&mut world).unwrap();
-        assert!(world.get::<ChannelData>(entity).is_none());
-    }
-
-    #[test]
-    fn set_plugin_replace() {
-        let mut world = setup_world();
-        let data_a = make_channel_data("com.test.synth-a");
-        let snapshot = ChannelSnapshot {
-            data: Some(data_a),
-            ..Default::default()
-        };
-        let id = snapshot.id;
-        AddChannelCommand::new(0, snapshot).execute(&mut world);
-
-        let data_b = make_channel_data("com.test.synth-b");
-        let undo = SetPluginCommand::new(id, Some(data_b))
-            .execute(&mut world)
-            .unwrap();
-
-        let entity = id.find_entity(&mut world).unwrap();
-        assert_eq!(
-            world.get::<ChannelData>(entity).unwrap().plugin_id,
-            "com.test.synth-b"
-        );
-
-        undo.execute(&mut world);
-        assert_eq!(
-            world.get::<ChannelData>(entity).unwrap().plugin_id,
-            "com.test.synth-a"
-        );
-    }
-
-    #[test]
-    fn set_plugin_roundtrip() {
-        let mut world = setup_world();
-        let snapshot = ChannelSnapshot::default();
-        let id = snapshot.id;
-        AddChannelCommand::new(0, snapshot).execute(&mut world);
-
-        let data = make_channel_data("com.test.synth");
-        let undo = SetPluginCommand::new(id, Some(data))
-            .execute(&mut world)
-            .unwrap();
-
-        let entity = id.find_entity(&mut world).unwrap();
-        assert!(world.get::<ChannelData>(entity).is_some());
-
-        // undo
-        let redo = undo.execute(&mut world).unwrap();
-        assert!(world.get::<ChannelData>(entity).is_none());
-
-        // redo
-        let undo = redo.execute(&mut world).unwrap();
-        assert_eq!(
-            world.get::<ChannelData>(entity).unwrap().plugin_id,
-            "com.test.synth"
-        );
-
-        // undo again
-        undo.execute(&mut world);
-        assert!(world.get::<ChannelData>(entity).is_none());
-    }
-
-    #[test]
-    fn set_gain() {
-        let mut world = setup_world();
-        let snapshot = ChannelSnapshot::default();
-        let id = snapshot.id;
-        AddChannelCommand::new(0, snapshot).execute(&mut world);
-
-        SetGainCommand::new(id, 0.5).execute(&mut world);
-
-        let entity = id.find_entity(&mut world).unwrap();
-        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 0.5);
-    }
-
-    #[test]
-    fn set_gain_undo() {
-        let mut world = setup_world();
-        let snapshot = ChannelSnapshot::default();
-        let id = snapshot.id;
-        AddChannelCommand::new(0, snapshot).execute(&mut world);
-
-        let undo = SetGainCommand::new(id, 0.3).execute(&mut world).unwrap();
-        undo.execute(&mut world);
-
-        let entity = id.find_entity(&mut world).unwrap();
-        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
-    }
-
-    #[test]
-    fn set_gain_roundtrip() {
-        let mut world = setup_world();
-        let snapshot = ChannelSnapshot::default();
-        let id = snapshot.id;
-        AddChannelCommand::new(0, snapshot).execute(&mut world);
-
-        let entity = id.find_entity(&mut world).unwrap();
-
-        let undo = SetGainCommand::new(id, 0.7).execute(&mut world).unwrap();
-        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 0.7);
-
-        // undo
-        let redo = undo.execute(&mut world).unwrap();
-        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
-
-        // redo
-        let undo = redo.execute(&mut world).unwrap();
-        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 0.7);
-
-        // undo again
-        undo.execute(&mut world);
-        assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
-    }
-}
+mod tests;
