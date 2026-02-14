@@ -1085,4 +1085,79 @@ mod tests {
 
         app
     }
+
+    fn spawn_channel(app: &mut App) -> Id {
+        let id = Id::new();
+        let snapshot = ChannelSnapshot {
+            id,
+            ..Default::default()
+        };
+        AddChannelCommand::new(0, snapshot).execute(app.world_mut());
+        id
+    }
+
+    fn get_entity(app: &mut App, id: Id) -> Entity {
+        id.find_entity(app.world_mut()).unwrap()
+    }
+
+    #[test]
+    fn system_set_plugin_creates_components() {
+        let mut app = setup_test_app();
+        let id = spawn_channel(&mut app);
+
+        let data = make_channel_data("com.test.synth-a");
+        SetPluginCommand::new(id, Some(data)).execute(app.world_mut());
+        app.update();
+
+        let entity = get_entity(&mut app, id);
+        let world = app.world();
+        assert!(world.get::<ChannelAudioView<MockPlugin>>(entity).is_some());
+        assert!(world.get::<InputNode>(entity).is_some());
+        assert!(world.get::<ChannelGainControl>(entity).is_some());
+    }
+
+    #[test]
+    fn system_remove_plugin_removes_components() {
+        let mut app = setup_test_app();
+        let id = spawn_channel(&mut app);
+
+        let data = make_channel_data("com.test.synth-a");
+        SetPluginCommand::new(id, Some(data)).execute(app.world_mut());
+        app.update();
+
+        // Remove ChannelData
+        let entity = get_entity(&mut app, id);
+        app.world_mut().entity_mut(entity).remove::<ChannelData>();
+        app.update();
+
+        let world = app.world();
+        assert!(world.get::<ChannelAudioView<MockPlugin>>(entity).is_none());
+        assert!(world.get::<InputNode>(entity).is_none());
+        assert!(world.get::<ChannelGainControl>(entity).is_none());
+    }
+
+    #[test]
+    fn system_set_plugin_wires_audio_graph() {
+        let mut app = setup_test_app();
+        let id = spawn_channel(&mut app);
+
+        let data = make_channel_data("com.test.synth-a");
+        SetPluginCommand::new(id, Some(data)).execute(app.world_mut());
+        app.update();
+
+        let entity = get_entity(&mut app, id);
+        let world = app.world();
+
+        let input_node_entity = world.get::<InputNode>(entity).unwrap().0;
+        let gain_entity = world.get::<ChannelGainControl>(entity).unwrap().0.entity;
+        let summer_entity = world.non_send_resource::<Summer>().entity;
+
+        // Gain control should be connected to plugin node (2 stereo ports)
+        let gain_node = world.get::<Node>(gain_entity).unwrap();
+        assert!(gain_node.inputs.contains(&input_node_entity));
+
+        // Summer should be connected to gain control
+        let summer_node = world.get::<Node>(summer_entity).unwrap();
+        assert!(summer_node.inputs.contains(&gain_entity));
+    }
 }
