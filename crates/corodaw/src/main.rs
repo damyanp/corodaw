@@ -4,7 +4,7 @@ use bevy_app::AppExit;
 use bevy_ecs::{message::MessageWriter, system::command, world::CommandQueue};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use bevy_inspector_egui::bevy_inspector;
-use egui::{Button, KeyboardShortcut, MenuBar, ModifierNames, Modifiers, Ui};
+use egui::{Button, KeyboardShortcut, MenuBar, Modifiers, Ui};
 use project::{CommandManager, LoadEvent, Project, SaveEvent, UndoRedoEvent};
 use smol::{LocalExecutor, Task, future};
 
@@ -64,8 +64,8 @@ fn menu_bar_system(
     let ctx = contexts.ctx_mut()?;
     ctx.request_repaint();
 
-    let undo_shortcut = KeyboardShortcut::new(Modifiers::COMMAND, egui::Key::Z);
-    let redo_shortcut = KeyboardShortcut::new(Modifiers::COMMAND, egui::Key::Y);
+    let undo_shortcut = KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Z);
+    let redo_shortcut = KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Y);
 
     if !executor.is_active() {
         if command_manager.can_undo() && ctx.input_mut(|i| i.consume_shortcut(&undo_shortcut)) {
@@ -75,8 +75,6 @@ fn menu_bar_system(
             commands.trigger(UndoRedoEvent::Redo);
         }
     }
-
-    let is_mac = matches!(ctx.os(), egui::os::OperatingSystem::Mac);
 
     egui::TopBottomPanel::top("menu").show(ctx, |ui| {
         if executor.is_active() {
@@ -88,9 +86,6 @@ fn menu_bar_system(
             &command_manager,
             &mut app_exit,
             &mut inspector_enabled,
-            &undo_shortcut,
-            &redo_shortcut,
-            is_mac,
         );
     });
 
@@ -103,9 +98,6 @@ fn menu_bar_ui(
     command_manager: &CommandManager,
     app_exit: &mut MessageWriter<AppExit>,
     inspector_enabled: &mut InspectorEnabled,
-    undo_shortcut: &KeyboardShortcut,
-    redo_shortcut: &KeyboardShortcut,
-    is_mac: bool,
 ) {
     MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
@@ -124,8 +116,7 @@ fn menu_bar_ui(
             if ui
                 .add_enabled(
                     command_manager.can_undo(),
-                    Button::new("Undo")
-                        .shortcut_text(undo_shortcut.format(&ModifierNames::NAMES, is_mac)),
+                    Button::new("Undo").shortcut_text("Ctrl+Z"),
                 )
                 .clicked()
             {
@@ -134,8 +125,7 @@ fn menu_bar_ui(
             if ui
                 .add_enabled(
                     command_manager.can_redo(),
-                    Button::new("Redo")
-                        .shortcut_text(redo_shortcut.format(&ModifierNames::NAMES, is_mac)),
+                    Button::new("Redo").shortcut_text("Ctrl+Y"),
                 )
                 .clicked()
             {
