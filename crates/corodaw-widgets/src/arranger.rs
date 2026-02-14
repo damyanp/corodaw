@@ -7,6 +7,13 @@ use egui::{
     vec2,
 };
 
+#[derive(Clone, Copy, Debug, Default)]
+enum DragAxis {
+    #[default]
+    Horizontal,
+    Vertical,
+}
+
 #[derive(Clone, Debug, Copy)]
 struct State {
     width: f32,
@@ -81,6 +88,7 @@ impl ArrangerWidget {
                 show_channels(
                     &mut data,
                     ui,
+                    id,
                     drag_id,
                     drag_info,
                     gap,
@@ -133,6 +141,7 @@ impl ArrangerWidget {
 fn show_channels(
     data: &mut impl ArrangerDataProvider,
     ui: &mut Ui,
+    id: Id,
     drag_id: Id,
     drag_info: Option<usize>,
     gap: f32,
@@ -170,6 +179,7 @@ fn show_channels(
     let mut drop_target = None;
     let mut dropped = false;
     let mut strip_drag_delta = Vec2::ZERO;
+    let strip_drag_axis_id = id.with("__strip_drag_axis");
 
     let mut y = channels_rect.min.y - viewport.min.y;
 
@@ -244,9 +254,31 @@ fn show_channels(
             )
             .response;
 
+        if r.drag_started_by(PointerButton::Primary) {
+            ui.ctx()
+                .data_mut(|d| d.remove_temp::<DragAxis>(strip_drag_axis_id));
+        }
+
         if r.dragged() {
             ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
-            strip_drag_delta += r.drag_delta();
+            let delta = r.drag_delta();
+            let axis: Option<DragAxis> = ui.ctx().data(|d| d.get_temp(strip_drag_axis_id));
+            let axis = axis.unwrap_or_else(|| {
+                let a = if delta.x.abs() >= delta.y.abs() {
+                    DragAxis::Horizontal
+                } else {
+                    DragAxis::Vertical
+                };
+                ui.ctx().data_mut(|d| d.insert_temp(strip_drag_axis_id, a));
+                a
+            });
+            strip_drag_delta += match axis {
+                DragAxis::Horizontal => vec2(delta.x, 0.0),
+                DragAxis::Vertical => vec2(0.0, delta.y),
+            };
+        } else if r.drag_stopped() {
+            ui.ctx()
+                .data_mut(|d| d.remove_temp::<DragAxis>(strip_drag_axis_id));
         } else if r.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::Grab);
         }
