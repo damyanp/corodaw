@@ -64,13 +64,23 @@ fn sync_plugin_window_titles_system<T: PluginFactory>(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn remove_plugins_system<T: PluginFactory>(
     mut commands: Commands,
     mut removed: RemovedComponents<ChannelData>,
-    channels: Query<Entity, (With<ChannelState>, Without<ChannelData>)>,
+    channels: Query<
+        (Entity, Option<&ChannelAudioView<T::Plugin>>),
+        (With<ChannelState>, Without<ChannelData>),
+    >,
 ) {
     for entity in removed.read() {
-        if channels.get(entity).is_ok() {
+        if let Ok((entity, audio_view)) = channels.get(entity) {
+            // Despawn the plugin's audio graph node entity. The audio graph's
+            // pre_update_system will automatically disconnect it from any
+            // remaining nodes (e.g. the summer) on the next frame.
+            if let Some(audio_view) = audio_view {
+                commands.entity(audio_view.plugin_node).despawn();
+            }
             commands
                 .entity(entity)
                 .remove::<(ChannelAudioView<T::Plugin>, ChannelGainControl, InputNode)>();
@@ -78,6 +88,7 @@ fn remove_plugins_system<T: PluginFactory>(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn set_plugins_system<T: PluginFactory>(
     mut commands: Commands,
     available_plugins: Query<&AvailablePlugin>,
@@ -88,17 +99,24 @@ fn set_plugins_system<T: PluginFactory>(
             &ChannelState,
             &ChannelData,
             Option<&ChannelGainControl>,
+            Option<&ChannelAudioView<T::Plugin>>,
         ),
         Changed<ChannelData>,
     >,
     summer: NonSend<Summer>,
 ) {
-    for (entity, state, data, gain_control) in &channels {
+    for (entity, state, data, gain_control, old_audio_view) in &channels {
         let found_plugin = available_plugins
             .iter()
             .find(|p| p.0.id == data.plugin_id)
             .unwrap();
         let found_plugin = &found_plugin.0;
+
+        // Despawn the old plugin's audio graph node. The audio graph's
+        // pre_update_system will disconnect it from other nodes next frame.
+        if let Some(old_audio_view) = old_audio_view {
+            commands.entity(old_audio_view.plugin_node).despawn();
+        }
 
         let channel_entity = commands.get_entity(entity).unwrap();
 
@@ -142,8 +160,6 @@ fn set_plugin<T: PluginFactory>(
             eprintln!("Warning: failed to load plugin state: {e}");
         }
     }
-
-    // TODO: destroy the old plugin and its graph node!
 
     let (plugin_node, plugin_processor) = plugin_factory.create_audio_graph_node(&plugin);
 
@@ -190,6 +206,7 @@ fn set_plugin<T: PluginFactory>(
 
     let channel_audio_view = ChannelAudioView {
         plugin,
+        plugin_node: plugin_node_id,
         gui_handle: Default::default(),
     };
 
@@ -301,6 +318,7 @@ impl ChannelState {
 #[derive(Component)]
 pub struct ChannelAudioView<P: Component> {
     plugin: P,
+    plugin_node: Entity,
     gui_handle: Option<GuiHandle>,
 }
 

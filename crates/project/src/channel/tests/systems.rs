@@ -181,6 +181,205 @@ fn remove_plugin_removes_components() {
 }
 
 #[test]
+fn replace_plugin_despawns_old_node() {
+    let mut app = setup_test_app();
+    let id = spawn_channel(&mut app);
+
+    // Set plugin A
+    let data_a = make_channel_data("com.test.synth-a");
+    SetPluginCommand::new(id, Some(data_a)).execute(app.world_mut());
+    app.update();
+
+    let entity = get_entity(&mut app, id);
+    let old_input_node_entity = app.world().get::<InputNode>(entity).unwrap().0;
+
+    // Replace with plugin B
+    let data_b = make_channel_data("com.test.synth-b");
+    SetPluginCommand::new(id, Some(data_b)).execute(app.world_mut());
+    app.update();
+
+    let new_input_node_entity = app.world().get::<InputNode>(entity).unwrap().0;
+
+    // New plugin should have a different node entity
+    assert_ne!(old_input_node_entity, new_input_node_entity);
+
+    // InputNode should reference a living entity
+    assert!(
+        app.world().get_entity(new_input_node_entity).is_ok(),
+        "InputNode should reference a valid entity after replacement"
+    );
+
+    // Old node entity should be despawned
+    assert!(
+        app.world().get_entity(old_input_node_entity).is_err(),
+        "Old plugin's audio graph node should be despawned after replacement"
+    );
+
+    // Second update lets the audio graph's pre_update_system clean up
+    // stale connections from the despawned node.
+    app.update();
+
+    // New plugin node should be connected to gain, gain to summer
+    let gain_entity = app
+        .world()
+        .get::<ChannelGainControl>(entity)
+        .unwrap()
+        .0
+        .entity;
+    let summer_entity = app.world().non_send_resource::<Summer>().entity;
+
+    let gain_node = app.world().get::<Node>(gain_entity).unwrap();
+    assert!(
+        gain_node.inputs.contains(&new_input_node_entity),
+        "Gain should be connected to new plugin node"
+    );
+    assert!(
+        !gain_node.inputs.contains(&old_input_node_entity),
+        "Gain should not be connected to old plugin node"
+    );
+
+    let summer_node = app.world().get::<Node>(summer_entity).unwrap();
+    assert!(
+        summer_node.inputs.contains(&gain_entity),
+        "Summer should still be connected to gain"
+    );
+}
+
+#[test]
+fn replace_plugin_reuses_gain_control() {
+    let mut app = setup_test_app();
+    let id = spawn_channel(&mut app);
+
+    // Set plugin A
+    let data_a = make_channel_data("com.test.synth-a");
+    SetPluginCommand::new(id, Some(data_a)).execute(app.world_mut());
+    app.update();
+
+    let entity = get_entity(&mut app, id);
+    let gain_entity_before = app
+        .world()
+        .get::<ChannelGainControl>(entity)
+        .unwrap()
+        .0
+        .entity;
+
+    // Replace with plugin B
+    let data_b = make_channel_data("com.test.synth-b");
+    SetPluginCommand::new(id, Some(data_b)).execute(app.world_mut());
+    app.update();
+
+    let gain_entity_after = app
+        .world()
+        .get::<ChannelGainControl>(entity)
+        .unwrap()
+        .0
+        .entity;
+
+    // Gain control entity should be reused, not recreated
+    assert_eq!(
+        gain_entity_before, gain_entity_after,
+        "Gain control should be reused across plugin replacement"
+    );
+}
+
+#[test]
+fn undo_plugin_set_despawns_node() {
+    let mut app = setup_test_app();
+    let id = spawn_channel(&mut app);
+
+    // Set plugin A
+    let data_a = make_channel_data("com.test.synth-a");
+    let undo = SetPluginCommand::new(id, Some(data_a)).execute(app.world_mut());
+    app.update();
+
+    let entity = get_entity(&mut app, id);
+    let input_node_entity = app.world().get::<InputNode>(entity).unwrap().0;
+
+    // Undo (removes ChannelData)
+    undo.unwrap().execute(app.world_mut());
+    app.update();
+
+    // Plugin components should be removed
+    assert!(
+        app.world()
+            .get::<ChannelAudioView<MockPlugin>>(entity)
+            .is_none()
+    );
+    assert!(app.world().get::<InputNode>(entity).is_none());
+
+    // The audio graph node entity should be despawned
+    assert!(
+        app.world().get_entity(input_node_entity).is_err(),
+        "Plugin's audio graph node should be despawned after undo"
+    );
+}
+
+#[test]
+fn undo_redo_plugin_set_reconnects_fresh() {
+    let mut app = setup_test_app();
+    let id = spawn_channel(&mut app);
+
+    // Set plugin A
+    let data_a = make_channel_data("com.test.synth-a");
+    let undo = SetPluginCommand::new(id, Some(data_a))
+        .execute(app.world_mut())
+        .unwrap();
+    app.update();
+
+    let entity = get_entity(&mut app, id);
+    let original_input_node = app.world().get::<InputNode>(entity).unwrap().0;
+
+    // Undo
+    let redo = undo.execute(app.world_mut()).unwrap();
+    app.update();
+
+    // Redo
+    redo.execute(app.world_mut());
+    app.update();
+
+    // Should have a fresh plugin node (possibly new entity)
+    let new_input_node = app.world().get::<InputNode>(entity).unwrap().0;
+
+    // InputNode should reference a living entity
+    assert!(
+        app.world().get_entity(new_input_node).is_ok(),
+        "InputNode should reference a valid entity after redo"
+    );
+
+    // Second update for audio graph cleanup
+    app.update();
+
+    // The new node should be properly wired
+    let gain_entity = app
+        .world()
+        .get::<ChannelGainControl>(entity)
+        .unwrap()
+        .0
+        .entity;
+    let summer_entity = app.world().non_send_resource::<Summer>().entity;
+
+    let gain_node = app.world().get::<Node>(gain_entity).unwrap();
+    assert!(
+        gain_node.inputs.contains(&new_input_node),
+        "After redo, gain should be connected to the plugin node"
+    );
+
+    // Old node should not be connected
+    if original_input_node != new_input_node {
+        assert!(
+            !gain_node.inputs.contains(&original_input_node),
+            "Old plugin node should not be connected after undo/redo"
+        );
+    }
+
+    let summer_node = app.world().get::<Node>(summer_entity).unwrap();
+    assert!(
+        summer_node.inputs.contains(&gain_entity),
+        "Summer should be connected to gain after redo"
+    );
+}
+
+#[test]
 fn set_plugin_wires_audio_graph() {
     let mut app = setup_test_app();
     let id = spawn_channel(&mut app);
