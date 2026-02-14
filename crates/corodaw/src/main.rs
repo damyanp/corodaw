@@ -4,7 +4,7 @@ use bevy_app::AppExit;
 use bevy_ecs::{message::MessageWriter, system::command, world::CommandQueue};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use bevy_inspector_egui::bevy_inspector;
-use egui::{Button, MenuBar, Ui};
+use egui::{Button, KeyboardShortcut, MenuBar, Modifiers, Ui};
 use project::{CommandManager, LoadEvent, Project, SaveEvent, UndoRedoEvent};
 use smol::{LocalExecutor, Task, future};
 
@@ -64,6 +64,18 @@ fn menu_bar_system(
     let ctx = contexts.ctx_mut()?;
     ctx.request_repaint();
 
+    if !executor.is_active() {
+        let undo_shortcut = KeyboardShortcut::new(Modifiers::COMMAND, egui::Key::Z);
+        let redo_shortcut = KeyboardShortcut::new(Modifiers::COMMAND, egui::Key::Y);
+
+        if command_manager.can_undo() && ctx.input_mut(|i| i.consume_shortcut(&undo_shortcut)) {
+            commands.trigger(UndoRedoEvent::Undo);
+        }
+        if command_manager.can_redo() && ctx.input_mut(|i| i.consume_shortcut(&redo_shortcut)) {
+            commands.trigger(UndoRedoEvent::Redo);
+        }
+    }
+
     egui::TopBottomPanel::top("menu").show(ctx, |ui| {
         if executor.is_active() {
             ui.disable();
@@ -102,13 +114,19 @@ fn menu_bar_ui(
         });
         ui.menu_button("Edit", |ui| {
             if ui
-                .add_enabled(command_manager.can_undo(), Button::new("Undo"))
+                .add_enabled(
+                    command_manager.can_undo(),
+                    Button::new("Undo").shortcut_text("Ctrl+Z"),
+                )
                 .clicked()
             {
                 commands.trigger(UndoRedoEvent::Undo);
             }
             if ui
-                .add_enabled(command_manager.can_redo(), Button::new("Redo"))
+                .add_enabled(
+                    command_manager.can_redo(),
+                    Button::new("Redo").shortcut_text("Ctrl+Y"),
+                )
                 .clicked()
             {
                 commands.trigger(UndoRedoEvent::Redo);
