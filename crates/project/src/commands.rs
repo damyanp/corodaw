@@ -40,6 +40,11 @@ impl CommandManager {
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
     }
+
+    pub fn clear(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+    }
 }
 
 #[derive(Event, Clone, Copy)]
@@ -65,4 +70,35 @@ fn on_undo_redo_event(command: On<UndoRedoEvent>, mut commands: Commands) {
         }
         world.insert_non_send_resource(command_manager);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct NoOpCommand;
+
+    impl Command for NoOpCommand {
+        fn execute(&self, _world: &mut World) -> Option<Box<dyn Command>> {
+            Some(Box::new(NoOpCommand))
+        }
+    }
+
+    #[test]
+    fn clear_empties_stacks() {
+        let mut manager = CommandManager::default();
+        let mut world = World::new();
+
+        manager.add_undo(Box::new(NoOpCommand));
+        manager.undo(&mut world);
+        assert!(manager.can_redo());
+
+        manager.add_undo(Box::new(NoOpCommand));
+        assert!(manager.can_undo());
+
+        manager.clear();
+        assert!(!manager.can_undo());
+        assert!(!manager.can_redo());
+    }
 }

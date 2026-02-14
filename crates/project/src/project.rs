@@ -148,6 +148,10 @@ fn on_load_event(
             channel_order: ordered,
         },
     ));
+
+    commands.queue(|world: &mut World| {
+        world.non_send_resource_mut::<CommandManager>().clear();
+    });
 }
 
 #[allow(clippy::type_complexity)]
