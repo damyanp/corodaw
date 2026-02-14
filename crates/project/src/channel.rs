@@ -22,6 +22,7 @@ impl Plugin for ChannelBevyPlugin {
         app.add_systems(
             Update,
             (
+                remove_plugins_system,
                 set_plugins_system,
                 update_channels_system,
                 sync_channel_order_system,
@@ -49,6 +50,20 @@ fn sync_plugin_window_titles_system(
         if view.has_gui() {
             let title = view.window_title(name.as_str());
             clap_plugin_manager.set_title(view.clap_plugin.plugin_id, title);
+        }
+    }
+}
+
+fn remove_plugins_system(
+    mut commands: Commands,
+    mut removed: RemovedComponents<ChannelData>,
+    channels: Query<Entity, (With<ChannelState>, Without<ChannelData>)>,
+) {
+    for entity in removed.read() {
+        if channels.get(entity).is_ok() {
+            commands
+                .entity(entity)
+                .remove::<(ChannelAudioView, ChannelGainControl, InputNode)>();
         }
     }
 }
@@ -493,6 +508,29 @@ impl Command for MoveChannelCommand {
     }
 }
 
+#[derive(Debug)]
+pub struct SetPluginCommand {
+    channel: Id,
+    data: Option<ChannelData>,
+}
+
+impl SetPluginCommand {
+    pub fn new(channel: Id, data: Option<ChannelData>) -> Self {
+        Self { channel, data }
+    }
+}
+
+impl Command for SetPluginCommand {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+        let entity = self.channel.find_entity(world)?;
+        let old_data = world.entity_mut(entity).take::<ChannelData>();
+        if let Some(data) = &self.data {
+            world.entity_mut(entity).insert(data.clone());
+        }
+        Some(Box::new(SetPluginCommand::new(self.channel, old_data)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -732,5 +770,104 @@ mod tests {
         assert_eq!(get_channel_ids(&mut world), vec![b, c, d, a]);
         undo.execute(&mut world);
         assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
+    }
+
+    fn make_channel_data(plugin_id: &str) -> ChannelData {
+        ChannelData {
+            plugin_id: plugin_id.to_owned(),
+            plugin_state: None,
+        }
+    }
+
+    #[test]
+    fn set_plugin() {
+        let mut world = setup_world();
+        let snapshot = ChannelSnapshot::default();
+        let id = snapshot.id;
+        AddChannelCommand::new(0, snapshot).execute(&mut world);
+
+        let data = make_channel_data("com.test.synth");
+        SetPluginCommand::new(id, Some(data)).execute(&mut world);
+
+        let entity = id.find_entity(&mut world).unwrap();
+        let data = world.get::<ChannelData>(entity).unwrap();
+        assert_eq!(data.plugin_id, "com.test.synth");
+    }
+
+    #[test]
+    fn set_plugin_undo() {
+        let mut world = setup_world();
+        let snapshot = ChannelSnapshot::default();
+        let id = snapshot.id;
+        AddChannelCommand::new(0, snapshot).execute(&mut world);
+
+        let data = make_channel_data("com.test.synth");
+        let undo = SetPluginCommand::new(id, Some(data))
+            .execute(&mut world)
+            .unwrap();
+        undo.execute(&mut world);
+
+        let entity = id.find_entity(&mut world).unwrap();
+        assert!(world.get::<ChannelData>(entity).is_none());
+    }
+
+    #[test]
+    fn set_plugin_replace() {
+        let mut world = setup_world();
+        let data_a = make_channel_data("com.test.synth-a");
+        let snapshot = ChannelSnapshot {
+            data: Some(data_a),
+            ..Default::default()
+        };
+        let id = snapshot.id;
+        AddChannelCommand::new(0, snapshot).execute(&mut world);
+
+        let data_b = make_channel_data("com.test.synth-b");
+        let undo = SetPluginCommand::new(id, Some(data_b))
+            .execute(&mut world)
+            .unwrap();
+
+        let entity = id.find_entity(&mut world).unwrap();
+        assert_eq!(
+            world.get::<ChannelData>(entity).unwrap().plugin_id,
+            "com.test.synth-b"
+        );
+
+        undo.execute(&mut world);
+        assert_eq!(
+            world.get::<ChannelData>(entity).unwrap().plugin_id,
+            "com.test.synth-a"
+        );
+    }
+
+    #[test]
+    fn set_plugin_roundtrip() {
+        let mut world = setup_world();
+        let snapshot = ChannelSnapshot::default();
+        let id = snapshot.id;
+        AddChannelCommand::new(0, snapshot).execute(&mut world);
+
+        let data = make_channel_data("com.test.synth");
+        let undo = SetPluginCommand::new(id, Some(data))
+            .execute(&mut world)
+            .unwrap();
+
+        let entity = id.find_entity(&mut world).unwrap();
+        assert!(world.get::<ChannelData>(entity).is_some());
+
+        // undo
+        let redo = undo.execute(&mut world).unwrap();
+        assert!(world.get::<ChannelData>(entity).is_none());
+
+        // redo
+        let undo = redo.execute(&mut world).unwrap();
+        assert_eq!(
+            world.get::<ChannelData>(entity).unwrap().plugin_id,
+            "com.test.synth"
+        );
+
+        // undo again
+        undo.execute(&mut world);
+        assert!(world.get::<ChannelData>(entity).is_none());
     }
 }

@@ -14,7 +14,7 @@ use engine::plugins::ClapPluginManager;
 use project::{
     AddChannelCommand, AvailablePlugin, ChannelAudioView, ChannelButton, ChannelButtonCommand,
     ChannelData, ChannelGainControl, ChannelOrder, ChannelSnapshot, ChannelState, CommandManager,
-    DeleteChannelCommand, MoveChannelCommand, RenameChannelCommand,
+    DeleteChannelCommand, MoveChannelCommand, RenameChannelCommand, SetPluginCommand,
 };
 
 #[derive(SystemParam)]
@@ -58,7 +58,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             .get(index)
             .expect("ChannelOrder index out of bounds");
 
-        let Ok((entity, channel, mut name, mut state, gain_control, audio_view, _channel_data)) =
+        let Ok((entity, channel, mut name, mut state, gain_control, audio_view, channel_data)) =
             self.channels.get_mut(entity)
         else {
             return;
@@ -117,6 +117,9 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                                                 show_available_plugins_menu(
                                                     &mut self.commands,
                                                     entity,
+                                                    *channel,
+                                                    channel_data,
+                                                    &mut self.command_manager,
                                                     self.available_plugins,
                                                     ui,
                                                 );
@@ -246,15 +249,21 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
 fn show_available_plugins_menu(
     commands: &mut Commands,
     channel_entity: Entity,
+    channel_id: project::Id,
+    old_data: Option<&ChannelData>,
+    command_manager: &mut CommandManager,
     available_plugins: Query<'_, '_, &'static AvailablePlugin, ()>,
     ui: &mut Ui,
 ) {
     for AvailablePlugin(found_plugin) in available_plugins.iter() {
         if ui.button(found_plugin.name.as_str()).clicked() {
-            commands.entity(channel_entity).insert(ChannelData {
+            let new_data = ChannelData {
                 plugin_id: found_plugin.id.clone(),
                 plugin_state: None,
-            });
+            };
+            commands.entity(channel_entity).insert(new_data);
+            let undo = SetPluginCommand::new(channel_id, old_data.cloned());
+            command_manager.add_undo(Box::new(undo));
         }
     }
 }
