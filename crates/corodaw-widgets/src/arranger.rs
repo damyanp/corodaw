@@ -241,7 +241,7 @@ fn show_channels(
         y += channel_height + gap;
     }
 
-    let add_button_response = ui.scope_builder(
+    let add_button_scope = ui.scope_builder(
         UiBuilder::new()
             .layout(Layout::top_down(Align::Center))
             .max_rect(Rect::from_min_size(
@@ -259,7 +259,7 @@ fn show_channels(
 
     // Ensure content height fills at least the visible area so the horizontal
     // scrollbar appears at the bottom of the window rather than after the last channel.
-    let content_bottom = add_button_response.response.rect.bottom();
+    let content_bottom = add_button_scope.response.rect.bottom();
     let min_bottom = channels_rect.min.y - viewport.min.y + channels_rect.height();
     if content_bottom < min_bottom {
         ui.allocate_rect(
