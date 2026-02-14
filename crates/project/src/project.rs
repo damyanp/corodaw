@@ -9,6 +9,8 @@ use serde_json::json;
 
 use crate::{ChannelAudioView, ChannelData, ChannelState, CommandManager, Id, new_channel};
 
+use engine::plugins::PluginFactory;
+
 #[derive(Component, Default, Reflect)]
 pub struct Project {
     pub path: Option<PathBuf>,
@@ -43,8 +45,15 @@ impl ChannelOrder {
     }
 }
 
-pub struct ProjectPlugin;
-impl Plugin for ProjectPlugin {
+pub struct ProjectPlugin<T: PluginFactory>(std::marker::PhantomData<fn() -> T>);
+
+impl<T: PluginFactory> Default for ProjectPlugin<T> {
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<T: PluginFactory + 'static> Plugin for ProjectPlugin<T> {
     fn build(&self, app: &mut App) {
         app.world_mut()
             .spawn((Project::default(), ChannelOrder::default()));
@@ -59,7 +68,7 @@ impl Plugin for ProjectPlugin {
             )
             .unwrap();
 
-        app.add_observer(on_save_event);
+        app.add_observer(on_save_event::<T>);
         app.add_observer(on_load_event);
     }
 }
@@ -155,7 +164,7 @@ fn on_load_event(
 }
 
 #[allow(clippy::type_complexity)]
-fn on_save_event(
+fn on_save_event<T: PluginFactory>(
     save_event: On<SaveEvent>,
     project_query: Single<(&mut Project, &ChannelOrder)>,
     channels_query: Query<(
@@ -165,7 +174,7 @@ fn on_save_event(
         &Id,
         Option<&ChannelAudioView>,
     )>,
-    clap_plugin_manager: NonSend<engine::plugins::ClapPluginManager>,
+    plugin_factory: NonSend<T>,
 ) {
     println!("Save: {:?}", save_event.path);
 
@@ -177,7 +186,7 @@ fn on_save_event(
             let data = match (data, view) {
                 (Some(data), Some(view)) => {
                     let plugin_state = futures::executor::block_on(async {
-                        clap_plugin_manager
+                        plugin_factory
                             .save_plugin_state(view.plugin_id())
                             .await
                             .ok()

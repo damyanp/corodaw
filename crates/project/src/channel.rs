@@ -7,7 +7,7 @@ use engine::builtin::{MidiInputNode, Summer};
 use engine::plugins::GuiHandle;
 use engine::{
     builtin::GainControl,
-    plugins::{ClapPluginManager, ClapPluginShared, discovery::FoundPlugin},
+    plugins::{ClapPluginShared, PluginFactory, discovery::FoundPlugin},
 };
 use serde::{Deserialize, Serialize};
 
@@ -16,17 +16,24 @@ use base64::{Engine, engine::general_purpose};
 use crate::commands::Command;
 use crate::{AvailablePlugin, ChannelOrder, Id};
 
-pub struct ChannelBevyPlugin;
-impl Plugin for ChannelBevyPlugin {
+pub struct ChannelBevyPlugin<T: PluginFactory>(std::marker::PhantomData<fn() -> T>);
+
+impl<T: PluginFactory> Default for ChannelBevyPlugin<T> {
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<T: PluginFactory + 'static> Plugin for ChannelBevyPlugin<T> {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
             (
                 remove_plugins_system,
-                set_plugins_system,
+                set_plugins_system::<T>,
                 update_channels_system,
                 sync_channel_order_system,
-                sync_plugin_window_titles_system,
+                sync_plugin_window_titles_system::<T>,
             )
                 .chain(),
         );
@@ -42,14 +49,14 @@ pub fn new_channel() -> impl Bundle {
 }
 
 #[allow(clippy::type_complexity)]
-fn sync_plugin_window_titles_system(
+fn sync_plugin_window_titles_system<T: PluginFactory>(
     channels: Query<(&Name, &ChannelAudioView), Or<(Changed<Name>, Changed<ChannelAudioView>)>>,
-    clap_plugin_manager: NonSend<ClapPluginManager>,
+    plugin_factory: NonSend<T>,
 ) {
     for (name, view) in &channels {
         if view.has_gui() {
             let title = view.window_title(name.as_str());
-            clap_plugin_manager.set_title(view.clap_plugin.plugin_id, title);
+            plugin_factory.set_title(view.clap_plugin.plugin_id, title);
         }
     }
 }
@@ -68,10 +75,10 @@ fn remove_plugins_system(
     }
 }
 
-fn set_plugins_system(
+fn set_plugins_system<T: PluginFactory>(
     mut commands: Commands,
     available_plugins: Query<&AvailablePlugin>,
-    clap_plugin_manager: NonSend<ClapPluginManager>,
+    plugin_factory: NonSend<T>,
     channels: Query<
         (
             Entity,
@@ -98,7 +105,7 @@ fn set_plugins_system(
             .and_then(|s| general_purpose::STANDARD.decode(s).ok());
 
         set_plugin(
-            &clap_plugin_manager,
+            &*plugin_factory,
             &summer,
             state,
             channel_entity,
@@ -110,7 +117,7 @@ fn set_plugins_system(
 }
 
 fn set_plugin(
-    clap_plugin_manager: &ClapPluginManager,
+    plugin_factory: &impl PluginFactory,
     summer: &Summer,
     state: &ChannelState,
     mut channel_entity: EntityCommands<'_>,
@@ -118,11 +125,11 @@ fn set_plugin(
     gain_control: Option<&ChannelGainControl>,
     plugin_state_data: Option<&[u8]>,
 ) {
-    let clap_plugin = clap_plugin_manager.create_plugin_sync(found_plugin.clone());
+    let clap_plugin = plugin_factory.create_plugin_sync(found_plugin.clone());
 
     if let Some(state_data) = plugin_state_data {
         let result = futures::executor::block_on(async {
-            clap_plugin_manager
+            plugin_factory
                 .load_plugin_state(clap_plugin.plugin_id, state_data.to_vec())
                 .await
                 .unwrap()
@@ -134,7 +141,7 @@ fn set_plugin(
 
     // TODO: destroy the old plugin and its graph node!
 
-    let (plugin_node, plugin_processor) = clap_plugin.create_audio_graph_node_sync();
+    let (plugin_node, plugin_processor) = plugin_factory.create_audio_graph_node(&clap_plugin);
 
     let commands = channel_entity.commands_mut();
     let plugin_node_id = commands.spawn(plugin_node).id();

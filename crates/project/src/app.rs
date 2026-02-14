@@ -12,7 +12,10 @@ use crate::{found_plugin::add_available_plugins, project::ProjectPlugin};
 pub fn make_app() -> App {
     let mut app = App::new();
 
-    app.add_plugins((audio_graph::AudioGraphPlugin, ProjectPlugin));
+    app.add_plugins((
+        audio_graph::AudioGraphPlugin,
+        ProjectPlugin::<ClapPluginManager>::default(),
+    ));
 
     let audio_graph_worker = app.world_mut().remove_non_send_resource().unwrap();
     let audio = Audio::new(audio_graph_worker).unwrap();
@@ -25,7 +28,10 @@ pub fn make_app() -> App {
         .insert_non_send_resource(midi_input)
         .insert_non_send_resource(summer)
         .insert_non_send_resource(audio)
-        .add_plugins((channel::ChannelBevyPlugin, CommandManagerBevyPlugin));
+        .add_plugins((
+            channel::ChannelBevyPlugin::<ClapPluginManager>::default(),
+            CommandManagerBevyPlugin,
+        ));
 
     // Register types for bevy-inspector-egui
     app.register_type::<Id>()

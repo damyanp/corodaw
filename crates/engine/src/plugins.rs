@@ -72,6 +72,27 @@ impl Default for ClapPluginManager {
     }
 }
 
+pub trait PluginFactory {
+    fn create_plugin_sync(&self, plugin: FoundPlugin) -> ClapPluginShared;
+
+    fn load_plugin_state(
+        &self,
+        clap_plugin_id: ClapPluginId,
+        data: Vec<u8>,
+    ) -> oneshot::Receiver<Result<(), String>>;
+
+    fn set_title(&self, clap_plugin_id: ClapPluginId, title: String);
+
+    fn show_gui(&self, clap_plugin_id: ClapPluginId, title: String)
+    -> oneshot::Receiver<GuiHandle>;
+
+    fn save_plugin_state(&self, clap_plugin_id: ClapPluginId)
+    -> oneshot::Receiver<Option<Vec<u8>>>;
+
+    fn create_audio_graph_node(&self, clap_plugin: &ClapPluginShared)
+    -> (Node, Box<dyn Processor>);
+}
+
 impl ClapPluginManager {
     pub fn create_plugin(&self, plugin: FoundPlugin) -> oneshot::Receiver<ClapPluginShared> {
         let (sender, receiver) = oneshot::channel();
@@ -80,13 +101,15 @@ impl ClapPluginManager {
             .unwrap();
         receiver
     }
+}
 
-    pub fn create_plugin_sync(&self, plugin: FoundPlugin) -> ClapPluginShared {
+impl PluginFactory for ClapPluginManager {
+    fn create_plugin_sync(&self, plugin: FoundPlugin) -> ClapPluginShared {
         let receiver = self.create_plugin(plugin);
         futures::executor::block_on(async { receiver.await.unwrap() })
     }
 
-    pub fn show_gui(
+    fn show_gui(
         &self,
         clap_plugin_id: ClapPluginId,
         title: String,
@@ -100,13 +123,13 @@ impl ClapPluginManager {
         receiver
     }
 
-    pub fn set_title(&self, clap_plugin_id: ClapPluginId, title: String) {
+    fn set_title(&self, clap_plugin_id: ClapPluginId, title: String) {
         self.sender
             .send(Message::SetTitle(clap_plugin_id, title))
             .unwrap();
     }
 
-    pub fn save_plugin_state(
+    fn save_plugin_state(
         &self,
         clap_plugin_id: ClapPluginId,
     ) -> oneshot::Receiver<Option<Vec<u8>>> {
@@ -117,7 +140,7 @@ impl ClapPluginManager {
         receiver
     }
 
-    pub fn load_plugin_state(
+    fn load_plugin_state(
         &self,
         clap_plugin_id: ClapPluginId,
         data: Vec<u8>,
@@ -127,6 +150,13 @@ impl ClapPluginManager {
             .send(Message::LoadState(clap_plugin_id, data, sender))
             .unwrap();
         receiver
+    }
+
+    fn create_audio_graph_node(
+        &self,
+        clap_plugin: &ClapPluginShared,
+    ) -> (Node, Box<dyn Processor>) {
+        clap_plugin.create_audio_graph_node_sync()
     }
 }
 

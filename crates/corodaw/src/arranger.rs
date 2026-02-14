@@ -10,7 +10,7 @@ use egui::{
     RichText, Sense, Slider, Stroke, TextEdit, Ui, pos2, vec2,
 };
 use egui_extras::{Size, StripBuilder};
-use engine::plugins::ClapPluginManager;
+use engine::plugins::{ClapPluginManager, PluginFactory};
 use project::{
     AddChannelCommand, AvailablePlugin, ChannelAudioView, ChannelButton, ChannelButtonCommand,
     ChannelData, ChannelGainControl, ChannelOrder, ChannelSnapshot, ChannelState, CommandManager,
@@ -104,9 +104,8 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                                             if let Some(mut audio_view) = audio_view {
                                                 input_button_response = ui.button("🎵");
 
-                                                let clap_plugin_manager = &self.clap_plugin_manager;
                                                 show_gui_button(
-                                                    clap_plugin_manager,
+                                                    &self.clap_plugin_manager,
                                                     &mut audio_view,
                                                     ui,
                                                 );
