@@ -154,12 +154,6 @@ layers:
 | `SetPluginEdit` | Sets or changes a channel's plugin |
 | `SetGainEdit` | Changes a channel's gain value |
 
-### App construction
-
-| Type | Kind | Description |
-|---|---|---|
-| `build_app()` | Free fn | Constructs the full Bevy `App` with all plugins |
-
 ## corodaw crate (app)
 
 | Type | Kind | Description |

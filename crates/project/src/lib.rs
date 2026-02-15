@@ -3,17 +3,15 @@ use bevy_reflect::Reflect;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-mod app;
 mod channel;
 mod commands;
 mod found_plugin;
 mod project;
 
-pub use app::build_app;
 pub use channel::*;
 pub use commands::*;
-pub use found_plugin::AvailablePlugin;
-pub use project::{ChannelOrder, LoadEvent, ProjectInfo, SaveEvent};
+pub use found_plugin::{AvailablePlugin, add_available_plugins};
+pub use project::{ChannelOrder, LoadEvent, ProjectInfo, ProjectPlugin, SaveEvent};
 
 #[derive(Component, Serialize, Deserialize, Hash, Eq, PartialEq, Clone, Copy, Debug, Reflect)]
 #[reflect(opaque)]

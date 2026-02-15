@@ -1,11 +1,22 @@
-use audio_graph::GraphStateReader;
+use audio_graph::{
+    GraphConnection, GraphNodeDesc, GraphOutputNode, GraphPlugin, GraphPorts, GraphStateReader,
+};
 use bevy::prelude::*;
 use bevy_app::AppExit;
 use bevy_ecs::{message::MessageWriter, system::command, world::CommandQueue};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use bevy_inspector_egui::bevy_inspector;
 use egui::{Button, KeyboardShortcut, MenuBar, Modifiers, Ui};
-use project::{EditHistory, LoadEvent, ProjectInfo, SaveEvent, UndoRedoEvent};
+use engine::{
+    audio::AudioOutput,
+    builtin::{MidiInputOwner, SummerOwner},
+    plugins::ClapManager,
+};
+use project::{
+    AvailablePlugin, ChannelGain, ChannelMixerState, ChannelOrder, ChannelPlugin,
+    ChannelPluginBinding, EditHistory, EditHistoryPlugin, LoadEvent, ProjectInfo, ProjectPlugin,
+    SaveEvent, StableId, UndoRedoEvent, add_available_plugins,
+};
 use smol::{LocalExecutor, Task, future};
 
 use crate::arranger::arranger_ui;
@@ -243,7 +254,39 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn main() {
-    let mut app = project::build_app();
+    let mut app = App::new();
+
+    app.add_plugins((GraphPlugin, ProjectPlugin::<ClapManager>::default()));
+
+    let audio_graph_worker = app.world_mut().remove_non_send_resource().unwrap();
+    let audio = AudioOutput::new(audio_graph_worker).unwrap();
+
+    let midi_input = MidiInputOwner::new(app.world_mut());
+    let summer = SummerOwner::new(app.world_mut(), 2);
+    app.world_mut()
+        .entity_mut(summer.entity)
+        .insert(GraphOutputNode);
+
+    app.insert_non_send_resource(ClapManager::default())
+        .insert_non_send_resource(midi_input)
+        .insert_non_send_resource(summer)
+        .insert_non_send_resource(audio)
+        .add_plugins((ChannelPlugin::<ClapManager>::default(), EditHistoryPlugin));
+
+    // Register types for bevy-inspector-egui
+    app.register_type::<StableId>()
+        .register_type::<ProjectInfo>()
+        .register_type::<ChannelOrder>()
+        .register_type::<ChannelPluginBinding>()
+        .register_type::<ChannelMixerState>()
+        .register_type::<ChannelGain>()
+        .register_type::<AvailablePlugin>()
+        .register_type::<GraphOutputNode>()
+        .register_type::<GraphNodeDesc>()
+        .register_type::<GraphConnection>()
+        .register_type::<GraphPorts>();
+
+    add_available_plugins(app.world_mut());
 
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {

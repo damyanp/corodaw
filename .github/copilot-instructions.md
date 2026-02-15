@@ -63,7 +63,7 @@ corodaw  (main app — UI, menus, async task runner)
 
 **Widget abstraction**: `ArrangerDataProvider` trait decouples the arranger widget from Bevy. The `corodaw` crate implements it with live ECS queries; the widget examples use mock data.
 
-**Bevy plugin registration**: Each subsystem registers as a Bevy `Plugin` (e.g., `ChannelPlugin`, `EditHistoryPlugin`). The app is assembled in `project::build_app()`.
+**Bevy plugin registration**: Each subsystem registers as a Bevy `Plugin` (e.g., `ChannelPlugin`, `EditHistoryPlugin`). The app is assembled in `corodaw::main()`.
 
 ## Naming Conventions
 

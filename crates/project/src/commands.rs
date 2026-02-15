@@ -53,7 +53,7 @@ pub enum UndoRedoEvent {
     Redo,
 }
 
-pub(crate) struct EditHistoryPlugin;
+pub struct EditHistoryPlugin;
 impl Plugin for EditHistoryPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         app.add_observer(on_undo_redo_event);
