@@ -1,11 +1,19 @@
-use audio_graph::StateReader;
+use audio_graph::{OutputNode, StateReader};
 use bevy::prelude::*;
 use bevy_app::AppExit;
 use bevy_ecs::{message::MessageWriter, system::command, world::CommandQueue};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use bevy_inspector_egui::bevy_inspector;
 use egui::{Button, KeyboardShortcut, MenuBar, Modifiers, Ui};
-use project::{CommandManager, LoadEvent, Project, SaveEvent, UndoRedoEvent};
+use engine::{
+    audio::Audio,
+    builtin::{MidiInputNode, Summer},
+    plugins::ClapPluginManager,
+};
+use project::{
+    ChannelBevyPlugin, ChannelData, ChannelGainControl, ChannelOrder, ChannelState, CommandManager,
+    CommandManagerBevyPlugin, Id, LoadEvent, Project, ProjectPlugin, SaveEvent, UndoRedoEvent,
+};
 use smol::{LocalExecutor, Task, future};
 
 use crate::arranger::arranger_ui;
@@ -243,7 +251,43 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn main() {
-    let mut app = project::make_app();
+    let mut app = App::new();
+
+    app.add_plugins((
+        audio_graph::AudioGraphPlugin,
+        ProjectPlugin::<ClapPluginManager>::default(),
+    ));
+
+    let audio_graph_worker = app.world_mut().remove_non_send_resource().unwrap();
+    let audio = Audio::new(audio_graph_worker).unwrap();
+
+    let midi_input = MidiInputNode::new(app.world_mut());
+    let summer = Summer::new(app.world_mut(), 2);
+    app.world_mut().entity_mut(summer.entity).insert(OutputNode);
+
+    app.insert_non_send_resource(ClapPluginManager::default())
+        .insert_non_send_resource(midi_input)
+        .insert_non_send_resource(summer)
+        .insert_non_send_resource(audio)
+        .add_plugins((
+            ChannelBevyPlugin::<ClapPluginManager>::default(),
+            CommandManagerBevyPlugin,
+        ));
+
+    // Register types for bevy-inspector-egui
+    app.register_type::<Id>()
+        .register_type::<Project>()
+        .register_type::<ChannelOrder>()
+        .register_type::<ChannelData>()
+        .register_type::<ChannelState>()
+        .register_type::<ChannelGainControl>()
+        .register_type::<project::AvailablePlugin>()
+        .register_type::<audio_graph::OutputNode>()
+        .register_type::<audio_graph::Node>()
+        .register_type::<audio_graph::Connection>()
+        .register_type::<audio_graph::Ports>();
+
+    project::add_available_plugins(app.world_mut());
 
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
