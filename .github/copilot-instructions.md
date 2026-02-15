@@ -23,6 +23,10 @@ cargo clippy --workspace
 
 No CI, clippy config, or rustfmt config exists. Use default `cargo clippy` and `cargo fmt`.
 
+## Code Style
+
+- **Module layout**: Use the modern Rust module style (`foo.rs` + `foo/` directory for sub-modules). Never use `foo/mod.rs`.
+
 ## Architecture
 
 Corodaw is a DAW (Digital Audio Workstation) built on **Bevy ECS** for state management and **egui** (via bevy_egui) for UI rendering.
