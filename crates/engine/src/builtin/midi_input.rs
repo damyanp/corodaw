@@ -2,21 +2,23 @@ use std::{collections::VecDeque, time::Duration};
 
 use bevy_ecs::prelude::*;
 
-use audio_graph::{AgEvent, Node, ProcessContext, Processor};
+use audio_graph::{GraphEvent, GraphNodeDesc, GraphProcessContext, GraphProcessor};
 use derivative::Derivative;
 
 use crate::midi::MidiReceiver;
 
 #[derive(Debug)]
-pub struct MidiInputNode {
+pub struct MidiInputOwner {
     pub entity: Entity,
 }
 
-impl MidiInputNode {
+impl MidiInputOwner {
     pub fn new(world: &mut World) -> Self {
-        let entity = world.spawn(Node::default().event(0, 1).always_run()).id();
-        audio_graph::set_processor(world, entity, Box::new(MidiInputProcessor::default()));
-        MidiInputNode { entity }
+        let entity = world
+            .spawn(GraphNodeDesc::default().event(0, 1).always_run())
+            .id();
+        audio_graph::graph_set_processor(world, entity, Box::new(MidiInputProcessor::default()));
+        MidiInputOwner { entity }
     }
 }
 
@@ -27,7 +29,7 @@ struct MidiInputProcessor {
     midi_receiver: Option<MidiReceiver>,
 
     #[derivative(Debug = "ignore")]
-    events: VecDeque<AgEvent>,
+    events: VecDeque<GraphEvent>,
 
     first_event_timestamp: Option<(u64, Duration)>,
 }
@@ -48,8 +50,8 @@ impl Default for MidiInputProcessor {
     }
 }
 
-impl Processor for MidiInputProcessor {
-    fn process(&mut self, ctx: ProcessContext) {
+impl GraphProcessor for MidiInputProcessor {
+    fn process(&mut self, ctx: GraphProcessContext) {
         self.receive_midi_events(ctx.timestamp);
         ctx.out_event_buffers[0].extend(self.events.iter().cloned());
         self.events.clear();
@@ -77,7 +79,7 @@ impl MidiInputProcessor {
 
             let session_time = session_time.max(*timestamp);
 
-            self.events.push_back(AgEvent {
+            self.events.push_back(GraphEvent {
                 timestamp: session_time,
                 midi: event.midi_event,
             })

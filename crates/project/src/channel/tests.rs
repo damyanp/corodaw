@@ -15,8 +15,8 @@ fn get_channel_order(world: &mut World) -> Vec<Entity> {
     query.single(world).unwrap().channel_order.clone()
 }
 
-fn make_channel_data(plugin_id: &str) -> ChannelData {
-    ChannelData {
+fn make_channel_data(plugin_id: &str) -> ChannelPluginBinding {
+    ChannelPluginBinding {
         plugin_id: plugin_id.to_owned(),
         plugin_state: None,
     }

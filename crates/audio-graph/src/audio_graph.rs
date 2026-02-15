@@ -3,9 +3,9 @@ use bevy_ecs::prelude::*;
 use audio_blocks::{AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, AudioBlockOpsMut};
 
 use crate::{
-    Node, Processor,
-    node::{self, OutputNode},
-    worker::{Graph, StateWriter},
+    GraphNodeDesc, GraphProcessor,
+    node::{self, GraphOutputNode},
+    worker::{GraphState, GraphStateWriter},
 };
 use std::{
     ops::DerefMut,
@@ -13,40 +13,40 @@ use std::{
     time::Duration,
 };
 
-pub struct AudioGraph {
+pub struct GraphController {
     sender: Sender<AudioGraphMessage>,
 }
 
 /// This is the part of the audio graph that does audio processing, so it lives
 /// on the audio thread.
-pub struct AudioGraphWorker {
+pub struct GraphWorker {
     receiver: Receiver<AudioGraphMessage>,
-    state_writer: StateWriter,
+    state_writer: GraphStateWriter,
     num_channels: u16,
     sample_rate: u32,
-    pub(crate) graph: Graph,
+    pub(crate) graph: GraphState,
     output: Option<Entity>,
 }
 
 enum AudioGraphMessage {
-    SetProcessor(Entity, Box<dyn Processor>),
+    SetProcessor(Entity, Box<dyn GraphProcessor>),
     UpdateGraph {
-        changed: Vec<(Entity, Node)>,
+        changed: Vec<(Entity, GraphNodeDesc)>,
         removed: Vec<Entity>,
         output_node: Option<Entity>,
     },
 }
 
-impl AudioGraph {
-    pub fn new(state_writer: StateWriter) -> (AudioGraph, AudioGraphWorker) {
+impl GraphController {
+    pub fn new(state_writer: GraphStateWriter) -> (GraphController, GraphWorker) {
         let (sender, receiver) = channel();
 
-        let audio_graph = AudioGraph { sender };
+        let audio_graph = GraphController { sender };
 
-        (audio_graph, AudioGraphWorker::new(receiver, state_writer))
+        (audio_graph, GraphWorker::new(receiver, state_writer))
     }
 
-    pub fn set_processor(&self, entity: Entity, processor: Box<dyn Processor>) {
+    pub fn set_processor(&self, entity: Entity, processor: Box<dyn GraphProcessor>) {
         let _ = self
             .sender
             .send(AudioGraphMessage::SetProcessor(entity, processor));
@@ -54,8 +54,8 @@ impl AudioGraph {
 }
 
 pub(crate) fn pre_update_system(
-    mut removed_nodes: RemovedComponents<Node>,
-    nodes: Query<(Entity, &mut Node)>,
+    mut removed_nodes: RemovedComponents<GraphNodeDesc>,
+    nodes: Query<(Entity, &mut GraphNodeDesc)>,
 ) {
     if removed_nodes.is_empty() {
         return;
@@ -79,10 +79,10 @@ pub(crate) fn pre_update_system(
 }
 
 pub(crate) fn update_system(
-    audio_graph: NonSendMut<AudioGraph>,
-    mut changed_nodes: Query<(Entity, Ref<node::Node>, Option<&Name>)>,
-    mut removed_nodes: RemovedComponents<node::Node>,
-    output_node: Option<Single<(Entity, &OutputNode)>>,
+    audio_graph: NonSendMut<GraphController>,
+    mut changed_nodes: Query<(Entity, Ref<node::GraphNodeDesc>, Option<&Name>)>,
+    mut removed_nodes: RemovedComponents<node::GraphNodeDesc>,
+    output_node: Option<Single<(Entity, &GraphOutputNode)>>,
 ) {
     let removed = Vec::from_iter(removed_nodes.read());
 
@@ -104,8 +104,8 @@ pub(crate) fn update_system(
     });
 }
 
-impl AudioGraphWorker {
-    fn new(receiver: Receiver<AudioGraphMessage>, state_writer: StateWriter) -> Self {
+impl GraphWorker {
+    fn new(receiver: Receiver<AudioGraphMessage>, state_writer: GraphStateWriter) -> Self {
         Self {
             receiver,
             state_writer,

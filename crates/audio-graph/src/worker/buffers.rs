@@ -2,15 +2,15 @@ use std::cell::{Ref, RefCell};
 
 use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockSequential};
 
-use crate::AgEvent;
+use crate::GraphEvent;
 
-pub struct AudioBuffers {
+pub struct GraphAudioBuffers {
     pub(crate) buffers: RefCell<AudioBlockSequential<f32>>,
 }
 
-impl AudioBuffers {
+impl GraphAudioBuffers {
     pub(crate) fn new(num_channels: u16, num_frames: usize) -> Self {
-        AudioBuffers {
+        GraphAudioBuffers {
             buffers: RefCell::new(AudioBlockSequential::new(num_channels, num_frames)),
         }
     }
@@ -31,18 +31,18 @@ impl AudioBuffers {
     }
 }
 
-pub struct EventBuffers {
-    pub(crate) ports: RefCell<Vec<Vec<AgEvent>>>,
+pub struct GraphEventBuffers {
+    pub(crate) ports: RefCell<Vec<Vec<GraphEvent>>>,
 }
 
-impl EventBuffers {
+impl GraphEventBuffers {
     pub(crate) fn new(num_ports: usize) -> Self {
-        EventBuffers {
+        GraphEventBuffers {
             ports: RefCell::new((0..num_ports).map(|_| Vec::new()).collect()),
         }
     }
 
-    pub fn get(&self) -> Ref<'_, Vec<Vec<AgEvent>>> {
+    pub fn get(&self) -> Ref<'_, Vec<Vec<GraphEvent>>> {
         self.ports.borrow()
     }
 

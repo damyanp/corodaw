@@ -9,25 +9,25 @@ use clack_host::{
     process::PluginAudioProcessor,
 };
 
-use crate::plugins::ClapPlugin;
-use audio_graph::{AgNode, Connection, Graph, ProcessContext, Processor};
+use crate::plugins::ClapInstance;
+use audio_graph::{GraphConnection, GraphNode, GraphProcessContext, GraphProcessor, GraphState};
 
-pub struct ClapPluginProcessor {
-    plugin_audio_processor: PluginAudioProcessor<ClapPlugin>,
+pub struct ClapProcessor {
+    plugin_audio_processor: PluginAudioProcessor<ClapInstance>,
     sample_rate: u32,
     audio_ports: AudioPorts,
     input_events: EventBuffer,
     num_outputs: usize,
 }
 
-impl Debug for ClapPluginProcessor {
+impl Debug for ClapProcessor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClapPluginProcessor").finish()
+        f.debug_struct("ClapProcessor").finish()
     }
 }
 
-impl ClapPluginProcessor {
-    pub fn new(clap_plugin: &ClapPlugin) -> Self {
+impl ClapProcessor {
+    pub fn new(clap_plugin: &ClapInstance) -> Self {
         let output_channels = clap_plugin.get_audio_ports(false);
         let total_channel_count = output_channels
             .iter()
@@ -53,8 +53,8 @@ impl ClapPluginProcessor {
     }
 }
 
-impl Processor for ClapPluginProcessor {
-    fn process(&mut self, ctx: ProcessContext) {
+impl GraphProcessor for ClapProcessor {
+    fn process(&mut self, ctx: GraphProcessContext) {
         self.update_input_events(ctx.graph, ctx.node, ctx.timestamp);
 
         let processor = if self.plugin_audio_processor.is_started() {
@@ -93,8 +93,8 @@ impl Processor for ClapPluginProcessor {
     }
 }
 
-impl ClapPluginProcessor {
-    fn update_input_events(&mut self, graph: &Graph, node: &AgNode, timestamp: &Duration) {
+impl ClapProcessor {
+    fn update_input_events(&mut self, graph: &GraphState, node: &GraphNode, timestamp: &Duration) {
         self.input_events.clear();
 
         if node.desc.event_channels.connections.is_empty() {
@@ -104,7 +104,7 @@ impl ClapPluginProcessor {
         // TODO: handle multiple inputs
         assert_eq!(node.desc.event_channels.connections.len(), 1);
 
-        let Connection {
+        let GraphConnection {
             src, src_channel, ..
         } = node.desc.event_channels.connections[0];
 

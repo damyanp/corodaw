@@ -9,58 +9,58 @@ use std::{
 use audio_blocks::AudioBlockSequential;
 use bevy_ecs::entity::Entity;
 
-use crate::{AgEvent, node};
+use crate::{GraphEvent, node};
 
 mod buffers;
-pub use buffers::{AudioBuffers, EventBuffers};
+pub use buffers::{GraphAudioBuffers, GraphEventBuffers};
 
 mod state;
-use state::StateBuffer;
-pub use state::{StateReader, StateValue, StateWriter, state_tracker};
+use state::GraphStateBuffer;
+pub use state::{GraphStateReader, GraphStateValue, GraphStateWriter, graph_state_tracker};
 
-pub struct ProcessContext<'a> {
-    pub graph: &'a Graph,
-    pub node: &'a AgNode,
+pub struct GraphProcessContext<'a> {
+    pub graph: &'a GraphState,
+    pub node: &'a GraphNode,
     pub num_frames: usize,
     pub sample_rate: u32,
     pub timestamp: &'a Duration,
     pub out_audio_buffers: &'a mut AudioBlockSequential<f32>,
-    pub out_event_buffers: &'a mut [Vec<AgEvent>],
-    pub state: &'a mut StateBuffer,
+    pub out_event_buffers: &'a mut [Vec<GraphEvent>],
+    pub state: &'a mut GraphStateBuffer,
 }
 
-pub trait Processor: Send + Debug {
-    fn process(&mut self, ctx: ProcessContext);
+pub trait GraphProcessor: Send + Debug {
+    fn process(&mut self, ctx: GraphProcessContext);
 }
 
 #[derive(Default)]
 pub(crate) struct Processors {
-    processors: HashMap<Entity, Box<dyn Processor>>,
+    processors: HashMap<Entity, Box<dyn GraphProcessor>>,
 }
 
 impl Processors {
-    fn get_mut(&mut self, entity: Entity) -> &mut dyn Processor {
+    fn get_mut(&mut self, entity: Entity) -> &mut dyn GraphProcessor {
         self.processors.get_mut(&entity).unwrap().as_mut()
     }
 
-    pub(crate) fn set(&mut self, entity: Entity, processor: Box<dyn Processor>) {
+    pub(crate) fn set(&mut self, entity: Entity, processor: Box<dyn GraphProcessor>) {
         let _ = self.processors.insert(entity, processor);
     }
 }
 
-pub struct AgNode {
+pub struct GraphNode {
     pub entity: Entity,
-    pub desc: node::Node,
-    pub output_audio_buffers: AudioBuffers,
-    pub output_event_buffers: EventBuffers,
+    pub desc: node::GraphNodeDesc,
+    pub output_audio_buffers: GraphAudioBuffers,
+    pub output_event_buffers: GraphEventBuffers,
 }
 
-impl AgNode {
-    fn new(entity: Entity, desc: node::Node) -> Self {
+impl GraphNode {
+    fn new(entity: Entity, desc: node::GraphNodeDesc) -> Self {
         const HARDCODED_NUM_FRAMES: usize = 1024;
         let output_audio_buffers =
-            AudioBuffers::new(desc.audio_channels.num_outputs, HARDCODED_NUM_FRAMES);
-        let output_event_buffers = EventBuffers::new(desc.event_channels.num_outputs as usize);
+            GraphAudioBuffers::new(desc.audio_channels.num_outputs, HARDCODED_NUM_FRAMES);
+        let output_event_buffers = GraphEventBuffers::new(desc.event_channels.num_outputs as usize);
 
         Self {
             entity,
@@ -72,13 +72,17 @@ impl AgNode {
 }
 
 #[derive(Default)]
-pub struct Graph {
-    pub(crate) nodes: HashMap<Entity, AgNode>,
+pub struct GraphState {
+    pub(crate) nodes: HashMap<Entity, GraphNode>,
     pub(crate) processors: RefCell<Processors>,
 }
 
-impl Graph {
-    pub(crate) fn update(&mut self, changed: Vec<(Entity, node::Node)>, removed: Vec<Entity>) {
+impl GraphState {
+    pub(crate) fn update(
+        &mut self,
+        changed: Vec<(Entity, node::GraphNodeDesc)>,
+        removed: Vec<Entity>,
+    ) {
         if !removed.is_empty() {
             for node in removed {
                 self.nodes.remove(&node);
@@ -91,13 +95,13 @@ impl Graph {
                     entry.get_mut().desc = node;
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(AgNode::new(entity, node));
+                    entry.insert(GraphNode::new(entity, node));
                 }
             };
         }
     }
 
-    pub fn get_node(&self, node_entity: Entity) -> Option<&AgNode> {
+    pub fn get_node(&self, node_entity: Entity) -> Option<&GraphNode> {
         let v = self.nodes.get(&node_entity);
         if v.is_none() {
             println!("** WARNING: asked for non-existent node {node_entity:?}");
@@ -111,7 +115,7 @@ impl Graph {
         num_frames: usize,
         sample_rate: u32,
         timestamp: &Duration,
-        state: &mut StateBuffer,
+        state: &mut GraphStateBuffer,
     ) {
         let ordered = self.build_breadth_first_traversal(node_entity);
         for node_entity in ordered {
@@ -131,7 +135,7 @@ impl Graph {
             let mut processors = self.processors.borrow_mut();
             let processor = processors.get_mut(node_entity);
 
-            processor.process(ProcessContext {
+            processor.process(GraphProcessContext {
                 graph: self,
                 node,
                 num_frames,

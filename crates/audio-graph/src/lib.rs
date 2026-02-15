@@ -5,22 +5,23 @@ mod events;
 mod node;
 mod worker;
 
-pub use audio_graph::{AudioGraph, AudioGraphWorker};
-pub use events::AgEvent;
+pub use audio_graph::{GraphController, GraphWorker};
+pub use events::GraphEvent;
 pub use node::{
-    Connection, Node, OutputNode, Ports, connect_audio, connect_event,
-    disconnect_event_input_from_node, set_processor,
+    GraphConnection, GraphNodeDesc, GraphOutputNode, GraphPorts, graph_connect_audio,
+    graph_connect_event, graph_disconnect_event_input, graph_set_processor,
 };
 pub use worker::{
-    AgNode, Graph, ProcessContext, Processor, StateReader, StateValue, StateWriter, state_tracker,
+    GraphNode, GraphProcessContext, GraphProcessor, GraphState, GraphStateReader, GraphStateValue,
+    GraphStateWriter, graph_state_tracker,
 };
 
-pub struct AudioGraphPlugin;
-impl Plugin for AudioGraphPlugin {
+pub struct GraphPlugin;
+impl Plugin for GraphPlugin {
     fn build(&self, app: &mut App) {
-        let (state_reader, state_writer) = state_tracker();
+        let (state_reader, state_writer) = graph_state_tracker();
 
-        let (audio_graph, audio_graph_worker) = AudioGraph::new(state_writer);
+        let (audio_graph, audio_graph_worker) = GraphController::new(state_writer);
         app.insert_non_send_resource(audio_graph)
             .insert_non_send_resource(audio_graph_worker)
             .insert_non_send_resource(state_reader)

@@ -30,14 +30,14 @@ use derivative::Derivative;
 use futures_channel::oneshot;
 use smol::LocalExecutor;
 
-use clap_adapter::ClapPluginProcessor;
+use clap_adapter::ClapProcessor;
 
-use audio_graph::{Node, Processor};
-use discovery::FoundPlugin;
+use audio_graph::{GraphNodeDesc, GraphProcessor};
+use discovery::PluginDescriptor;
 use timers::Timers;
 use ui_host::PluginUiHost;
 
-pub use crate::plugins::ui_host::GuiHandle;
+pub use crate::plugins::ui_host::PluginGuiHandle;
 
 mod clap_adapter;
 pub mod discovery;
@@ -45,20 +45,20 @@ mod timers;
 mod ui_host;
 
 #[derive(Debug, Hash, Copy, Clone, Eq, PartialEq)]
-pub struct ClapPluginId(usize);
+pub struct ClapId(usize);
 
-impl ClapPluginId {
+impl ClapId {
     pub fn from_raw(id: usize) -> Self {
         Self(id)
     }
 }
 
-pub struct ClapPluginManager {
+pub struct ClapManager {
     sender: Sender<Message>,
     _plugin_host: JoinHandle<()>,
 }
 
-impl Default for ClapPluginManager {
+impl Default for ClapManager {
     fn default() -> Self {
         let (sender, receiver) = channel();
 
@@ -78,34 +78,36 @@ impl Default for ClapPluginManager {
     }
 }
 
-pub trait PluginFactory {
+pub trait PluginManager {
     type Plugin: Component;
 
-    fn create_plugin_sync(&self, plugin: FoundPlugin) -> Self::Plugin;
+    fn create_plugin_sync(&self, plugin: PluginDescriptor) -> Self::Plugin;
 
-    fn plugin_id(plugin: &Self::Plugin) -> ClapPluginId;
+    fn plugin_id(plugin: &Self::Plugin) -> ClapId;
 
     fn plugin_name(plugin: &Self::Plugin) -> &str;
 
     fn load_plugin_state(
         &self,
-        clap_plugin_id: ClapPluginId,
+        clap_plugin_id: ClapId,
         data: Vec<u8>,
     ) -> oneshot::Receiver<Result<(), String>>;
 
-    fn set_title(&self, clap_plugin_id: ClapPluginId, title: String);
+    fn set_title(&self, clap_plugin_id: ClapId, title: String);
 
-    fn show_gui(&self, clap_plugin_id: ClapPluginId, title: String)
-    -> oneshot::Receiver<GuiHandle>;
+    fn show_gui(&self, clap_plugin_id: ClapId, title: String)
+    -> oneshot::Receiver<PluginGuiHandle>;
 
-    fn save_plugin_state(&self, clap_plugin_id: ClapPluginId)
-    -> oneshot::Receiver<Option<Vec<u8>>>;
+    fn save_plugin_state(&self, clap_plugin_id: ClapId) -> oneshot::Receiver<Option<Vec<u8>>>;
 
-    fn create_audio_graph_node(&self, plugin: &Self::Plugin) -> (Node, Box<dyn Processor>);
+    fn create_audio_graph_node(
+        &self,
+        plugin: &Self::Plugin,
+    ) -> (GraphNodeDesc, Box<dyn GraphProcessor>);
 }
 
-impl ClapPluginManager {
-    pub fn create_plugin(&self, plugin: FoundPlugin) -> oneshot::Receiver<ClapPluginShared> {
+impl ClapManager {
+    pub fn create_plugin(&self, plugin: PluginDescriptor) -> oneshot::Receiver<ClapProxy> {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send(Message::CreatePlugin(plugin, sender))
@@ -114,27 +116,27 @@ impl ClapPluginManager {
     }
 }
 
-impl PluginFactory for ClapPluginManager {
-    type Plugin = ClapPluginShared;
+impl PluginManager for ClapManager {
+    type Plugin = ClapProxy;
 
-    fn create_plugin_sync(&self, plugin: FoundPlugin) -> ClapPluginShared {
+    fn create_plugin_sync(&self, plugin: PluginDescriptor) -> ClapProxy {
         let receiver = self.create_plugin(plugin);
         futures::executor::block_on(async { receiver.await.unwrap() })
     }
 
-    fn plugin_id(plugin: &ClapPluginShared) -> ClapPluginId {
+    fn plugin_id(plugin: &ClapProxy) -> ClapId {
         plugin.plugin_id
     }
 
-    fn plugin_name(plugin: &ClapPluginShared) -> &str {
+    fn plugin_name(plugin: &ClapProxy) -> &str {
         &plugin.plugin_name
     }
 
     fn show_gui(
         &self,
-        clap_plugin_id: ClapPluginId,
+        clap_plugin_id: ClapId,
         title: String,
-    ) -> oneshot::Receiver<GuiHandle> {
+    ) -> oneshot::Receiver<PluginGuiHandle> {
         let (sender, receiver) = oneshot::channel();
 
         self.sender
@@ -144,16 +146,13 @@ impl PluginFactory for ClapPluginManager {
         receiver
     }
 
-    fn set_title(&self, clap_plugin_id: ClapPluginId, title: String) {
+    fn set_title(&self, clap_plugin_id: ClapId, title: String) {
         self.sender
             .send(Message::SetTitle(clap_plugin_id, title))
             .unwrap();
     }
 
-    fn save_plugin_state(
-        &self,
-        clap_plugin_id: ClapPluginId,
-    ) -> oneshot::Receiver<Option<Vec<u8>>> {
+    fn save_plugin_state(&self, clap_plugin_id: ClapId) -> oneshot::Receiver<Option<Vec<u8>>> {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send(Message::SaveState(clap_plugin_id, sender))
@@ -163,7 +162,7 @@ impl PluginFactory for ClapPluginManager {
 
     fn load_plugin_state(
         &self,
-        clap_plugin_id: ClapPluginId,
+        clap_plugin_id: ClapId,
         data: Vec<u8>,
     ) -> oneshot::Receiver<Result<(), String>> {
         let (sender, receiver) = oneshot::channel();
@@ -173,15 +172,18 @@ impl PluginFactory for ClapPluginManager {
         receiver
     }
 
-    fn create_audio_graph_node(&self, plugin: &ClapPluginShared) -> (Node, Box<dyn Processor>) {
+    fn create_audio_graph_node(
+        &self,
+        plugin: &ClapProxy,
+    ) -> (GraphNodeDesc, Box<dyn GraphProcessor>) {
         plugin.create_audio_graph_node_sync()
     }
 }
 
 struct PluginHostThread {
     executor: LocalExecutor<'static>,
-    plugins: RefCell<HashMap<ClapPluginId, Rc<ClapPlugin>>>,
-    next_id: Cell<ClapPluginId>,
+    plugins: RefCell<HashMap<ClapId, Rc<ClapInstance>>>,
+    next_id: Cell<ClapId>,
     sender: Sender<Message>,
     receiver: Receiver<Message>,
     plugin_ui_host: Pin<Box<PluginUiHost>>,
@@ -192,7 +194,7 @@ impl PluginHostThread {
         Rc::new(Self {
             executor: LocalExecutor::new(),
             plugins: RefCell::new(HashMap::new()),
-            next_id: Cell::new(ClapPluginId(1)),
+            next_id: Cell::new(ClapId(1)),
             sender,
             receiver,
             plugin_ui_host: Pin::new(Box::new(PluginUiHost::new())),
@@ -218,10 +220,10 @@ impl PluginHostThread {
                         self.executor
                             .spawn(async move {
                                 let id = this.next_id.get();
-                                this.next_id.set(ClapPluginId(id.0 + 1));
+                                this.next_id.set(ClapId(id.0 + 1));
 
                                 let (clap_plugin, clap_plugin_shared) =
-                                    ClapPlugin::new(id, &found_plugin, this.sender.clone()).await;
+                                    ClapInstance::new(id, &found_plugin, this.sender.clone()).await;
                                 let old_plugin =
                                     this.plugins.borrow_mut().insert(id, clap_plugin.clone());
                                 assert!(old_plugin.is_none());
@@ -261,7 +263,7 @@ impl PluginHostThread {
                     }
                     Message::CreateProcessor(clap_plugin_id, sender) => {
                         let clap_plugin = self.get_plugin(clap_plugin_id);
-                        let processor = Box::new(ClapPluginProcessor::new(&clap_plugin));
+                        let processor = Box::new(ClapProcessor::new(&clap_plugin));
 
                         let num_inputs = 0; // TODO: support inputs!
                         let num_outputs = processor.get_total_output_channels() as u16;
@@ -272,7 +274,7 @@ impl PluginHostThread {
                         let clap_plugin = self.get_plugin(clap_plugin_id);
                         let state_ext = {
                             let plugin = clap_plugin.plugin.borrow();
-                            plugin.access_shared_handler(|h: &ClapPluginShared| {
+                            plugin.access_shared_handler(|h: &ClapProxy| {
                                 h.extensions.read().unwrap().plugin_state
                             })
                         };
@@ -302,7 +304,7 @@ impl PluginHostThread {
                         let clap_plugin = self.get_plugin(clap_plugin_id);
                         let state_ext = {
                             let plugin = clap_plugin.plugin.borrow();
-                            plugin.access_shared_handler(|h: &ClapPluginShared| {
+                            plugin.access_shared_handler(|h: &ClapProxy| {
                                 h.extensions.read().unwrap().plugin_state
                             })
                         };
@@ -323,23 +325,23 @@ impl PluginHostThread {
         }
     }
 
-    fn get_plugin(&self, clap_plugin_id: ClapPluginId) -> Rc<ClapPlugin> {
+    fn get_plugin(&self, clap_plugin_id: ClapId) -> Rc<ClapInstance> {
         self.plugins.borrow().get(&clap_plugin_id).unwrap().clone()
     }
 }
 
-pub struct ClapPlugin {
-    clap_plugin_id: ClapPluginId,
+pub struct ClapInstance {
+    clap_plugin_id: ClapId,
     pub plugin: RefCell<PluginInstance<Self>>,
     plugin_audio_ports: RefCell<Option<PluginAudioPorts>>,
 }
 
-impl ClapPlugin {
+impl ClapInstance {
     async fn new(
-        clap_plugin_id: ClapPluginId,
-        plugin: &FoundPlugin,
+        clap_plugin_id: ClapId,
+        plugin: &PluginDescriptor,
         sender: Sender<Message>,
-    ) -> (Rc<Self>, ClapPluginShared) {
+    ) -> (Rc<Self>, ClapProxy) {
         let bundle = plugin.load_bundle();
         bundle
             .get_plugin_factory()
@@ -351,7 +353,7 @@ impl ClapPlugin {
         let host =
             HostInfo::new("corodaw", "damyanp", "https://github.com/damyanp", "0.0.1").unwrap();
 
-        let shared = ClapPluginShared {
+        let shared = ClapProxy {
             channel: sender,
             plugin_id: clap_plugin_id,
             plugin_name: plugin.name.clone(),
@@ -363,7 +365,7 @@ impl ClapPlugin {
         let shared_clone = shared.clone();
         let plugin = clack_host::plugin::PluginInstance::new(
             move |_| shared_clone,
-            move |_| ClapPluginMainThread::new(initialized_sender),
+            move |_| ClapMainThread::new(initialized_sender),
             &bundle,
             plugin_id.as_c_str(),
             &host,
@@ -372,8 +374,8 @@ impl ClapPlugin {
 
         initialized_receiver.await.unwrap();
 
-        let audio_ports = plugin
-            .access_shared_handler(|h: &ClapPluginShared| h.extensions.read().unwrap().audio_ports);
+        let audio_ports =
+            plugin.access_shared_handler(|h: &ClapProxy| h.extensions.read().unwrap().audio_ports);
 
         let clap_plugin = Rc::new(Self {
             clap_plugin_id,
@@ -405,7 +407,7 @@ impl ClapPlugin {
             .unwrap_or_default()
     }
 
-    pub fn get_audio_processor(&self, sample_rate: f64) -> PluginAudioProcessor<ClapPlugin> {
+    pub fn get_audio_processor(&self, sample_rate: f64) -> PluginAudioProcessor<ClapInstance> {
         let configuration = PluginAudioConfiguration {
             sample_rate,
             min_frames_count: 1,
@@ -421,29 +423,26 @@ impl ClapPlugin {
         )
     }
 
-    pub fn get_id(&self) -> ClapPluginId {
+    pub fn get_id(&self) -> ClapId {
         self.clap_plugin_id
     }
 }
 
 enum Message {
-    CreatePlugin(FoundPlugin, oneshot::Sender<ClapPluginShared>),
-    ShowGui(ClapPluginId, String, oneshot::Sender<GuiHandle>),
-    SetTitle(ClapPluginId, String),
-    RunOnMainThread(ClapPluginId),
-    ResizeHintsChanged(ClapPluginId),
-    RequestResize(ClapPluginId, GuiSize),
-    CreateProcessor(
-        ClapPluginId,
-        oneshot::Sender<(u16, u16, Box<dyn Processor>)>,
-    ),
-    SaveState(ClapPluginId, oneshot::Sender<Option<Vec<u8>>>),
-    LoadState(ClapPluginId, Vec<u8>, oneshot::Sender<Result<(), String>>),
+    CreatePlugin(PluginDescriptor, oneshot::Sender<ClapProxy>),
+    ShowGui(ClapId, String, oneshot::Sender<PluginGuiHandle>),
+    SetTitle(ClapId, String),
+    RunOnMainThread(ClapId),
+    ResizeHintsChanged(ClapId),
+    RequestResize(ClapId, GuiSize),
+    CreateProcessor(ClapId, oneshot::Sender<(u16, u16, Box<dyn GraphProcessor>)>),
+    SaveState(ClapId, oneshot::Sender<Option<Vec<u8>>>),
+    LoadState(ClapId, Vec<u8>, oneshot::Sender<Result<(), String>>),
 }
 
-impl HostHandlers for ClapPlugin {
-    type Shared<'a> = ClapPluginShared;
-    type MainThread<'a> = ClapPluginMainThread<'a>;
+impl HostHandlers for ClapInstance {
+    type Shared<'a> = ClapProxy;
+    type MainThread<'a> = ClapMainThread<'a>;
     type AudioProcessor<'a> = ();
 
     fn declare_extensions(
@@ -461,46 +460,48 @@ impl HostHandlers for ClapPlugin {
 
 #[derive(Clone, Component, Derivative)]
 #[derivative(Debug)]
-pub struct ClapPluginShared {
+pub struct ClapProxy {
     channel: Sender<Message>,
-    pub plugin_id: ClapPluginId,
+    pub plugin_id: ClapId,
     pub plugin_name: String,
     #[derivative(Debug = "ignore")]
-    pub extensions: Arc<RwLock<Extensions>>,
+    pub extensions: Arc<RwLock<ClapExtensions>>,
 }
 
 #[derive(Default)]
-pub struct Extensions {
+pub struct ClapExtensions {
     pub plugin_gui: Option<PluginGui>,
     pub audio_ports: Option<PluginAudioPorts>,
     pub plugin_state: Option<PluginState>,
 }
 
-impl ClapPluginShared {
-    pub async fn create_audio_graph_node(&self) -> (Node, Box<dyn Processor>) {
+impl ClapProxy {
+    pub async fn create_audio_graph_node(&self) -> (GraphNodeDesc, Box<dyn GraphProcessor>) {
         let (sender, receiver) = oneshot::channel();
         self.channel
             .send(Message::CreateProcessor(self.plugin_id, sender))
             .unwrap();
         let (num_inputs, num_outputs, processor) = receiver.await.unwrap();
 
-        let node = Node::default().audio(num_inputs, num_outputs).event(1, 0);
+        let node = GraphNodeDesc::default()
+            .audio(num_inputs, num_outputs)
+            .event(1, 0);
 
         (node, processor)
     }
 
-    pub fn create_audio_graph_node_sync(&self) -> (Node, Box<dyn Processor>) {
+    pub fn create_audio_graph_node_sync(&self) -> (GraphNodeDesc, Box<dyn GraphProcessor>) {
         futures::executor::block_on(async { self.create_audio_graph_node().await })
     }
 }
 
-impl HostLogImpl for ClapPluginShared {
+impl HostLogImpl for ClapProxy {
     fn log(&self, severity: clack_extensions::log::LogSeverity, message: &str) {
         println!("[host log] {}: {}", severity, message);
     }
 }
 
-impl HostGuiImpl for ClapPluginShared {
+impl HostGuiImpl for ClapProxy {
     fn resize_hints_changed(&self) {
         self.channel
             .send(Message::ResizeHintsChanged(self.plugin_id))
@@ -526,7 +527,7 @@ impl HostGuiImpl for ClapPluginShared {
     }
 }
 
-impl<'a> HostParamsImplMainThread for ClapPluginMainThread<'a> {
+impl<'a> HostParamsImplMainThread for ClapMainThread<'a> {
     fn rescan(&mut self, _flags: clack_extensions::params::ParamRescanFlags) {
         todo!()
     }
@@ -540,22 +541,22 @@ impl<'a> HostParamsImplMainThread for ClapPluginMainThread<'a> {
     }
 }
 
-impl HostParamsImplShared for ClapPluginShared {
+impl HostParamsImplShared for ClapProxy {
     fn request_flush(&self) {
         todo!()
     }
 }
 
-impl<'a> HostStateImpl for ClapPluginMainThread<'a> {
+impl<'a> HostStateImpl for ClapMainThread<'a> {
     fn mark_dirty(&mut self) {
         println!("[host state] Plugin marked state as dirty");
     }
 }
 
-unsafe impl Send for ClapPluginShared {}
-unsafe impl Sync for ClapPluginShared {}
+unsafe impl Send for ClapProxy {}
+unsafe impl Sync for ClapProxy {}
 
-impl<'a> host::SharedHandler<'a> for ClapPluginShared {
+impl<'a> host::SharedHandler<'a> for ClapProxy {
     fn initializing(&self, instance: InitializingPluginHandle<'a>) {
         let mut extensions = self.extensions.write().unwrap();
         extensions.audio_ports = instance.get_extension();
@@ -578,14 +579,14 @@ impl<'a> host::SharedHandler<'a> for ClapPluginShared {
     }
 }
 
-pub struct ClapPluginMainThread<'a> {
+pub struct ClapMainThread<'a> {
     plugin: Option<InitializedPluginHandle<'a>>,
     initialized: Cell<Option<oneshot::Sender<()>>>,
     timer_support: Option<PluginTimer>,
     _timers: Rc<Timers>,
 }
 
-impl<'a> ClapPluginMainThread<'a> {
+impl<'a> ClapMainThread<'a> {
     fn new(initialized: oneshot::Sender<()>) -> Self {
         Self {
             plugin: None,
@@ -596,7 +597,7 @@ impl<'a> ClapPluginMainThread<'a> {
     }
 }
 
-impl<'a> host::MainThreadHandler<'a> for ClapPluginMainThread<'a> {
+impl<'a> host::MainThreadHandler<'a> for ClapMainThread<'a> {
     fn initialized(&mut self, instance: InitializedPluginHandle<'a>) {
         self.timer_support = instance.get_extension();
         self.initialized

@@ -7,12 +7,15 @@ use bevy_reflect::Reflect;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::{ChannelAudioView, ChannelData, ChannelState, CommandManager, Id, new_channel};
+use crate::{
+    ChannelMixerState, ChannelPluginBinding, ChannelPluginInstance, EditHistory, StableId,
+    channel_bundle,
+};
 
-use engine::plugins::PluginFactory;
+use engine::plugins::PluginManager;
 
 #[derive(Component, Default, Reflect)]
-pub struct Project {
+pub struct ProjectInfo {
     pub path: Option<PathBuf>,
 }
 
@@ -23,7 +26,7 @@ pub struct ChannelOrder {
 
 impl ChannelOrder {
     pub fn add_channel(&mut self, commands: &mut Commands, index: usize) {
-        let entity = commands.spawn(new_channel()).id();
+        let entity = commands.spawn(channel_bundle()).id();
         self.channel_order.insert(index, entity);
     }
 
@@ -45,20 +48,20 @@ impl ChannelOrder {
     }
 }
 
-pub struct ProjectPlugin<T: PluginFactory>(std::marker::PhantomData<fn() -> T>);
+pub struct ProjectPlugin<T: PluginManager>(std::marker::PhantomData<fn() -> T>);
 
-impl<T: PluginFactory> Default for ProjectPlugin<T> {
+impl<T: PluginManager> Default for ProjectPlugin<T> {
     fn default() -> Self {
         Self(std::marker::PhantomData)
     }
 }
 
-impl<T: PluginFactory + 'static> Plugin for ProjectPlugin<T> {
+impl<T: PluginManager + 'static> Plugin for ProjectPlugin<T> {
     fn build(&self, app: &mut App) {
         app.world_mut()
-            .spawn((Project::default(), ChannelOrder::default()));
+            .spawn((ProjectInfo::default(), ChannelOrder::default()));
 
-        app.insert_non_send_resource(CommandManager::default());
+        app.insert_non_send_resource(EditHistory::default());
 
         app.world_mut()
             .run_system_once(
@@ -98,22 +101,22 @@ impl LoadEvent {
 #[derive(Deserialize)]
 struct Document {
     channels: Vec<ChannelDocument>,
-    channel_order: Vec<Option<Id>>,
+    channel_order: Vec<Option<StableId>>,
 }
 
 #[derive(Deserialize)]
 struct ChannelDocument {
     name: Name,
-    data: Option<ChannelData>,
-    state: ChannelState,
-    id: Id,
+    data: Option<ChannelPluginBinding>,
+    state: ChannelMixerState,
+    id: StableId,
 }
 
 fn on_load_event(
     load_event: On<LoadEvent>,
     mut commands: Commands,
-    project_query: Single<Entity, With<Project>>,
-    channels_query: Query<Entity, With<ChannelState>>,
+    project_query: Single<Entity, With<ProjectInfo>>,
+    channels_query: Query<Entity, With<ChannelMixerState>>,
 ) {
     println!("Load: {:?}", load_event.path);
 
@@ -150,7 +153,7 @@ fn on_load_event(
         .collect();
 
     commands.spawn((
-        Project {
+        ProjectInfo {
             path: Some(load_event.path.clone()),
         },
         ChannelOrder {
@@ -159,20 +162,20 @@ fn on_load_event(
     ));
 
     commands.queue(|world: &mut World| {
-        world.non_send_resource_mut::<CommandManager>().clear();
+        world.non_send_resource_mut::<EditHistory>().clear();
     });
 }
 
 #[allow(clippy::type_complexity)]
-fn on_save_event<T: PluginFactory>(
+fn on_save_event<T: PluginManager>(
     save_event: On<SaveEvent>,
-    project_query: Single<(&mut Project, &ChannelOrder)>,
+    project_query: Single<(&mut ProjectInfo, &ChannelOrder)>,
     channels_query: Query<(
         &Name,
-        Option<&ChannelData>,
-        &ChannelState,
-        &Id,
-        Option<&ChannelAudioView<T::Plugin>>,
+        Option<&ChannelPluginBinding>,
+        &ChannelMixerState,
+        &StableId,
+        Option<&ChannelPluginInstance<T::Plugin>>,
     )>,
     plugin_factory: NonSend<T>,
 ) {

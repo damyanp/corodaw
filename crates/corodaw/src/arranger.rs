@@ -1,4 +1,4 @@
-use audio_graph::{StateReader, StateValue};
+use audio_graph::{GraphStateReader, GraphStateValue};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
@@ -10,12 +10,11 @@ use egui::{
     RichText, Sense, Slider, Stroke, TextEdit, Ui, pos2, vec2,
 };
 use egui_extras::{Size, StripBuilder};
-use engine::plugins::{ClapPluginManager, ClapPluginShared, PluginFactory};
+use engine::plugins::{ClapManager, ClapProxy, PluginManager};
 use project::{
-    AddChannelCommand, AvailablePlugin, ChannelAudioView, ChannelButton, ChannelButtonCommand,
-    ChannelData, ChannelGainControl, ChannelOrder, ChannelSnapshot, ChannelState, CommandManager,
-    DeleteChannelCommand, MoveChannelCommand, RenameChannelCommand, SetGainCommand,
-    SetPluginCommand,
+    AddChannelEdit, AvailablePlugin, ChannelButton, ChannelButtonEdit, ChannelGain,
+    ChannelMixerState, ChannelOrder, ChannelPluginBinding, ChannelPluginInstance, ChannelSnapshot,
+    DeleteChannelEdit, EditHistory, MoveChannelEdit, RenameChannelEdit, SetGainEdit, SetPluginEdit,
 };
 
 #[derive(SystemParam)]
@@ -27,19 +26,19 @@ pub struct ArrangerData<'w, 's> {
         's,
         (
             Entity,
-            &'static project::Id,
+            &'static project::StableId,
             &'static mut Name,
-            &'static mut ChannelState,
-            Option<&'static ChannelGainControl>,
-            Option<&'static mut ChannelAudioView<ClapPluginShared>>,
-            Option<&'static ChannelData>,
+            &'static mut ChannelMixerState,
+            Option<&'static ChannelGain>,
+            Option<&'static mut ChannelPluginInstance<ClapProxy>>,
+            Option<&'static ChannelPluginBinding>,
         ),
     >,
     available_plugins: Query<'w, 's, &'static AvailablePlugin>,
     channel_order: Single<'w, 's, &'static mut ChannelOrder>,
-    state_reader: NonSend<'w, StateReader>,
-    clap_plugin_manager: NonSend<'w, ClapPluginManager>,
-    command_manager: NonSendMut<'w, CommandManager>,
+    state_reader: NonSend<'w, GraphStateReader>,
+    clap_plugin_manager: NonSend<'w, ClapManager>,
+    command_manager: NonSendMut<'w, EditHistory>,
 }
 
 impl ArrangerDataProvider for ArrangerData<'_, '_> {
@@ -205,11 +204,11 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             .channel_order
             .insert(index, entity);
         self.command_manager
-            .add_undo(Box::new(DeleteChannelCommand::new(id, index)));
+            .add_undo(Box::new(DeleteChannelEdit::new(id, index)));
     }
 
     fn move_channel(&mut self, index: usize, destination: usize) {
-        let undo = MoveChannelCommand::new(index, destination).apply(self.channel_order.as_mut());
+        let undo = MoveChannelEdit::new(index, destination).apply(self.channel_order.as_mut());
         self.command_manager.add_undo(undo);
     }
 
@@ -237,7 +236,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                 .as_mut()
                 .delete_channel(&mut self.commands, index);
             self.command_manager
-                .add_undo(Box::new(AddChannelCommand::new(index, snapshot)));
+                .add_undo(Box::new(AddChannelEdit::new(index, snapshot)));
         }
         ui.separator();
         if ui.button("Add Channel").clicked() {
@@ -254,29 +253,29 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
 fn show_available_plugins_menu(
     commands: &mut Commands,
     channel_entity: Entity,
-    channel_id: project::Id,
-    old_data: Option<&ChannelData>,
-    command_manager: &mut CommandManager,
+    channel_id: project::StableId,
+    old_data: Option<&ChannelPluginBinding>,
+    command_manager: &mut EditHistory,
     available_plugins: Query<'_, '_, &'static AvailablePlugin, ()>,
     ui: &mut Ui,
 ) {
     for AvailablePlugin(found_plugin) in available_plugins.iter() {
         if ui.button(found_plugin.name.as_str()).clicked() {
-            let new_data = ChannelData {
+            let new_data = ChannelPluginBinding {
                 plugin_id: found_plugin.id.clone(),
                 plugin_state: None,
             };
             commands.entity(channel_entity).insert(new_data);
-            let undo = SetPluginCommand::new(channel_id, old_data.cloned());
+            let undo = SetPluginEdit::new(channel_id, old_data.cloned());
             command_manager.add_undo(Box::new(undo));
         }
     }
 }
 
 fn show_channel_name_editor(
-    channel: &project::Id,
+    channel: &project::StableId,
     name: &mut Name,
-    command_manager: &mut CommandManager,
+    command_manager: &mut EditHistory,
     ui: &mut Ui,
 ) {
     // When we click on the label we switch to letting us rename the channel
@@ -311,10 +310,7 @@ fn show_channel_name_editor(
         } else if commit {
             let trimmed = value.trim();
             if !trimmed.is_empty() && trimmed != name.as_str() {
-                let undo = Box::new(RenameChannelCommand::new(
-                    *channel,
-                    name.as_str().to_owned(),
-                ));
+                let undo = Box::new(RenameChannelEdit::new(*channel, name.as_str().to_owned()));
                 name.set(trimmed.to_owned());
                 command_manager.add_undo(undo);
             }
@@ -342,9 +338,9 @@ fn show_channel_name_editor(
 }
 
 fn show_gain_slider(
-    channel: &project::Id,
-    state: &mut ChannelState,
-    command_manager: &mut CommandManager,
+    channel: &project::StableId,
+    state: &mut ChannelMixerState,
+    command_manager: &mut EditHistory,
     ui: &mut Ui,
 ) {
     let mut gain_value = state.gain_value;
@@ -364,21 +360,21 @@ fn show_gain_slider(
             if let Some(start_value) = start_value
                 && start_value != state.gain_value
             {
-                let undo = SetGainCommand::new(*channel, start_value);
+                let undo = SetGainEdit::new(*channel, start_value);
                 command_manager.add_undo(Box::new(undo));
             }
         }
     });
 }
 
-fn show_meters(peaks: Option<&StateValue>, ui: &mut Ui) {
+fn show_meters(peaks: Option<&GraphStateValue>, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
 
-        let values: &[f32] = match peaks.unwrap_or(&StateValue::None) {
-            StateValue::None => &[],
-            StateValue::Mono(v) => &[*v],
-            StateValue::Stereo(l, r) => &[*l, *r],
+        let values: &[f32] = match peaks.unwrap_or(&GraphStateValue::None) {
+            GraphStateValue::None => &[],
+            GraphStateValue::Mono(v) => &[*v],
+            GraphStateValue::Stereo(l, r) => &[*l, *r],
         };
 
         let h = ui.available_height();
@@ -387,8 +383,8 @@ fn show_meters(peaks: Option<&StateValue>, ui: &mut Ui) {
 }
 
 fn show_gui_button(
-    clap_plugin_manager: &ClapPluginManager,
-    channel_audio_view: &mut ChannelAudioView<ClapPluginShared>,
+    clap_plugin_manager: &ClapManager,
+    channel_audio_view: &mut ChannelPluginInstance<ClapProxy>,
     ui: &mut Ui,
 ) {
     if ui.button("Show").clicked() {
@@ -396,7 +392,7 @@ fn show_gui_button(
         let gui_handle = futures::executor::block_on(async {
             clap_plugin_manager
                 .show_gui(
-                    channel_audio_view.plugin_id::<ClapPluginManager>(),
+                    channel_audio_view.plugin_id::<ClapManager>(),
                     "<untitled>".to_owned(),
                 )
                 .await
@@ -407,9 +403,9 @@ fn show_gui_button(
 }
 
 fn mute_solo_arm_buttons(
-    channel: &project::Id,
-    state: &mut ChannelState,
-    command_manager: &mut CommandManager,
+    channel: &project::StableId,
+    state: &mut ChannelMixerState,
+    command_manager: &mut EditHistory,
     ui: &mut Ui,
 ) {
     let mut control_button = |label: &str, color: Color32, button: ChannelButton| {
@@ -429,7 +425,7 @@ fn mute_solo_arm_buttons(
             )
             .clicked()
         {
-            let undo = Box::new(ChannelButtonCommand::new(*channel, button, selected));
+            let undo = Box::new(ChannelButtonEdit::new(*channel, button, selected));
             state.set_button(button, !selected);
             command_manager.add_undo(undo);
         }

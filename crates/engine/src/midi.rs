@@ -8,7 +8,7 @@ use wmidi::MidiMessage;
 
 /// A MIDI message that was received at a given time.
 #[derive(Debug)]
-pub struct MidiEventMessage {
+pub struct MidiEvent {
     /// A micro-timestamp of when the event occurred.
     ///
     /// This is given by `midir` and is unrelated to the audio frame counter. It is based off an
@@ -28,7 +28,7 @@ pub struct MidiReceiver {
     _connection: MidiInputConnection<MidiReceiverWorker>,
 
     /// The consumer side of the ring buffer the MIDI thread sends event through.
-    consumer: Consumer<MidiEventMessage>,
+    consumer: Consumer<MidiEvent>,
 }
 
 impl MidiReceiver {
@@ -87,7 +87,7 @@ impl MidiReceiver {
     }
 
     /// Receives all the MIDI events since the last call to the method.
-    pub fn receive_all_events<'a>(&'a mut self) -> Option<ReadChunkIntoIter<'a, MidiEventMessage>> {
+    pub fn receive_all_events<'a>(&'a mut self) -> Option<ReadChunkIntoIter<'a, MidiEvent>> {
         if self.consumer.is_abandoned() {
             None
         } else {
@@ -102,7 +102,7 @@ impl MidiReceiver {
 
 struct MidiReceiverWorker {
     first_timestamp: Option<u64>,
-    producer: Producer<MidiEventMessage>,
+    producer: Producer<MidiEvent>,
 }
 
 impl MidiReceiverWorker {
@@ -118,7 +118,7 @@ impl MidiReceiverWorker {
             return;
         };
 
-        let _ = self.producer.push(MidiEventMessage {
+        let _ = self.producer.push(MidiEvent {
             timestamp: timestamp - first_timestamp,
             midi_event,
         });

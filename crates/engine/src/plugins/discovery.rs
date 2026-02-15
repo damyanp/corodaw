@@ -3,25 +3,25 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use clack_host::{bundle::PluginBundle, plugin::PluginDescriptor};
+use clack_host::{bundle::PluginBundle, plugin::PluginDescriptor as ClackPluginDescriptor};
 use serde::{Deserialize, Serialize};
 use walkdir::{DirEntry, WalkDir};
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct FoundPlugin {
+pub struct PluginDescriptor {
     pub id: String,
     pub name: String,
     pub path: PathBuf,
 }
 
-impl PartialEq for FoundPlugin {
+impl PartialEq for PluginDescriptor {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id && self.name == other.name && self.path == other.path
     }
 }
 
-impl FoundPlugin {
-    fn try_from_descriptor(descriptor: &PluginDescriptor, path: PathBuf) -> Option<Self> {
+impl PluginDescriptor {
+    fn try_from_descriptor(descriptor: &ClackPluginDescriptor, path: PathBuf) -> Option<Self> {
         let id = descriptor
             .id()
             .and_then(|id| id.to_str().ok())
@@ -47,7 +47,7 @@ impl FoundPlugin {
     }
 }
 
-pub fn get_plugins() -> Vec<FoundPlugin> {
+pub fn get_plugins() -> Vec<PluginDescriptor> {
     load_plugin_cache()
         .unwrap_or_else(|| {
             let plugins = find_plugins();
@@ -58,7 +58,7 @@ pub fn get_plugins() -> Vec<FoundPlugin> {
         .collect()
 }
 
-fn save_plugin_cache(plugins: &Vec<FoundPlugin>) {
+fn save_plugin_cache(plugins: &Vec<PluginDescriptor>) {
     let plugins_json = serde_json::to_string_pretty(plugins)
         .unwrap_or_else(|e| format!("{{\"error\":\"failed to serialize plugins: {e}\"}}"));
 
@@ -71,9 +71,9 @@ fn save_plugin_cache(plugins: &Vec<FoundPlugin>) {
     println!("Wrote .plugins.json");
 }
 
-fn load_plugin_cache() -> Option<Vec<FoundPlugin>> {
+fn load_plugin_cache() -> Option<Vec<PluginDescriptor>> {
     match std::fs::read_to_string(".plugins.json") {
-        Ok(contents) => match serde_json::from_str::<Vec<FoundPlugin>>(&contents) {
+        Ok(contents) => match serde_json::from_str::<Vec<PluginDescriptor>>(&contents) {
             Ok(plugins) => {
                 println!("Loaded {} plugins from .plugins.json", plugins.len());
                 return Some(plugins);
@@ -89,7 +89,7 @@ fn load_plugin_cache() -> Option<Vec<FoundPlugin>> {
     None
 }
 
-pub fn find_plugins() -> Vec<FoundPlugin> {
+pub fn find_plugins() -> Vec<PluginDescriptor> {
     find_bundles()
         .iter()
         .flat_map(|(p, b)| get_plugins_in_bundle(p, b))
@@ -114,14 +114,14 @@ fn find_bundles() -> Vec<(PathBuf, PluginBundle)> {
         .collect()
 }
 
-fn get_plugins_in_bundle(path: &Path, bundle: &PluginBundle) -> Vec<FoundPlugin> {
+fn get_plugins_in_bundle(path: &Path, bundle: &PluginBundle) -> Vec<PluginDescriptor> {
     bundle
         .get_plugin_factory()
         .map(|factory| {
             factory
                 .plugin_descriptors()
                 .filter_map(|descriptor| {
-                    FoundPlugin::try_from_descriptor(descriptor, path.to_path_buf())
+                    PluginDescriptor::try_from_descriptor(descriptor, path.to_path_buf())
                 })
                 .collect()
         })

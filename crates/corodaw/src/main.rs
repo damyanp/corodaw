@@ -1,11 +1,11 @@
-use audio_graph::StateReader;
+use audio_graph::GraphStateReader;
 use bevy::prelude::*;
 use bevy_app::AppExit;
 use bevy_ecs::{message::MessageWriter, system::command, world::CommandQueue};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use bevy_inspector_egui::bevy_inspector;
 use egui::{Button, KeyboardShortcut, MenuBar, Modifiers, Ui};
-use project::{CommandManager, LoadEvent, Project, SaveEvent, UndoRedoEvent};
+use project::{EditHistory, LoadEvent, ProjectInfo, SaveEvent, UndoRedoEvent};
 use smol::{LocalExecutor, Task, future};
 
 use crate::arranger::arranger_ui;
@@ -13,12 +13,12 @@ use crate::arranger::arranger_ui;
 mod arranger;
 
 #[derive(Default)]
-struct Executor {
+struct AsyncTaskRunner {
     executor: LocalExecutor<'static>,
     current_task: Option<Task<CommandQueue>>,
 }
 
-impl Executor {
+impl AsyncTaskRunner {
     pub fn is_active(&self) -> bool {
         self.current_task.is_some()
     }
@@ -30,23 +30,23 @@ impl Executor {
 }
 
 fn update_executor_system(world: &mut World) {
-    let mut executor = world.non_send_resource_mut::<Executor>();
-    while executor.executor.try_tick() {}
+    let mut async_task_runner = world.non_send_resource_mut::<AsyncTaskRunner>();
+    while async_task_runner.executor.try_tick() {}
 
-    if let Some(task) = &mut executor.current_task
+    if let Some(task) = &mut async_task_runner.current_task
         && task.is_finished()
     {
         // I couldn't find a nice way to get it so these async tasks could
         // mutate the World. Instead, we allow them to build up a CommandQueue
         // that we can then apply when we're back into a Bevy system.
-        let task = executor.current_task.take().unwrap();
+        let task = async_task_runner.current_task.take().unwrap();
 
         let mut c = future::block_on(task);
         c.apply(world);
     }
 }
 
-fn swap_buffers_system(mut state_reader: NonSendMut<StateReader>) {
+fn swap_buffers_system(mut state_reader: NonSendMut<GraphStateReader>) {
     state_reader.swap_buffers();
 }
 
@@ -55,9 +55,9 @@ struct InspectorEnabled(bool);
 
 fn menu_bar_system(
     mut contexts: EguiContexts,
-    executor: NonSend<Executor>,
+    async_task_runner: NonSend<AsyncTaskRunner>,
     mut commands: Commands,
-    command_manager: NonSendMut<CommandManager>,
+    command_manager: NonSendMut<EditHistory>,
     mut app_exit: MessageWriter<AppExit>,
     mut inspector_enabled: ResMut<InspectorEnabled>,
 ) -> Result {
@@ -67,7 +67,7 @@ fn menu_bar_system(
     let undo_shortcut = KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Z);
     let redo_shortcut = KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Y);
 
-    if !executor.is_active() {
+    if !async_task_runner.is_active() {
         if command_manager.can_undo() && ctx.input_mut(|i| i.consume_shortcut(&undo_shortcut)) {
             commands.trigger(UndoRedoEvent::Undo);
         }
@@ -77,7 +77,7 @@ fn menu_bar_system(
     }
 
     egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-        if executor.is_active() {
+        if async_task_runner.is_active() {
             ui.disable();
         }
         menu_bar_ui(
@@ -95,17 +95,17 @@ fn menu_bar_system(
 fn menu_bar_ui(
     ui: &mut Ui,
     commands: &mut Commands,
-    command_manager: &CommandManager,
+    command_manager: &EditHistory,
     app_exit: &mut MessageWriter<AppExit>,
     inspector_enabled: &mut InspectorEnabled,
 ) {
     MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
             if ui.button("Open...").clicked() {
-                commands.trigger(FileCommand::Open);
+                commands.trigger(FileAction::Open);
             }
             if ui.button("Save...").clicked() {
-                commands.trigger(FileCommand::Save);
+                commands.trigger(FileAction::Save);
             }
             ui.separator();
             if ui.button("Quit").clicked() {
@@ -142,13 +142,13 @@ fn menu_bar_ui(
 
 fn arranger_panel_system(
     mut contexts: EguiContexts,
-    executor: NonSend<Executor>,
+    async_task_runner: NonSend<AsyncTaskRunner>,
     data: arranger::ArrangerData,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
     egui::CentralPanel::default().show(ctx, |ui| {
-        if executor.is_active() {
+        if async_task_runner.is_active() {
             ui.disable();
         }
         arranger_ui(data, ui);
@@ -189,18 +189,18 @@ fn world_inspector_system(world: &mut World) {
 }
 
 #[derive(Event, Clone, Copy)]
-pub enum FileCommand {
+pub enum FileAction {
     Open,
     Save,
 }
 
-fn on_file_command(command: On<FileCommand>, mut executor: NonSendMut<Executor>) {
+fn on_file_action(command: On<FileAction>, mut async_task_runner: NonSendMut<AsyncTaskRunner>) {
     let command = *command;
-    executor.spawn(async move {
+    async_task_runner.spawn(async move {
         let mut command_queue = CommandQueue::default();
 
         match command {
-            FileCommand::Open => {
+            FileAction::Open => {
                 let file = rfd::AsyncFileDialog::new()
                     .add_filter("Corodaw Project", &["corodaw"])
                     .pick_file()
@@ -210,7 +210,7 @@ fn on_file_command(command: On<FileCommand>, mut executor: NonSendMut<Executor>)
                     command_queue.push(command::trigger(LoadEvent::new(file)));
                 }
             }
-            FileCommand::Save => {
+            FileAction::Save => {
                 let file = rfd::AsyncFileDialog::new()
                     .add_filter("Corodaw Project", &["corodaw"])
                     .save_file()
@@ -227,7 +227,7 @@ fn on_file_command(command: On<FileCommand>, mut executor: NonSendMut<Executor>)
 
 fn set_titlebar_system(
     mut window: Single<&mut Window>,
-    project: Single<&Project, Changed<Project>>,
+    project: Single<&ProjectInfo, Changed<ProjectInfo>>,
 ) {
     let project_name = if let Some(path) = &project.path {
         path.file_name().unwrap().to_str().unwrap()
@@ -243,7 +243,7 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn main() {
-    let mut app = project::make_app();
+    let mut app = project::build_app();
 
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -265,8 +265,8 @@ fn main() {
     );
     app.add_systems(EguiPrimaryContextPass, world_inspector_system);
     app.add_systems(PostUpdate, set_titlebar_system);
-    app.insert_non_send_resource(Executor::default());
-    app.add_observer(on_file_command);
+    app.insert_non_send_resource(AsyncTaskRunner::default());
+    app.add_observer(on_file_action);
 
     app.run();
 }

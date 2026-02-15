@@ -1,30 +1,30 @@
-use audio_graph::{Connection, Node};
+use audio_graph::{GraphConnection, GraphNodeDesc};
 use bevy_app::prelude::*;
 use bevy_ecs::{name::Name, prelude::*};
 use bevy_reflect::Reflect;
 
-use engine::builtin::{MidiInputNode, Summer};
-use engine::plugins::{ClapPluginId, GuiHandle};
+use engine::builtin::{MidiInputOwner, SummerOwner};
+use engine::plugins::{ClapId, PluginGuiHandle};
 use engine::{
-    builtin::GainControl,
-    plugins::{PluginFactory, discovery::FoundPlugin},
+    builtin::GainNodeOwner,
+    plugins::{PluginManager, discovery::PluginDescriptor},
 };
 use serde::{Deserialize, Serialize};
 
 use base64::{Engine, engine::general_purpose};
 
-use crate::commands::Command;
-use crate::{AvailablePlugin, ChannelOrder, Id};
+use crate::commands::EditCommand;
+use crate::{AvailablePlugin, ChannelOrder, StableId};
 
-pub struct ChannelBevyPlugin<T: PluginFactory>(std::marker::PhantomData<fn() -> T>);
+pub struct ChannelPlugin<T: PluginManager>(std::marker::PhantomData<fn() -> T>);
 
-impl<T: PluginFactory> Default for ChannelBevyPlugin<T> {
+impl<T: PluginManager> Default for ChannelPlugin<T> {
     fn default() -> Self {
         Self(std::marker::PhantomData)
     }
 }
 
-impl<T: PluginFactory + 'static> Plugin for ChannelBevyPlugin<T> {
+impl<T: PluginManager + 'static> Plugin for ChannelPlugin<T> {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
@@ -40,19 +40,19 @@ impl<T: PluginFactory + 'static> Plugin for ChannelBevyPlugin<T> {
     }
 }
 
-pub fn new_channel() -> impl Bundle {
+pub fn channel_bundle() -> impl Bundle {
     (
-        ChannelState::default(),
+        ChannelMixerState::default(),
         Name::new("unnamed channel"),
-        Id::new(),
+        StableId::new(),
     )
 }
 
 #[allow(clippy::type_complexity)]
-fn sync_plugin_window_titles_system<T: PluginFactory>(
+fn sync_plugin_window_titles_system<T: PluginManager>(
     channels: Query<
-        (&Name, &ChannelAudioView<T::Plugin>),
-        Or<(Changed<Name>, Changed<ChannelAudioView<T::Plugin>>)>,
+        (&Name, &ChannelPluginInstance<T::Plugin>),
+        Or<(Changed<Name>, Changed<ChannelPluginInstance<T::Plugin>>)>,
     >,
     plugin_factory: NonSend<T>,
 ) {
@@ -65,12 +65,12 @@ fn sync_plugin_window_titles_system<T: PluginFactory>(
 }
 
 #[allow(clippy::type_complexity)]
-fn remove_plugins_system<T: PluginFactory>(
+fn remove_plugins_system<T: PluginManager>(
     mut commands: Commands,
-    mut removed: RemovedComponents<ChannelData>,
+    mut removed: RemovedComponents<ChannelPluginBinding>,
     channels: Query<
-        (Entity, Option<&ChannelAudioView<T::Plugin>>),
-        (With<ChannelState>, Without<ChannelData>),
+        (Entity, Option<&ChannelPluginInstance<T::Plugin>>),
+        (With<ChannelMixerState>, Without<ChannelPluginBinding>),
     >,
 ) {
     for entity in removed.read() {
@@ -81,29 +81,31 @@ fn remove_plugins_system<T: PluginFactory>(
             if let Some(audio_view) = audio_view {
                 commands.entity(audio_view.plugin_node).despawn();
             }
-            commands
-                .entity(entity)
-                .remove::<(ChannelAudioView<T::Plugin>, ChannelGainControl, InputNode)>();
+            commands.entity(entity).remove::<(
+                ChannelPluginInstance<T::Plugin>,
+                ChannelGain,
+                ChannelSourceNode,
+            )>();
         }
     }
 }
 
 #[allow(clippy::type_complexity)]
-fn set_plugins_system<T: PluginFactory>(
+fn set_plugins_system<T: PluginManager>(
     mut commands: Commands,
     available_plugins: Query<&AvailablePlugin>,
     plugin_factory: NonSend<T>,
     channels: Query<
         (
             Entity,
-            &ChannelState,
-            &ChannelData,
-            Option<&ChannelGainControl>,
-            Option<&ChannelAudioView<T::Plugin>>,
+            &ChannelMixerState,
+            &ChannelPluginBinding,
+            Option<&ChannelGain>,
+            Option<&ChannelPluginInstance<T::Plugin>>,
         ),
-        Changed<ChannelData>,
+        Changed<ChannelPluginBinding>,
     >,
-    summer: NonSend<Summer>,
+    summer: NonSend<SummerOwner>,
 ) {
     for (entity, state, data, gain_control, old_audio_view) in &channels {
         let found_plugin = available_plugins
@@ -137,13 +139,13 @@ fn set_plugins_system<T: PluginFactory>(
     }
 }
 
-fn set_plugin<T: PluginFactory>(
+fn set_plugin<T: PluginManager>(
     plugin_factory: &T,
-    summer: &Summer,
-    state: &ChannelState,
+    summer: &SummerOwner,
+    state: &ChannelMixerState,
     mut channel_entity: EntityCommands<'_>,
-    found_plugin: &FoundPlugin,
-    gain_control: Option<&ChannelGainControl>,
+    found_plugin: &PluginDescriptor,
+    gain_control: Option<&ChannelGain>,
     plugin_state_data: Option<&[u8]>,
 ) {
     let plugin = plugin_factory.create_plugin_sync(found_plugin.clone());
@@ -166,16 +168,13 @@ fn set_plugin<T: PluginFactory>(
     let commands = channel_entity.commands_mut();
     let plugin_node_id = commands.spawn(plugin_node).id();
     commands.queue(move |world: &mut World| {
-        audio_graph::set_processor(world, plugin_node_id, plugin_processor);
+        audio_graph::graph_set_processor(world, plugin_node_id, plugin_processor);
     });
 
     let mut gain_control = gain_control;
     let mut new_gain_control = None;
     if gain_control.is_none() {
-        new_gain_control = Some(ChannelGainControl(GainControl::new(
-            commands,
-            state.gain_value,
-        )));
+        new_gain_control = Some(ChannelGain(GainNodeOwner::new(commands, state.gain_value)));
         gain_control = new_gain_control.as_ref();
     }
     let gain_control = gain_control.unwrap();
@@ -184,16 +183,16 @@ fn set_plugin<T: PluginFactory>(
     let summer_entity = summer.entity;
     commands.queue(move |world: &mut World| {
         for port in 0..2 {
-            audio_graph::connect_audio(
+            audio_graph::graph_connect_audio(
                 world,
                 gain_control_entity,
-                Connection::new(port, plugin_node_id, port),
+                GraphConnection::new(port, plugin_node_id, port),
             )
             .unwrap();
-            audio_graph::connect_audio(
+            audio_graph::graph_connect_audio(
                 world,
                 summer_entity,
-                Connection::new(port, gain_control_entity, port),
+                GraphConnection::new(port, gain_control_entity, port),
             )
             .unwrap();
         }
@@ -204,19 +203,19 @@ fn set_plugin<T: PluginFactory>(
         channel_entity.insert(new_gain_control);
     }
 
-    let channel_audio_view = ChannelAudioView {
+    let channel_audio_view = ChannelPluginInstance {
         plugin,
         plugin_node: plugin_node_id,
         gui_handle: Default::default(),
     };
 
     channel_entity.add_child(plugin_node_id);
-    channel_entity.insert((channel_audio_view, InputNode(plugin_node_id)));
+    channel_entity.insert((channel_audio_view, ChannelSourceNode(plugin_node_id)));
 }
 
 fn sync_channel_order_system(
     mut orders: Query<&mut ChannelOrder>,
-    channels: Query<Entity, With<ChannelState>>,
+    channels: Query<Entity, With<ChannelMixerState>>,
 ) {
     let mut order = orders
         .single_mut()
@@ -231,9 +230,9 @@ fn sync_channel_order_system(
 
 fn update_channels_system(
     mut commands: Commands,
-    channels: Query<(&ChannelState, &InputNode, &ChannelGainControl)>,
-    nodes: Query<&Node>,
-    midi_input: NonSend<MidiInputNode>,
+    channels: Query<(&ChannelMixerState, &ChannelSourceNode, &ChannelGain)>,
+    nodes: Query<&GraphNodeDesc>,
+    midi_input: NonSend<MidiInputOwner>,
 ) {
     let has_soloed = channels.iter().any(|(d, _, _)| d.soloed);
     for (state, input_node, gain_control) in &channels {
@@ -249,17 +248,17 @@ fn update_channels_system(
         if state.armed {
             if !input_node.has_event_connected(midi_input) {
                 commands.queue(move |world: &mut World| {
-                    audio_graph::connect_event(
+                    audio_graph::graph_connect_event(
                         world,
                         input_node_id,
-                        Connection::new(0, midi_input, 0),
+                        GraphConnection::new(0, midi_input, 0),
                     )
                     .unwrap();
                 });
             }
         } else if input_node.has_event_connected(midi_input) {
             commands.queue(move |world: &mut World| {
-                audio_graph::disconnect_event_input_from_node(world, input_node_id, midi_input)
+                audio_graph::graph_disconnect_event_input(world, input_node_id, midi_input)
                     .unwrap();
             });
         }
@@ -267,26 +266,26 @@ fn update_channels_system(
 }
 
 #[derive(Component, Reflect)]
-struct InputNode(pub Entity);
+struct ChannelSourceNode(pub Entity);
 
 #[derive(Component, Debug, Clone, Serialize, Deserialize, Reflect)]
-#[require(ChannelState)]
-pub struct ChannelData {
+#[require(ChannelMixerState)]
+pub struct ChannelPluginBinding {
     pub plugin_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_state: Option<String>,
 }
 
 #[derive(Component, Debug, Clone, Serialize, Deserialize, Reflect)]
-#[require(Id=Id::new(), Name)]
-pub struct ChannelState {
+#[require(StableId=StableId::new(), Name)]
+pub struct ChannelMixerState {
     pub gain_value: f32,
     pub muted: bool,
     pub soloed: bool,
     pub armed: bool,
 }
 
-impl Default for ChannelState {
+impl Default for ChannelMixerState {
     fn default() -> Self {
         Self {
             gain_value: 1.0,
@@ -297,7 +296,7 @@ impl Default for ChannelState {
     }
 }
 
-impl ChannelState {
+impl ChannelMixerState {
     pub fn get_button(&self, button: ChannelButton) -> bool {
         match button {
             ChannelButton::Mute => self.muted,
@@ -316,18 +315,18 @@ impl ChannelState {
 }
 
 #[derive(Component)]
-pub struct ChannelAudioView<P: Component> {
+pub struct ChannelPluginInstance<P: Component> {
     plugin: P,
     plugin_node: Entity,
-    gui_handle: Option<GuiHandle>,
+    gui_handle: Option<PluginGuiHandle>,
 }
 
 #[derive(Component, Debug, Reflect)]
 #[reflect(from_reflect = false)]
-#[require(ChannelState)]
-pub struct ChannelGainControl(#[reflect(ignore)] pub GainControl);
+#[require(ChannelMixerState)]
+pub struct ChannelGain(#[reflect(ignore)] pub GainNodeOwner);
 
-impl<P: Component> ChannelAudioView<P> {
+impl<P: Component> ChannelPluginInstance<P> {
     pub fn has_gui(&self) -> bool {
         self.gui_handle
             .as_ref()
@@ -335,44 +334,44 @@ impl<P: Component> ChannelAudioView<P> {
             .unwrap_or(false)
     }
 
-    pub fn plugin_id<T: PluginFactory<Plugin = P>>(&self) -> ClapPluginId {
+    pub fn plugin_id<T: PluginManager<Plugin = P>>(&self) -> ClapId {
         T::plugin_id(&self.plugin)
     }
 
-    pub fn window_title<T: PluginFactory<Plugin = P>>(&self, channel_name: &str) -> String {
+    pub fn window_title<T: PluginManager<Plugin = P>>(&self, channel_name: &str) -> String {
         format!("{}: {channel_name}", T::plugin_name(&self.plugin))
     }
 
-    pub fn set_gui_handle(&mut self, gui_handle: GuiHandle) {
+    pub fn set_gui_handle(&mut self, gui_handle: PluginGuiHandle) {
         self.gui_handle = Some(gui_handle);
     }
 }
 
 #[derive(Debug)]
-pub struct RenameChannelCommand {
-    channel: Id,
+pub struct RenameChannelEdit {
+    channel: StableId,
     name: String,
 }
 
-impl RenameChannelCommand {
-    pub fn new(channel: Id, name: String) -> Self {
+impl RenameChannelEdit {
+    pub fn new(channel: StableId, name: String) -> Self {
         Self { channel, name }
     }
 }
 
-impl Command for RenameChannelCommand {
-    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+impl EditCommand for RenameChannelEdit {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn EditCommand>> {
         let entity = self.channel.find_entity(world)?;
         let mut name = world.get_mut::<Name>(entity)?;
         let old_name = name.as_str().to_owned();
         name.set(self.name.clone());
-        Some(Box::new(RenameChannelCommand::new(self.channel, old_name)))
+        Some(Box::new(RenameChannelEdit::new(self.channel, old_name)))
     }
 }
 
 #[derive(Debug)]
-pub struct ChannelButtonCommand {
-    channel: Id,
+pub struct ChannelButtonEdit {
+    channel: StableId,
     button: ChannelButton,
     value: bool,
 }
@@ -384,8 +383,8 @@ pub enum ChannelButton {
     Arm,
 }
 
-impl ChannelButtonCommand {
-    pub fn new(channel: Id, button: ChannelButton, value: bool) -> Self {
+impl ChannelButtonEdit {
+    pub fn new(channel: StableId, button: ChannelButton, value: bool) -> Self {
         Self {
             channel,
             button,
@@ -394,13 +393,13 @@ impl ChannelButtonCommand {
     }
 }
 
-impl Command for ChannelButtonCommand {
-    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+impl EditCommand for ChannelButtonEdit {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn EditCommand>> {
         let entity = self.channel.find_entity(world)?;
-        let mut state = world.get_mut::<ChannelState>(entity)?;
+        let mut state = world.get_mut::<ChannelMixerState>(entity)?;
         let old_value = state.get_button(self.button);
         state.set_button(self.button, self.value);
-        Some(Box::new(ChannelButtonCommand::new(
+        Some(Box::new(ChannelButtonEdit::new(
             self.channel,
             self.button,
             old_value,
@@ -411,36 +410,36 @@ impl Command for ChannelButtonCommand {
 #[derive(Debug, Clone)]
 pub struct ChannelSnapshot {
     pub name: Name,
-    pub state: ChannelState,
-    pub data: Option<ChannelData>,
-    pub id: Id,
+    pub state: ChannelMixerState,
+    pub data: Option<ChannelPluginBinding>,
+    pub id: StableId,
 }
 
 impl Default for ChannelSnapshot {
     fn default() -> Self {
         Self {
             name: Name::new("unnamed channel"),
-            state: ChannelState::default(),
+            state: ChannelMixerState::default(),
             data: None,
-            id: Id::new(),
+            id: StableId::new(),
         }
     }
 }
 
 #[derive(Debug)]
-pub struct AddChannelCommand {
+pub struct AddChannelEdit {
     index: usize,
     snapshot: ChannelSnapshot,
 }
 
-impl AddChannelCommand {
+impl AddChannelEdit {
     pub fn new(index: usize, snapshot: ChannelSnapshot) -> Self {
         Self { index, snapshot }
     }
 }
 
-impl Command for AddChannelCommand {
-    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+impl EditCommand for AddChannelEdit {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn EditCommand>> {
         let mut entity = world.spawn((
             self.snapshot.state.clone(),
             self.snapshot.name.clone(),
@@ -455,7 +454,7 @@ impl Command for AddChannelCommand {
         let mut channel_order = query.single_mut(world).ok()?;
         channel_order.channel_order.insert(self.index, entity_id);
 
-        Some(Box::new(DeleteChannelCommand::new(
+        Some(Box::new(DeleteChannelEdit::new(
             self.snapshot.id,
             self.index,
         )))
@@ -463,25 +462,25 @@ impl Command for AddChannelCommand {
 }
 
 #[derive(Debug)]
-pub struct DeleteChannelCommand {
-    channel: Id,
+pub struct DeleteChannelEdit {
+    channel: StableId,
     index: usize,
 }
 
-impl DeleteChannelCommand {
-    pub fn new(channel: Id, index: usize) -> Self {
+impl DeleteChannelEdit {
+    pub fn new(channel: StableId, index: usize) -> Self {
         Self { channel, index }
     }
 }
 
-impl Command for DeleteChannelCommand {
-    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+impl EditCommand for DeleteChannelEdit {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn EditCommand>> {
         let entity = self.channel.find_entity(world)?;
 
         let name = world.get::<Name>(entity)?.clone();
-        let state = world.get::<ChannelState>(entity)?.clone();
-        let data = world.get::<ChannelData>(entity).cloned();
-        let id = *world.get::<Id>(entity)?;
+        let state = world.get::<ChannelMixerState>(entity)?.clone();
+        let data = world.get::<ChannelPluginBinding>(entity).cloned();
+        let id = *world.get::<StableId>(entity)?;
 
         let mut query = world.query::<&mut ChannelOrder>();
         let mut channel_order = query.single_mut(world).ok()?;
@@ -496,22 +495,22 @@ impl Command for DeleteChannelCommand {
             id,
         };
 
-        Some(Box::new(AddChannelCommand::new(self.index, snapshot)))
+        Some(Box::new(AddChannelEdit::new(self.index, snapshot)))
     }
 }
 
 #[derive(Debug)]
-pub struct MoveChannelCommand {
+pub struct MoveChannelEdit {
     from: usize,
     to: usize,
 }
 
-impl MoveChannelCommand {
+impl MoveChannelEdit {
     pub fn new(from: usize, to: usize) -> Self {
         Self { from, to }
     }
 
-    pub fn apply(&self, channel_order: &mut ChannelOrder) -> Box<dyn Command> {
+    pub fn apply(&self, channel_order: &mut ChannelOrder) -> Box<dyn EditCommand> {
         channel_order.move_channel(self.from, self.to);
         let undo = if self.from < self.to {
             Self::new(self.to - 1, self.from)
@@ -524,8 +523,8 @@ impl MoveChannelCommand {
     }
 }
 
-impl Command for MoveChannelCommand {
-    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+impl EditCommand for MoveChannelEdit {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn EditCommand>> {
         let mut query = world.query::<&mut ChannelOrder>();
         let mut channel_order = query.single_mut(world).ok()?;
         let undo = self.apply(&mut channel_order);
@@ -534,36 +533,36 @@ impl Command for MoveChannelCommand {
 }
 
 #[derive(Debug)]
-pub struct SetPluginCommand {
-    channel: Id,
-    data: Option<ChannelData>,
+pub struct SetPluginEdit {
+    channel: StableId,
+    data: Option<ChannelPluginBinding>,
 }
 
-impl SetPluginCommand {
-    pub fn new(channel: Id, data: Option<ChannelData>) -> Self {
+impl SetPluginEdit {
+    pub fn new(channel: StableId, data: Option<ChannelPluginBinding>) -> Self {
         Self { channel, data }
     }
 }
 
-impl Command for SetPluginCommand {
-    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+impl EditCommand for SetPluginEdit {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn EditCommand>> {
         let entity = self.channel.find_entity(world)?;
-        let old_data = world.entity_mut(entity).take::<ChannelData>();
+        let old_data = world.entity_mut(entity).take::<ChannelPluginBinding>();
         if let Some(data) = &self.data {
             world.entity_mut(entity).insert(data.clone());
         }
-        Some(Box::new(SetPluginCommand::new(self.channel, old_data)))
+        Some(Box::new(SetPluginEdit::new(self.channel, old_data)))
     }
 }
 
 #[derive(Debug)]
-pub struct SetGainCommand {
-    channel: Id,
+pub struct SetGainEdit {
+    channel: StableId,
     gain_value: f32,
 }
 
-impl SetGainCommand {
-    pub fn new(channel: Id, gain_value: f32) -> Self {
+impl SetGainEdit {
+    pub fn new(channel: StableId, gain_value: f32) -> Self {
         Self {
             channel,
             gain_value,
@@ -571,13 +570,13 @@ impl SetGainCommand {
     }
 }
 
-impl Command for SetGainCommand {
-    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>> {
+impl EditCommand for SetGainEdit {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn EditCommand>> {
         let entity = self.channel.find_entity(world)?;
-        let mut state = world.get_mut::<ChannelState>(entity)?;
+        let mut state = world.get_mut::<ChannelMixerState>(entity)?;
         let old_value = state.gain_value;
         state.gain_value = self.gain_value;
-        Some(Box::new(SetGainCommand::new(self.channel, old_value)))
+        Some(Box::new(SetGainEdit::new(self.channel, old_value)))
     }
 }
 

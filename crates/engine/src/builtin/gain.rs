@@ -2,27 +2,29 @@ use audio_blocks::AudioBlock;
 use bevy_ecs::prelude::*;
 use crossbeam::channel::{self, Receiver, Sender};
 
-use audio_graph::{Connection, Node, ProcessContext, Processor, StateValue};
+use audio_graph::{
+    GraphConnection, GraphNodeDesc, GraphProcessContext, GraphProcessor, GraphStateValue,
+};
 
 use crate::builtin::peak::PeakMeter;
 
 #[derive(Debug)]
-pub struct GainControl {
+pub struct GainNodeOwner {
     pub entity: Entity,
     sender: Sender<f32>,
 }
 
-impl GainControl {
+impl GainNodeOwner {
     pub fn new(commands: &mut Commands, initial_gain: f32) -> Self {
         let (sender, receiver) = channel::unbounded();
 
-        let entity = commands.spawn(Node::default().audio(2, 2)).id();
+        let entity = commands.spawn(GraphNodeDesc::default().audio(2, 2)).id();
 
         commands.queue(move |world: &mut World| {
-            audio_graph::set_processor(
+            audio_graph::graph_set_processor(
                 world,
                 entity,
-                Box::new(GainControlProcessor {
+                Box::new(GainProcessor {
                     receiver,
                     gain: initial_gain,
                     vu_meters: Default::default(),
@@ -30,7 +32,7 @@ impl GainControl {
             );
         });
 
-        GainControl { entity, sender }
+        GainNodeOwner { entity, sender }
     }
 
     pub fn set_gain(&self, gain: f32) {
@@ -39,14 +41,14 @@ impl GainControl {
 }
 
 #[derive(Debug)]
-struct GainControlProcessor {
+struct GainProcessor {
     receiver: Receiver<f32>,
     gain: f32,
     vu_meters: Vec<PeakMeter>,
 }
 
-impl Processor for GainControlProcessor {
-    fn process(&mut self, ctx: ProcessContext) {
+impl GraphProcessor for GainProcessor {
+    fn process(&mut self, ctx: GraphProcessContext) {
         self.process_messages();
 
         let num_channels = ctx.out_audio_buffers.num_channels();
@@ -61,7 +63,7 @@ impl Processor for GainControlProcessor {
         {
             output_buffer.fill(0.0);
 
-            for Connection {
+            for GraphConnection {
                 channel,
                 src,
                 src_channel,
@@ -84,15 +86,15 @@ impl Processor for GainControlProcessor {
         }
 
         let value = match self.vu_meters.len() {
-            0 => StateValue::None,
-            1 => StateValue::Mono(self.vu_meters[0].value()),
-            _ => StateValue::Stereo(self.vu_meters[0].value(), self.vu_meters[1].value()),
+            0 => GraphStateValue::None,
+            1 => GraphStateValue::Mono(self.vu_meters[0].value()),
+            _ => GraphStateValue::Stereo(self.vu_meters[0].value(), self.vu_meters[1].value()),
         };
         ctx.state.insert(ctx.node.entity, value);
     }
 }
 
-impl GainControlProcessor {
+impl GainProcessor {
     fn process_messages(&mut self) {
         while let Ok(gain) = self.receiver.try_recv() {
             self.gain = gain;

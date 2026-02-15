@@ -1,18 +1,18 @@
 use bevy_ecs::prelude::*;
 
-use audio_graph::{Node, ProcessContext, Processor};
+use audio_graph::{GraphNodeDesc, GraphProcessContext, GraphProcessor};
 
-pub struct Summer {
+pub struct SummerOwner {
     pub entity: Entity,
 }
 
-impl Summer {
+impl SummerOwner {
     pub fn new(world: &mut World, num_channels: u16) -> Self {
         let entity = world
-            .spawn(Node::default().audio(num_channels, num_channels))
+            .spawn(GraphNodeDesc::default().audio(num_channels, num_channels))
             .id();
 
-        audio_graph::set_processor(world, entity, Box::new(SummerProcessor));
+        audio_graph::graph_set_processor(world, entity, Box::new(SummerProcessor));
 
         Self { entity }
     }
@@ -20,8 +20,8 @@ impl Summer {
 
 #[derive(Debug)]
 struct SummerProcessor;
-impl Processor for SummerProcessor {
-    fn process(&mut self, ctx: ProcessContext) {
+impl GraphProcessor for SummerProcessor {
+    fn process(&mut self, ctx: GraphProcessContext) {
         for (output_channel, output_buffer) in ctx.out_audio_buffers.channels_mut().enumerate() {
             output_buffer.fill(0.0);
 

@@ -1,18 +1,18 @@
 use bevy_app::Plugin;
 use bevy_ecs::prelude::*;
 
-pub trait Command: std::fmt::Debug + Send + Sync {
-    fn execute(&self, world: &mut World) -> Option<Box<dyn Command>>;
+pub trait EditCommand: std::fmt::Debug + Send + Sync {
+    fn execute(&self, world: &mut World) -> Option<Box<dyn EditCommand>>;
 }
 
 #[derive(Default)]
-pub struct CommandManager {
-    undo: Vec<Box<dyn Command>>,
-    redo: Vec<Box<dyn Command>>,
+pub struct EditHistory {
+    undo: Vec<Box<dyn EditCommand>>,
+    redo: Vec<Box<dyn EditCommand>>,
 }
 
-impl CommandManager {
-    pub fn add_undo(&mut self, command: Box<dyn Command>) {
+impl EditHistory {
+    pub fn add_undo(&mut self, command: Box<dyn EditCommand>) {
         self.undo.push(command);
         self.redo.clear();
     }
@@ -53,8 +53,8 @@ pub enum UndoRedoEvent {
     Redo,
 }
 
-pub(crate) struct CommandManagerBevyPlugin;
-impl Plugin for CommandManagerBevyPlugin {
+pub(crate) struct EditHistoryPlugin;
+impl Plugin for EditHistoryPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         app.add_observer(on_undo_redo_event);
     }
@@ -63,12 +63,12 @@ impl Plugin for CommandManagerBevyPlugin {
 fn on_undo_redo_event(command: On<UndoRedoEvent>, mut commands: Commands) {
     let command = *command;
     commands.queue(move |world: &mut World| {
-        let mut command_manager: CommandManager = world.remove_non_send_resource().unwrap();
+        let mut edit_history: EditHistory = world.remove_non_send_resource().unwrap();
         match command {
-            UndoRedoEvent::Undo => command_manager.undo(world),
-            UndoRedoEvent::Redo => command_manager.redo(world),
+            UndoRedoEvent::Undo => edit_history.undo(world),
+            UndoRedoEvent::Redo => edit_history.redo(world),
         }
-        world.insert_non_send_resource(command_manager);
+        world.insert_non_send_resource(edit_history);
     });
 }
 
@@ -79,15 +79,15 @@ mod tests {
     #[derive(Debug)]
     struct NoOpCommand;
 
-    impl Command for NoOpCommand {
-        fn execute(&self, _world: &mut World) -> Option<Box<dyn Command>> {
+    impl EditCommand for NoOpCommand {
+        fn execute(&self, _world: &mut World) -> Option<Box<dyn EditCommand>> {
             Some(Box::new(NoOpCommand))
         }
     }
 
     #[test]
     fn clear_empties_stacks() {
-        let mut manager = CommandManager::default();
+        let mut manager = EditHistory::default();
         let mut world = World::new();
 
         manager.add_undo(Box::new(NoOpCommand));

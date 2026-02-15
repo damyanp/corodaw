@@ -4,14 +4,14 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 
-use audio_graph::AudioGraphWorker;
+use audio_graph::GraphWorker;
 
-pub struct Audio {
+pub struct AudioOutput {
     _stream: Stream,
 }
 
-impl Audio {
-    pub fn new(mut audio_graph_worker: AudioGraphWorker) -> Result<Audio, Error> {
+impl AudioOutput {
+    pub fn new(mut audio_graph_worker: GraphWorker) -> Result<AudioOutput, Error> {
         let cpal = cpal::host_from_id(cpal::HostId::Asio)?;
         let device = cpal.default_output_device().unwrap();
 
@@ -25,7 +25,7 @@ impl Audio {
 
         audio_graph_worker.configure(config.channels, config.sample_rate);
 
-        let mut audio_thread = AudioThread {
+        let mut audio_thread = AudioOutputThread {
             audio_graph_worker,
             first_playback: None,
         };
@@ -41,16 +41,16 @@ impl Audio {
 
         stream.play()?;
 
-        Ok(Audio { _stream: stream })
+        Ok(AudioOutput { _stream: stream })
     }
 }
 
-struct AudioThread {
-    audio_graph_worker: AudioGraphWorker,
+struct AudioOutputThread {
+    audio_graph_worker: GraphWorker,
     first_playback: Option<StreamInstant>,
 }
 
-impl AudioThread {
+impl AudioOutputThread {
     fn data_callback(&mut self, data: &mut [f32], info: &OutputCallbackInfo) {
         let playback_time = info.timestamp().playback;
         let first_playback = self.first_playback.get_or_insert(playback_time);

@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use crate::plugins::{ClapPlugin, ClapPluginId};
+use crate::plugins::{ClapId, ClapInstance};
 use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui, Window};
 use windows::{
     Win32::{
@@ -40,31 +40,31 @@ unsafe impl Send for WindowHandle {}
 unsafe impl Sync for WindowHandle {}
 
 #[derive(Debug)]
-pub struct GuiHandle(Weak<WindowHandle>);
+pub struct PluginGuiHandle(Weak<WindowHandle>);
 
-impl Hash for GuiHandle {
+impl Hash for PluginGuiHandle {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.as_ptr().hash(state);
     }
 }
 
-impl PartialEq for GuiHandle {
+impl PartialEq for PluginGuiHandle {
     fn eq(&self, other: &Self) -> bool {
         self.0.as_ptr() == other.0.as_ptr()
     }
 }
 
-impl Eq for GuiHandle {}
+impl Eq for PluginGuiHandle {}
 
-impl GuiHandle {
+impl PluginGuiHandle {
     pub fn is_visible(&self) -> bool {
         self.0.strong_count() > 0
     }
 }
 
 pub struct PluginUiHost {
-    plugin_to_window: RefCell<HashMap<ClapPluginId, Arc<WindowHandle>>>,
-    window_to_plugin: RefCell<HashMap<WindowHandle, Rc<ClapPlugin>>>,
+    plugin_to_window: RefCell<HashMap<ClapId, Arc<WindowHandle>>>,
+    window_to_plugin: RefCell<HashMap<WindowHandle, Rc<ClapInstance>>>,
 
     wndclass_name: PCSTR,
 }
@@ -129,7 +129,7 @@ impl PluginUiHost {
         }
     }
 
-    pub fn resize_hints_changed(&self, clap_plugin_id: ClapPluginId) {
+    pub fn resize_hints_changed(&self, clap_plugin_id: ClapId) {
         let hwnd = self.plugin_to_window.borrow().get(&clap_plugin_id).cloned();
         let clap_plugin = hwnd
             .as_ref()
@@ -161,14 +161,14 @@ impl PluginUiHost {
         }
     }
 
-    pub fn request_resize(&self, clap_plugin_id: ClapPluginId, gui_size: GuiSize) {
+    pub fn request_resize(&self, clap_plugin_id: ClapId, gui_size: GuiSize) {
         let hwnd = self.plugin_to_window.borrow().get(&clap_plugin_id).cloned();
         if let Some(hwnd) = hwnd {
             set_window_client_area(hwnd.0, gui_size);
         }
     }
 
-    pub fn set_title(&self, clap_plugin_id: ClapPluginId, title: &str) {
+    pub fn set_title(&self, clap_plugin_id: ClapId, title: &str) {
         let hwnd = self.plugin_to_window.borrow().get(&clap_plugin_id).cloned();
         if let Some(hwnd) = hwnd {
             let title = CString::new(title).unwrap_or_default();
@@ -180,15 +180,15 @@ impl PluginUiHost {
 
     pub async fn show_gui(
         self: &Pin<Box<Self>>,
-        clap_plugin: &Rc<ClapPlugin>,
+        clap_plugin: &Rc<ClapInstance>,
         title: &str,
-    ) -> GuiHandle {
+    ) -> PluginGuiHandle {
         let plugin_id = clap_plugin.get_id();
         if let Some(window_handle) = self.plugin_to_window.borrow().get(&plugin_id) {
             unsafe {
                 let _ = SetForegroundWindow(window_handle.0);
             }
-            return GuiHandle(Arc::downgrade(window_handle));
+            return PluginGuiHandle(Arc::downgrade(window_handle));
         }
 
         let plugin_gui = clap_plugin
@@ -249,7 +249,7 @@ impl PluginUiHost {
             .borrow_mut()
             .insert(WindowHandle(hwnd), clap_plugin.clone());
 
-        GuiHandle(weak_window_handle)
+        PluginGuiHandle(weak_window_handle)
     }
 
     fn pump_windows_message_loop(&self) {

@@ -6,35 +6,35 @@ use std::{
 
 use bevy_ecs::entity::{Entity, EntityHashMap};
 
-pub fn state_tracker() -> (StateReader, StateWriter) {
+pub fn graph_state_tracker() -> (GraphStateReader, GraphStateWriter) {
     let inner: Arc<Mutex<Inner>> = Arc::default();
 
-    let reader = StateReader {
+    let reader = GraphStateReader {
         inner: inner.clone(),
-        buffer: StateBuffer::default(),
+        buffer: GraphStateBuffer::default(),
     };
 
-    let writer = StateWriter {
+    let writer = GraphStateWriter {
         inner,
-        buffer: StateBuffer::default(),
+        buffer: GraphStateBuffer::default(),
     };
 
     (reader, writer)
 }
 
-pub struct StateReader {
+pub struct GraphStateReader {
     inner: Arc<Mutex<Inner>>,
-    buffer: StateBuffer,
+    buffer: GraphStateBuffer,
 }
 
-pub struct StateWriter {
+pub struct GraphStateWriter {
     inner: Arc<Mutex<Inner>>,
-    buffer: StateBuffer,
+    buffer: GraphStateBuffer,
 }
 
 struct Inner {
-    ready_to_read_buffer: Option<StateBuffer>,
-    ready_to_write_buffer: Option<StateBuffer>,
+    ready_to_read_buffer: Option<GraphStateBuffer>,
+    ready_to_write_buffer: Option<GraphStateBuffer>,
 }
 
 impl Default for Inner {
@@ -42,12 +42,12 @@ impl Default for Inner {
         // We start with one extra buffer reader for writing to.
         Self {
             ready_to_read_buffer: Default::default(),
-            ready_to_write_buffer: Some(StateBuffer::default()),
+            ready_to_write_buffer: Some(GraphStateBuffer::default()),
         }
     }
 }
 
-impl StateReader {
+impl GraphStateReader {
     pub fn swap_buffers(&mut self) {
         let mut inner = self.inner.lock().unwrap();
 
@@ -59,15 +59,15 @@ impl StateReader {
     }
 }
 
-impl Deref for StateReader {
-    type Target = StateBuffer;
+impl Deref for GraphStateReader {
+    type Target = GraphStateBuffer;
 
     fn deref(&self) -> &Self::Target {
         &self.buffer
     }
 }
 
-impl StateWriter {
+impl GraphStateWriter {
     pub fn swap_buffers(&mut self) {
         let mut inner = self.inner.lock().unwrap();
 
@@ -91,38 +91,38 @@ impl StateWriter {
     }
 }
 
-impl Deref for StateWriter {
-    type Target = StateBuffer;
+impl Deref for GraphStateWriter {
+    type Target = GraphStateBuffer;
 
     fn deref(&self) -> &Self::Target {
         &self.buffer
     }
 }
 
-impl DerefMut for StateWriter {
+impl DerefMut for GraphStateWriter {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.buffer
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum StateValue {
+pub enum GraphStateValue {
     None,
     Mono(f32),
     Stereo(f32, f32),
 }
 
 #[derive(Default, Debug)]
-pub struct StateBuffer {
-    data: EntityHashMap<StateValue>,
+pub struct GraphStateBuffer {
+    data: EntityHashMap<GraphStateValue>,
 }
 
-impl StateBuffer {
-    pub fn insert(&mut self, key: Entity, value: StateValue) -> Option<StateValue> {
+impl GraphStateBuffer {
+    pub fn insert(&mut self, key: Entity, value: GraphStateValue) -> Option<GraphStateValue> {
         self.data.insert(key, value)
     }
 
-    pub fn get(&self, key: &Entity) -> Option<&StateValue> {
+    pub fn get(&self, key: &Entity) -> Option<&GraphStateValue> {
         self.data.get(key)
     }
 
@@ -141,7 +141,7 @@ mod test {
 
     #[test]
     fn reader_starts_empty() {
-        let (mut reader, _writer) = state_tracker();
+        let (mut reader, _writer) = graph_state_tracker();
 
         reader.swap_buffers();
 
@@ -150,23 +150,26 @@ mod test {
 
     #[test]
     fn reader_sees_written_values_after_swaps() {
-        let (mut reader, mut writer) = state_tracker();
+        let (mut reader, mut writer) = graph_state_tracker();
 
-        writer.insert(entity(1), StateValue::Mono(0.5));
-        writer.insert(entity(2), StateValue::Stereo(0.1, 0.2));
+        writer.insert(entity(1), GraphStateValue::Mono(0.5));
+        writer.insert(entity(2), GraphStateValue::Stereo(0.1, 0.2));
 
         writer.swap_buffers();
         reader.swap_buffers();
 
-        assert_eq!(reader.get(&entity(1)), Some(&StateValue::Mono(0.5)));
-        assert_eq!(reader.get(&entity(2)), Some(&StateValue::Stereo(0.1, 0.2)));
+        assert_eq!(reader.get(&entity(1)), Some(&GraphStateValue::Mono(0.5)));
+        assert_eq!(
+            reader.get(&entity(2)),
+            Some(&GraphStateValue::Stereo(0.1, 0.2))
+        );
     }
 
     #[test]
     fn reader_does_not_see_values_without_writer_swap() {
-        let (mut reader, mut writer) = state_tracker();
+        let (mut reader, mut writer) = graph_state_tracker();
 
-        writer.insert(entity(3), StateValue::Mono(1.0));
+        writer.insert(entity(3), GraphStateValue::Mono(1.0));
 
         reader.swap_buffers();
 
@@ -175,16 +178,16 @@ mod test {
 
     #[test]
     fn latest_write_wins_before_reader_swap() {
-        let (mut reader, mut writer) = state_tracker();
+        let (mut reader, mut writer) = graph_state_tracker();
 
-        writer.insert(entity(4), StateValue::Mono(0.25));
+        writer.insert(entity(4), GraphStateValue::Mono(0.25));
         writer.swap_buffers();
 
-        writer.insert(entity(4), StateValue::Mono(0.75));
+        writer.insert(entity(4), GraphStateValue::Mono(0.75));
         writer.swap_buffers();
 
         reader.swap_buffers();
 
-        assert_eq!(reader.get(&entity(4)), Some(&StateValue::Mono(0.75)));
+        assert_eq!(reader.get(&entity(4)), Some(&GraphStateValue::Mono(0.75)));
     }
 }

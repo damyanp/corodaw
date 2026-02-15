@@ -1,8 +1,8 @@
 use super::*;
 
-fn setup_world_with_4_channels() -> (World, [Id; 4]) {
+fn setup_world_with_4_channels() -> (World, [StableId; 4]) {
     let mut world = setup_world();
-    let ids: [Id; 4] = std::array::from_fn(|_| Id::new());
+    let ids: [StableId; 4] = std::array::from_fn(|_| StableId::new());
     let names = ["A", "B", "C", "D"];
     for (i, (id, name)) in ids.iter().zip(names.iter()).enumerate() {
         let snapshot = ChannelSnapshot {
@@ -10,16 +10,16 @@ fn setup_world_with_4_channels() -> (World, [Id; 4]) {
             id: *id,
             ..Default::default()
         };
-        AddChannelCommand::new(i, snapshot).execute(&mut world);
+        AddChannelEdit::new(i, snapshot).execute(&mut world);
     }
     (world, ids)
 }
 
-fn get_channel_ids(world: &mut World) -> Vec<Id> {
+fn get_channel_ids(world: &mut World) -> Vec<StableId> {
     let order = get_channel_order(world);
     order
         .iter()
-        .map(|e| *world.get::<Id>(*e).unwrap())
+        .map(|e| *world.get::<StableId>(*e).unwrap())
         .collect()
 }
 
@@ -29,7 +29,7 @@ fn add_channel() {
     let snapshot = ChannelSnapshot::default();
     let id = snapshot.id;
 
-    AddChannelCommand::new(0, snapshot).execute(&mut world);
+    AddChannelEdit::new(0, snapshot).execute(&mut world);
 
     let order = get_channel_order(&mut world);
     assert_eq!(order.len(), 1);
@@ -40,8 +40,11 @@ fn add_channel() {
         world.get::<Name>(entity).unwrap().as_str(),
         "unnamed channel"
     );
-    assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
-    assert_eq!(*world.get::<Id>(entity).unwrap(), id);
+    assert_eq!(
+        world.get::<ChannelMixerState>(entity).unwrap().gain_value,
+        1.0
+    );
+    assert_eq!(*world.get::<StableId>(entity).unwrap(), id);
 }
 
 #[test]
@@ -49,7 +52,7 @@ fn add_channel_returns_delete_undo() {
     let mut world = setup_world();
     let snapshot = ChannelSnapshot::default();
 
-    let undo = AddChannelCommand::new(0, snapshot)
+    let undo = AddChannelEdit::new(0, snapshot)
         .execute(&mut world)
         .unwrap();
     undo.execute(&mut world);
@@ -64,9 +67,9 @@ fn delete_channel() {
     let snapshot = ChannelSnapshot::default();
     let id = snapshot.id;
 
-    AddChannelCommand::new(0, snapshot).execute(&mut world);
+    AddChannelEdit::new(0, snapshot).execute(&mut world);
 
-    DeleteChannelCommand::new(id, 0).execute(&mut world);
+    DeleteChannelEdit::new(id, 0).execute(&mut world);
 
     let order = get_channel_order(&mut world);
     assert_eq!(order.len(), 0);
@@ -81,11 +84,9 @@ fn delete_channel_returns_add_undo() {
     snapshot.state.gain_value = 0.5;
     let id = snapshot.id;
 
-    AddChannelCommand::new(0, snapshot).execute(&mut world);
+    AddChannelEdit::new(0, snapshot).execute(&mut world);
 
-    let undo = DeleteChannelCommand::new(id, 0)
-        .execute(&mut world)
-        .unwrap();
+    let undo = DeleteChannelEdit::new(id, 0).execute(&mut world).unwrap();
     undo.execute(&mut world);
 
     let order = get_channel_order(&mut world);
@@ -93,8 +94,11 @@ fn delete_channel_returns_add_undo() {
 
     let entity = id.find_entity(&mut world).unwrap();
     assert_eq!(world.get::<Name>(entity).unwrap().as_str(), "my channel");
-    assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 0.5);
-    assert_eq!(*world.get::<Id>(entity).unwrap(), id);
+    assert_eq!(
+        world.get::<ChannelMixerState>(entity).unwrap().gain_value,
+        0.5
+    );
+    assert_eq!(*world.get::<StableId>(entity).unwrap(), id);
 }
 
 #[test]
@@ -104,7 +108,7 @@ fn add_delete_roundtrip() {
     let id = snapshot.id;
 
     // Add
-    let delete_cmd = AddChannelCommand::new(0, snapshot)
+    let delete_cmd = AddChannelEdit::new(0, snapshot)
         .execute(&mut world)
         .unwrap();
     assert_eq!(get_channel_order(&mut world).len(), 1);
@@ -128,7 +132,7 @@ fn add_delete_roundtrip() {
 fn delete_channel_with_data() {
     let mut world = setup_world();
     let snapshot = ChannelSnapshot {
-        data: Some(ChannelData {
+        data: Some(ChannelPluginBinding {
             plugin_id: "com.test.plugin".to_owned(),
             plugin_state: Some("dGVzdA==".to_owned()),
         }),
@@ -136,15 +140,13 @@ fn delete_channel_with_data() {
     };
     let id = snapshot.id;
 
-    AddChannelCommand::new(0, snapshot).execute(&mut world);
+    AddChannelEdit::new(0, snapshot).execute(&mut world);
 
-    let undo = DeleteChannelCommand::new(id, 0)
-        .execute(&mut world)
-        .unwrap();
+    let undo = DeleteChannelEdit::new(id, 0).execute(&mut world).unwrap();
     undo.execute(&mut world);
 
     let entity = id.find_entity(&mut world).unwrap();
-    let data = world.get::<ChannelData>(entity).unwrap();
+    let data = world.get::<ChannelPluginBinding>(entity).unwrap();
     assert_eq!(data.plugin_id, "com.test.plugin");
     assert_eq!(data.plugin_state.as_deref(), Some("dGVzdA=="));
 }
@@ -152,21 +154,21 @@ fn delete_channel_with_data() {
 #[test]
 fn move_forward() {
     let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-    MoveChannelCommand::new(0, 2).execute(&mut world);
+    MoveChannelEdit::new(0, 2).execute(&mut world);
     assert_eq!(get_channel_ids(&mut world), vec![b, a, c, d]);
 }
 
 #[test]
 fn move_backward() {
     let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-    MoveChannelCommand::new(2, 0).execute(&mut world);
+    MoveChannelEdit::new(2, 0).execute(&mut world);
     assert_eq!(get_channel_ids(&mut world), vec![c, a, b, d]);
 }
 
 #[test]
 fn move_forward_undo() {
     let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-    let undo = MoveChannelCommand::new(0, 2).execute(&mut world).unwrap();
+    let undo = MoveChannelEdit::new(0, 2).execute(&mut world).unwrap();
     undo.execute(&mut world);
     assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
 }
@@ -174,7 +176,7 @@ fn move_forward_undo() {
 #[test]
 fn move_backward_undo() {
     let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-    let undo = MoveChannelCommand::new(2, 0).execute(&mut world).unwrap();
+    let undo = MoveChannelEdit::new(2, 0).execute(&mut world).unwrap();
     undo.execute(&mut world);
     assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
 }
@@ -184,7 +186,7 @@ fn move_roundtrip() {
     let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
 
     // move(1, 3): [A, B, C, D] → [A, C, B, D]
-    let undo = MoveChannelCommand::new(1, 3).execute(&mut world).unwrap();
+    let undo = MoveChannelEdit::new(1, 3).execute(&mut world).unwrap();
     assert_eq!(get_channel_ids(&mut world), vec![a, c, b, d]);
 
     // undo
@@ -203,14 +205,14 @@ fn move_roundtrip() {
 #[test]
 fn move_same_position() {
     let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-    MoveChannelCommand::new(1, 1).execute(&mut world);
+    MoveChannelEdit::new(1, 1).execute(&mut world);
     assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
 }
 
 #[test]
 fn move_to_beginning() {
     let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-    let undo = MoveChannelCommand::new(3, 0).execute(&mut world).unwrap();
+    let undo = MoveChannelEdit::new(3, 0).execute(&mut world).unwrap();
     assert_eq!(get_channel_ids(&mut world), vec![d, a, b, c]);
     undo.execute(&mut world);
     assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
@@ -219,7 +221,7 @@ fn move_to_beginning() {
 #[test]
 fn move_to_end() {
     let (mut world, [a, b, c, d]) = setup_world_with_4_channels();
-    let undo = MoveChannelCommand::new(0, 4).execute(&mut world).unwrap();
+    let undo = MoveChannelEdit::new(0, 4).execute(&mut world).unwrap();
     assert_eq!(get_channel_ids(&mut world), vec![b, c, d, a]);
     undo.execute(&mut world);
     assert_eq!(get_channel_ids(&mut world), vec![a, b, c, d]);
@@ -230,13 +232,13 @@ fn set_plugin() {
     let mut world = setup_world();
     let snapshot = ChannelSnapshot::default();
     let id = snapshot.id;
-    AddChannelCommand::new(0, snapshot).execute(&mut world);
+    AddChannelEdit::new(0, snapshot).execute(&mut world);
 
     let data = make_channel_data("com.test.synth");
-    SetPluginCommand::new(id, Some(data)).execute(&mut world);
+    SetPluginEdit::new(id, Some(data)).execute(&mut world);
 
     let entity = id.find_entity(&mut world).unwrap();
-    let data = world.get::<ChannelData>(entity).unwrap();
+    let data = world.get::<ChannelPluginBinding>(entity).unwrap();
     assert_eq!(data.plugin_id, "com.test.synth");
 }
 
@@ -245,16 +247,16 @@ fn set_plugin_undo() {
     let mut world = setup_world();
     let snapshot = ChannelSnapshot::default();
     let id = snapshot.id;
-    AddChannelCommand::new(0, snapshot).execute(&mut world);
+    AddChannelEdit::new(0, snapshot).execute(&mut world);
 
     let data = make_channel_data("com.test.synth");
-    let undo = SetPluginCommand::new(id, Some(data))
+    let undo = SetPluginEdit::new(id, Some(data))
         .execute(&mut world)
         .unwrap();
     undo.execute(&mut world);
 
     let entity = id.find_entity(&mut world).unwrap();
-    assert!(world.get::<ChannelData>(entity).is_none());
+    assert!(world.get::<ChannelPluginBinding>(entity).is_none());
 }
 
 #[test]
@@ -266,22 +268,22 @@ fn set_plugin_replace() {
         ..Default::default()
     };
     let id = snapshot.id;
-    AddChannelCommand::new(0, snapshot).execute(&mut world);
+    AddChannelEdit::new(0, snapshot).execute(&mut world);
 
     let data_b = make_channel_data("com.test.synth-b");
-    let undo = SetPluginCommand::new(id, Some(data_b))
+    let undo = SetPluginEdit::new(id, Some(data_b))
         .execute(&mut world)
         .unwrap();
 
     let entity = id.find_entity(&mut world).unwrap();
     assert_eq!(
-        world.get::<ChannelData>(entity).unwrap().plugin_id,
+        world.get::<ChannelPluginBinding>(entity).unwrap().plugin_id,
         "com.test.synth-b"
     );
 
     undo.execute(&mut world);
     assert_eq!(
-        world.get::<ChannelData>(entity).unwrap().plugin_id,
+        world.get::<ChannelPluginBinding>(entity).unwrap().plugin_id,
         "com.test.synth-a"
     );
 }
@@ -291,30 +293,30 @@ fn set_plugin_roundtrip() {
     let mut world = setup_world();
     let snapshot = ChannelSnapshot::default();
     let id = snapshot.id;
-    AddChannelCommand::new(0, snapshot).execute(&mut world);
+    AddChannelEdit::new(0, snapshot).execute(&mut world);
 
     let data = make_channel_data("com.test.synth");
-    let undo = SetPluginCommand::new(id, Some(data))
+    let undo = SetPluginEdit::new(id, Some(data))
         .execute(&mut world)
         .unwrap();
 
     let entity = id.find_entity(&mut world).unwrap();
-    assert!(world.get::<ChannelData>(entity).is_some());
+    assert!(world.get::<ChannelPluginBinding>(entity).is_some());
 
     // undo
     let redo = undo.execute(&mut world).unwrap();
-    assert!(world.get::<ChannelData>(entity).is_none());
+    assert!(world.get::<ChannelPluginBinding>(entity).is_none());
 
     // redo
     let undo = redo.execute(&mut world).unwrap();
     assert_eq!(
-        world.get::<ChannelData>(entity).unwrap().plugin_id,
+        world.get::<ChannelPluginBinding>(entity).unwrap().plugin_id,
         "com.test.synth"
     );
 
     // undo again
     undo.execute(&mut world);
-    assert!(world.get::<ChannelData>(entity).is_none());
+    assert!(world.get::<ChannelPluginBinding>(entity).is_none());
 }
 
 #[test]
@@ -322,12 +324,15 @@ fn set_gain() {
     let mut world = setup_world();
     let snapshot = ChannelSnapshot::default();
     let id = snapshot.id;
-    AddChannelCommand::new(0, snapshot).execute(&mut world);
+    AddChannelEdit::new(0, snapshot).execute(&mut world);
 
-    SetGainCommand::new(id, 0.5).execute(&mut world);
+    SetGainEdit::new(id, 0.5).execute(&mut world);
 
     let entity = id.find_entity(&mut world).unwrap();
-    assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 0.5);
+    assert_eq!(
+        world.get::<ChannelMixerState>(entity).unwrap().gain_value,
+        0.5
+    );
 }
 
 #[test]
@@ -335,13 +340,16 @@ fn set_gain_undo() {
     let mut world = setup_world();
     let snapshot = ChannelSnapshot::default();
     let id = snapshot.id;
-    AddChannelCommand::new(0, snapshot).execute(&mut world);
+    AddChannelEdit::new(0, snapshot).execute(&mut world);
 
-    let undo = SetGainCommand::new(id, 0.3).execute(&mut world).unwrap();
+    let undo = SetGainEdit::new(id, 0.3).execute(&mut world).unwrap();
     undo.execute(&mut world);
 
     let entity = id.find_entity(&mut world).unwrap();
-    assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
+    assert_eq!(
+        world.get::<ChannelMixerState>(entity).unwrap().gain_value,
+        1.0
+    );
 }
 
 #[test]
@@ -349,22 +357,34 @@ fn set_gain_roundtrip() {
     let mut world = setup_world();
     let snapshot = ChannelSnapshot::default();
     let id = snapshot.id;
-    AddChannelCommand::new(0, snapshot).execute(&mut world);
+    AddChannelEdit::new(0, snapshot).execute(&mut world);
 
     let entity = id.find_entity(&mut world).unwrap();
 
-    let undo = SetGainCommand::new(id, 0.7).execute(&mut world).unwrap();
-    assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 0.7);
+    let undo = SetGainEdit::new(id, 0.7).execute(&mut world).unwrap();
+    assert_eq!(
+        world.get::<ChannelMixerState>(entity).unwrap().gain_value,
+        0.7
+    );
 
     // undo
     let redo = undo.execute(&mut world).unwrap();
-    assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
+    assert_eq!(
+        world.get::<ChannelMixerState>(entity).unwrap().gain_value,
+        1.0
+    );
 
     // redo
     let undo = redo.execute(&mut world).unwrap();
-    assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 0.7);
+    assert_eq!(
+        world.get::<ChannelMixerState>(entity).unwrap().gain_value,
+        0.7
+    );
 
     // undo again
     undo.execute(&mut world);
-    assert_eq!(world.get::<ChannelState>(entity).unwrap().gain_value, 1.0);
+    assert_eq!(
+        world.get::<ChannelMixerState>(entity).unwrap().gain_value,
+        1.0
+    );
 }
