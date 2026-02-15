@@ -256,7 +256,7 @@ fn setup_camera(mut commands: Commands) {
 fn main() {
     let mut app = App::new();
 
-    app.add_plugins((GraphPlugin, ProjectPlugin::<ClapManager>::default()));
+    app.add_plugins((GraphPlugin, ProjectPlugin::new()));
 
     let audio_graph_worker = app.world_mut().remove_non_send_resource().unwrap();
     let audio = AudioOutput::new(audio_graph_worker).unwrap();
@@ -271,7 +271,7 @@ fn main() {
         .insert_non_send_resource(midi_input)
         .insert_non_send_resource(summer)
         .insert_non_send_resource(audio)
-        .add_plugins((ChannelPlugin::<ClapManager>::default(), EditHistoryPlugin));
+        .add_plugins((ChannelPlugin::new(), EditHistoryPlugin));
 
     // Register types for bevy-inspector-egui
     app.register_type::<StableId>()

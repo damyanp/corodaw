@@ -5,7 +5,7 @@ use bevy_ecs::{name::Name, prelude::*};
 use engine::builtin::{MidiInputOwner, SummerOwner};
 use engine::{
     builtin::GainNodeOwner,
-    plugins::{PluginManager, discovery::PluginDescriptor},
+    plugins::{ClapManager, PluginManager, discovery::PluginDescriptor},
 };
 
 use base64::{Engine, engine::general_purpose};
@@ -21,7 +21,13 @@ pub use edits::*;
 // Re-export so tests and downstream code can call EditCommand methods on edit types.
 pub use crate::commands::EditCommand;
 
-pub struct ChannelPlugin<T: PluginManager>(std::marker::PhantomData<fn() -> T>);
+pub struct ChannelPlugin<T: PluginManager = ClapManager>(std::marker::PhantomData<fn() -> T>);
+
+impl ChannelPlugin {
+    pub fn new() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
 
 impl<T: PluginManager> Default for ChannelPlugin<T> {
     fn default() -> Self {

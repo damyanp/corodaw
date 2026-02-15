@@ -10,7 +10,7 @@ use egui::{
     RichText, Sense, Slider, Stroke, TextEdit, Ui, pos2, vec2,
 };
 use egui_extras::{Size, StripBuilder};
-use engine::plugins::{ClapManager, ClapProxy, PluginManager};
+use engine::plugins::{ClapManager, PluginManager};
 use project::{
     AddChannelEdit, AvailablePlugin, ChannelButton, ChannelButtonEdit, ChannelGain,
     ChannelMixerState, ChannelOrder, ChannelPluginBinding, ChannelPluginInstance, ChannelSnapshot,
@@ -30,7 +30,7 @@ pub struct ArrangerData<'w, 's> {
             &'static mut Name,
             &'static mut ChannelMixerState,
             Option<&'static ChannelGain>,
-            Option<&'static mut ChannelPluginInstance<ClapProxy>>,
+            Option<&'static mut ChannelPluginInstance>,
             Option<&'static ChannelPluginBinding>,
         ),
     >,
@@ -384,7 +384,7 @@ fn show_meters(peaks: Option<&GraphStateValue>, ui: &mut Ui) {
 
 fn show_gui_button(
     clap_plugin_manager: &ClapManager,
-    channel_audio_view: &mut ChannelPluginInstance<ClapProxy>,
+    channel_audio_view: &mut ChannelPluginInstance,
     ui: &mut Ui,
 ) {
     if ui.button("Show").clicked() {

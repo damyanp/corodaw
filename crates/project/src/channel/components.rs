@@ -3,7 +3,7 @@ use bevy_reflect::Reflect;
 use serde::{Deserialize, Serialize};
 
 use engine::builtin::GainNodeOwner;
-use engine::plugins::{ClapId, PluginGuiHandle, PluginManager};
+use engine::plugins::{ClapId, ClapProxy, PluginGuiHandle, PluginManager};
 
 use crate::StableId;
 
@@ -57,7 +57,7 @@ impl ChannelMixerState {
 }
 
 #[derive(Component)]
-pub struct ChannelPluginInstance<P: Component> {
+pub struct ChannelPluginInstance<P: Component = ClapProxy> {
     pub(crate) plugin: P,
     pub(crate) plugin_node: Entity,
     pub(crate) gui_handle: Option<PluginGuiHandle>,

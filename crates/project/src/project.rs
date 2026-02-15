@@ -12,7 +12,7 @@ use crate::{
     channel_bundle,
 };
 
-use engine::plugins::PluginManager;
+use engine::plugins::{ClapManager, PluginManager};
 
 #[derive(Component, Default, Reflect)]
 pub struct ProjectInfo {
@@ -48,7 +48,13 @@ impl ChannelOrder {
     }
 }
 
-pub struct ProjectPlugin<T: PluginManager>(std::marker::PhantomData<fn() -> T>);
+pub struct ProjectPlugin<T: PluginManager = ClapManager>(std::marker::PhantomData<fn() -> T>);
+
+impl ProjectPlugin {
+    pub fn new() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
 
 impl<T: PluginManager> Default for ProjectPlugin<T> {
     fn default() -> Self {
