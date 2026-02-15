@@ -1,4 +1,3 @@
-#![allow(unused)]
 use bevy_ecs::prelude::*;
 
 use audio_blocks::{AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, AudioBlockOpsMut};
@@ -6,18 +5,15 @@ use audio_blocks::{AudioBlock, AudioBlockInterleavedViewMut, AudioBlockMut, Audi
 use crate::{
     Node, Processor,
     node::{self, OutputNode},
-    state_tracker,
-    worker::{Graph, StateReader, StateWriter},
+    worker::{Graph, StateWriter},
 };
 use std::{
-    cell::RefCell,
     ops::DerefMut,
     sync::mpsc::{Receiver, Sender, channel},
     time::Duration,
 };
 
 pub struct AudioGraph {
-    modified: bool,
     sender: Sender<AudioGraphMessage>,
 }
 
@@ -45,23 +41,21 @@ impl AudioGraph {
     pub fn new(state_writer: StateWriter) -> (AudioGraph, AudioGraphWorker) {
         let (sender, receiver) = channel();
 
-        let audio_graph = AudioGraph {
-            modified: false,
-            sender,
-        };
+        let audio_graph = AudioGraph { sender };
 
         (audio_graph, AudioGraphWorker::new(receiver, state_writer))
     }
 
     pub fn set_processor(&self, entity: Entity, processor: Box<dyn Processor>) {
-        self.sender
+        let _ = self
+            .sender
             .send(AudioGraphMessage::SetProcessor(entity, processor));
     }
 }
 
 pub(crate) fn pre_update_system(
     mut removed_nodes: RemovedComponents<Node>,
-    mut nodes: Query<(Entity, &mut Node)>,
+    nodes: Query<(Entity, &mut Node)>,
 ) {
     if removed_nodes.is_empty() {
         return;
@@ -85,8 +79,7 @@ pub(crate) fn pre_update_system(
 }
 
 pub(crate) fn update_system(
-    mut commands: Commands,
-    mut audio_graph: NonSendMut<AudioGraph>,
+    audio_graph: NonSendMut<AudioGraph>,
     mut changed_nodes: Query<(Entity, Ref<node::Node>, Option<&Name>)>,
     mut removed_nodes: RemovedComponents<node::Node>,
     output_node: Option<Single<(Entity, &OutputNode)>>,
@@ -104,7 +97,7 @@ pub(crate) fn update_system(
 
     let output_node = output_node.map(|s| s.0);
 
-    audio_graph.sender.send(AudioGraphMessage::UpdateGraph {
+    let _ = audio_graph.sender.send(AudioGraphMessage::UpdateGraph {
         changed,
         removed,
         output_node,
@@ -167,14 +160,14 @@ impl AudioGraphWorker {
                     let frames_dest = block.frames_iter_mut();
 
                     for (output_channel, dest_channel) in output_buffers.zip(frames_dest) {
-                        for (output_frame, mut dest_frame) in output_channel.zip(dest_channel) {
+                        for (output_frame, dest_frame) in output_channel.zip(dest_channel) {
                             *dest_frame = *output_frame;
                         }
                     }
                 } else if output_buffers.num_channels() == 1 {
                     let frames_dest = block.channels_iter_mut();
                     for dest_channel in frames_dest {
-                        for (output_frame, mut dest_frame) in
+                        for (output_frame, dest_frame) in
                             output_buffers.channel_iter(0).zip(dest_channel)
                         {
                             *dest_frame = *output_frame;

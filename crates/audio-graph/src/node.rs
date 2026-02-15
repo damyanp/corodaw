@@ -1,11 +1,4 @@
-#![allow(unused)]
-
-use bevy_ecs::{
-    lifecycle::HookContext,
-    prelude::*,
-    query::QueryEntityError,
-    world::{DeferredWorld, error::EntityMutableFetchError},
-};
+use bevy_ecs::{prelude::*, query::QueryEntityError};
 use bevy_reflect::Reflect;
 
 use crate::{AudioGraph, worker::Processor};
@@ -229,14 +222,14 @@ mod test {
     //use bevy_ecs::prelude::*;
     use super::*;
 
-    fn get_node(mut world: &mut World, node: Entity) -> Node {
+    fn get_node(world: &mut World, node: Entity) -> Node {
         world.query::<&Node>().get(world, node).unwrap().clone()
     }
 
     #[test]
     fn test_connect_audio() {
         let mut world = World::new();
-        let mut world = &mut world;
+        let world = &mut world;
         let a = world.spawn(Node::default().audio(0, 2)).id();
         let b = world.spawn(Node::default().audio(2, 0)).id();
         let c = world.spawn(Node::default().audio(0, 1)).id();

@@ -1,20 +1,13 @@
-#![allow(unused)]
-
 use std::{
-    cmp::Reverse,
-    collections::{BinaryHeap, VecDeque},
-    pin::Pin,
-    process::Output,
-    rc::Rc,
+    collections::VecDeque,
     sync::{Arc, RwLock, RwLockReadGuard},
     time::Duration,
 };
 
-use audio_blocks::{AudioBlockMut, AudioBlockSequential};
-use bevy_ecs::{schedule::MultiThreadedExecutor, world::CommandQueue};
-use fixedbitset::FixedBitSet;
+use audio_blocks::AudioBlockMut;
+use bevy_ecs::prelude::Entity;
 use itertools::Itertools;
-use wmidi::{Channel, MidiMessage, Note, U7};
+use wmidi::MidiMessage;
 
 use crate::AgEvent;
 
@@ -47,7 +40,7 @@ impl Processor for SumInputs {
 
         for input in inputs {
             let input = input.channel(0);
-            for (input, mut output) in input.iter().zip(ctx.out_audio_buffers.channel_iter_mut(0)) {
+            for (input, output) in input.iter().zip(ctx.out_audio_buffers.channel_iter_mut(0)) {
                 *output += *input;
             }
         }
@@ -129,8 +122,8 @@ fn reachable_nodes() {
         .spawn_batch((0..5).map(|_| (node::Node::default().audio(1, 1),)))
         .collect();
 
-    node::connect_audio(app.world_mut(), nodes[0], Connection::new(0, nodes[1], 0));
-    node::connect_audio(app.world_mut(), nodes[2], Connection::new(0, nodes[3], 0));
+    let _ = node::connect_audio(app.world_mut(), nodes[0], Connection::new(0, nodes[1], 0));
+    let _ = node::connect_audio(app.world_mut(), nodes[2], Connection::new(0, nodes[3], 0));
 
     app.update();
 
@@ -177,10 +170,10 @@ fn multiple_node_process_order() {
 
     let logger = Logger::new();
 
-    let mut w = app.world_mut();
-    let a = w.spawn((node::Node::default().audio(2, 1))).id();
-    let b = w.spawn((node::Node::default().audio(0, 1))).id();
-    let c = w.spawn((node::Node::default().audio(0, 1))).id();
+    let w = app.world_mut();
+    let a = w.spawn(node::Node::default().audio(2, 1)).id();
+    let b = w.spawn(node::Node::default().audio(0, 1)).id();
+    let c = w.spawn(node::Node::default().audio(0, 1)).id();
     let d = w
         .spawn((node::Node::default().audio(1, 2), node::OutputNode))
         .id();
@@ -189,9 +182,9 @@ fn multiple_node_process_order() {
         node::set_processor(w, e, logger.make_processor());
     }
 
-    node::connect_audio(w, d, Connection::new(0, a, 0));
-    node::connect_audio(w, a, Connection::new(0, b, 0));
-    node::connect_audio(w, a, Connection::new(1, c, 0));
+    let _ = node::connect_audio(w, d, Connection::new(0, a, 0));
+    let _ = node::connect_audio(w, a, Connection::new(0, b, 0));
+    let _ = node::connect_audio(w, a, Connection::new(1, c, 0));
 
     app.update();
     let mut audio_graph_worker: AudioGraphWorker =
@@ -222,8 +215,8 @@ fn always_run_nodes() {
 
     let logger = Logger::new();
 
-    let mut w = app.world_mut();
-    let [a, b, f] = std::array::from_fn(|_| w.spawn((Node::default().audio(1, 2))).id());
+    let w = app.world_mut();
+    let [a, b, f] = std::array::from_fn(|_| w.spawn(Node::default().audio(1, 2)).id());
     let [c, d, e] = std::array::from_fn(|_| w.spawn(Node::default().audio(1, 1).always_run()).id());
 
     w.insert_batch([(a, OutputNode)]);
@@ -232,9 +225,9 @@ fn always_run_nodes() {
         set_processor(w, e, logger.make_processor());
     }
 
-    connect_audio(w, a, Connection::new(0, b, 0));
-    connect_audio(w, a, Connection::new(0, d, 0));
-    connect_audio(w, b, Connection::new(0, c, 0));
+    let _ = connect_audio(w, a, Connection::new(0, b, 0));
+    let _ = connect_audio(w, a, Connection::new(0, d, 0));
+    let _ = connect_audio(w, b, Connection::new(0, c, 0));
 
     app.update();
     let mut audio_graph_worker: AudioGraphWorker =
@@ -266,7 +259,7 @@ fn node_processing() {
     //   \-> c
 
     let mut app = test_app();
-    let mut w = app.world_mut();
+    let w = app.world_mut();
 
     let a = w
         .spawn((node::Node::default().audio(2, 2), node::OutputNode))
@@ -283,8 +276,8 @@ fn node_processing() {
         node::set_processor(w, e, Box::new(Constant(1.0)));
     }
 
-    node::connect_audio(w, a, Connection::new(0, b, 0));
-    node::connect_audio(w, a, Connection::new(1, c, 0));
+    let _ = node::connect_audio(w, a, Connection::new(0, b, 0));
+    let _ = node::connect_audio(w, a, Connection::new(1, c, 0));
 
     app.update();
 
@@ -300,7 +293,7 @@ fn node_processing() {
 #[test]
 fn mono_node_stereo_output() {
     let mut app = test_app();
-    let mut w = app.world_mut();
+    let w = app.world_mut();
 
     let a = w
         .spawn((node::Node::default().audio(0, 1), node::OutputNode))
@@ -370,7 +363,7 @@ fn new_test_midi_message(n: u8) -> MidiMessage<'static> {
 #[test]
 fn events_output_to_single_input() {
     let mut app = test_app();
-    let mut w = app.world_mut();
+    let w = app.world_mut();
 
     let events = vec![
         AgEvent {

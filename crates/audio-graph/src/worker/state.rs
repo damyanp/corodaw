@@ -1,9 +1,7 @@
 use std::{
-    collections::VecDeque,
-    error::Error,
     mem::swap,
     ops::{Deref, DerefMut},
-    sync::{Arc, LockResult, Mutex, MutexGuard},
+    sync::{Arc, Mutex},
 };
 
 use bevy_ecs::entity::{Entity, EntityHashMap};

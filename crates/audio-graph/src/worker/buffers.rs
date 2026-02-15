@@ -2,7 +2,7 @@ use std::cell::{Ref, RefCell};
 
 use audio_blocks::{AudioBlock, AudioBlockMut, AudioBlockSequential};
 
-use crate::{AgEvent, Event};
+use crate::AgEvent;
 
 pub struct AudioBuffers {
     pub(crate) buffers: RefCell<AudioBlockSequential<f32>>,

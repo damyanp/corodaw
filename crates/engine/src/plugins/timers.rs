@@ -1,4 +1,3 @@
-#![allow(unused)]
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -27,6 +26,7 @@ impl<'a> HostTimerImpl for ClapPluginMainThread<'a> {
 }
 
 /// Handles all Timer logic.
+#[allow(dead_code)]
 pub struct Timers {
     /// All the registered timers, indexed by ID.
     timers: RefCell<HashMap<TimerId, Timer>>,
@@ -37,6 +37,7 @@ pub struct Timers {
     smallest_duration: Cell<Option<Duration>>,
 }
 
+#[allow(dead_code)]
 impl Timers {
     /// Initializes timer logic.
     pub fn new() -> Self {
@@ -123,6 +124,7 @@ impl Timers {
 }
 
 /// A single timer.
+#[allow(dead_code)]
 struct Timer {
     /// The timer's ID
     id: TimerId,
@@ -132,6 +134,7 @@ struct Timer {
     last_triggered_at: Option<Instant>,
 }
 
+#[allow(dead_code)]
 impl Timer {
     /// Creates a new Timer from its ID and interval.
     fn new(id: TimerId, interval: Duration) -> Self {
