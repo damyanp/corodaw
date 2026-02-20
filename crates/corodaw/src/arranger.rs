@@ -144,37 +144,29 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
 
         const MEASURES: usize = 32;
         const BEATS_PER_MEASURE: usize = 4;
+        let total_width = MEASURES as f32 * BEATS_PER_MEASURE as f32 * pixels_per_beat;
 
-        let r = Rect::from_min_size(
-            strip_rect.min,
-            vec2(
-                MEASURES as f32 * BEATS_PER_MEASURE as f32 * pixels_per_beat,
-                strip_rect.height(),
-            ),
-        );
-
-        ui.advance_cursor_after_rect(r);
+        let r = Rect::from_min_size(strip_rect.min, vec2(total_width, strip_rect.height()));
+        let _ = ui.allocate_rect(r, Sense::empty());
 
         let p = ui.painter();
-
-        p.rect_filled(r, 10.0, Color32::LIGHT_BLUE);
+        p.rect_filled(r, 2.0, Color32::from_rgb(30, 40, 60));
 
         for measure in 0..MEASURES {
-            let x = r.min.x + (measure * BEATS_PER_MEASURE) as f32 * pixels_per_beat;
+            let measure_x = r.min.x + (measure * BEATS_PER_MEASURE) as f32 * pixels_per_beat;
 
             p.vline(
-                x,
-                strip_rect.shrink(30.0).y_range(),
-                Stroke::new(2.0, Color32::DARK_BLUE),
+                measure_x,
+                r.y_range(),
+                Stroke::new(1.0, Color32::from_rgb(80, 90, 110)),
             );
 
             for beat in 1..BEATS_PER_MEASURE {
-                let x = x + beat as f32 * pixels_per_beat;
-
+                let x = measure_x + beat as f32 * pixels_per_beat;
                 p.vline(
                     x,
-                    strip_rect.shrink(30.0).y_range(),
-                    Stroke::new(1.0, Color32::DARK_BLUE),
+                    r.y_range(),
+                    Stroke::new(0.5, Color32::from_rgb(50, 60, 80)),
                 );
             }
         }
