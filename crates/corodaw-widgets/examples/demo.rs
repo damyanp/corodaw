@@ -74,36 +74,70 @@ impl App {
             fn show_strip(&mut self, _: usize, ui: &mut Ui) {
                 let strip_rect = ui.available_rect_before_wrap();
 
-                let r =
-                    Rect::from_min_size(strip_rect.min, vec2(100.0 * 50.0, strip_rect.height()));
+                const MEASURES: usize = 32;
+                const BEATS_PER_MEASURE: usize = 4;
+                const BEAT_WIDTH: f32 = 20.0;
+                let total_width = MEASURES as f32 * BEATS_PER_MEASURE as f32 * BEAT_WIDTH;
+
+                let r = Rect::from_min_size(strip_rect.min, vec2(total_width, strip_rect.height()));
                 let _ = ui.allocate_rect(r, Sense::empty());
 
                 let p = ui.painter();
-                p.rect_filled(r, 10.0, Color32::DARK_GREEN);
-                p.vline(r.max.x, r.y_range(), Stroke::new(2.0, Color32::WHITE));
-                p.text(
-                    pos2(r.max.x, r.min.y),
-                    Align2::CENTER_TOP,
-                    format!("{}", r.max.x),
-                    FontId::default(),
-                    Color32::WHITE,
-                );
-                for i in 0..100 {
-                    let x = r.min.x + i as f32 * 50.0;
-                    let pos = pos2(x, r.center().y);
+                p.rect_filled(r, 2.0, Color32::from_rgb(30, 40, 60));
 
-                    p.rect_filled(
-                        Rect::from_center_size(pos, vec2(40.0, 40.0)),
-                        5.0,
-                        Color32::DARK_RED,
+                for measure in 0..MEASURES {
+                    let measure_x = r.min.x + (measure * BEATS_PER_MEASURE) as f32 * BEAT_WIDTH;
+
+                    p.vline(
+                        measure_x,
+                        r.y_range(),
+                        Stroke::new(1.0, Color32::from_rgb(80, 90, 110)),
                     );
+
+                    for beat in 1..BEATS_PER_MEASURE {
+                        let x = measure_x + beat as f32 * BEAT_WIDTH;
+                        p.vline(
+                            x,
+                            r.y_range(),
+                            Stroke::new(0.5, Color32::from_rgb(50, 60, 80)),
+                        );
+                    }
+                }
+            }
+
+            fn show_timestrip(&mut self, ui: &mut Ui) {
+                let rect = ui.available_rect_before_wrap();
+
+                const MEASURES: usize = 32;
+                const BEATS_PER_MEASURE: usize = 4;
+                const BEAT_WIDTH: f32 = 20.0;
+                let total_width = MEASURES as f32 * BEATS_PER_MEASURE as f32 * BEAT_WIDTH;
+
+                let r = Rect::from_min_size(rect.min, vec2(total_width, rect.height()));
+
+                let p = ui.painter();
+
+                for measure in 0..MEASURES {
+                    let x = r.min.x + (measure * BEATS_PER_MEASURE) as f32 * BEAT_WIDTH;
+
+                    // Measure tick
+                    p.vline(x, r.min.y..=r.max.y, Stroke::new(1.0, Color32::GRAY));
+
+                    // Measure number
                     p.text(
-                        pos,
-                        Align2::CENTER_CENTER,
-                        format!("{}", i * 50),
+                        pos2(x + 3.0, r.min.y + 2.0),
+                        Align2::LEFT_TOP,
+                        format!("{}", measure + 1),
                         FontId::default(),
-                        Color32::WHITE,
+                        ui.style().visuals.text_color(),
                     );
+
+                    // Beat ticks (shorter)
+                    for beat in 1..BEATS_PER_MEASURE {
+                        let bx = x + beat as f32 * BEAT_WIDTH;
+                        let tick_top = r.min.y + r.height() * 0.5;
+                        p.vline(bx, tick_top..=r.max.y, Stroke::new(0.5, Color32::DARK_GRAY));
+                    }
                 }
             }
 

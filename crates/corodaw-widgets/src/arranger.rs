@@ -1,8 +1,8 @@
 use std::f32;
 
 use egui::{
-    Align, Align2, Color32, Context, CursorIcon, Direction, FontId, Id, Layout, NumExt,
-    PointerButton, Rect, ScrollArea, Sense, Stroke, TextStyle, Ui, UiBuilder, Vec2, emath, pos2,
+    Align, Color32, Context, CursorIcon, Direction, Id, Layout, NumExt, PointerButton, Rect,
+    ScrollArea, Sense, Stroke, TextStyle, Ui, UiBuilder, Vec2, emath, pos2,
     scroll_area::{ScrollBarVisibility, ScrollSource},
     vec2,
 };
@@ -34,6 +34,7 @@ pub trait ArrangerDataProvider {
     fn channel_height(&self, index: usize) -> f32;
     fn show_channel(&mut self, index: usize, ui: &mut Ui);
     fn show_strip(&mut self, index: usize, ui: &mut Ui);
+    fn show_timestrip(&mut self, ui: &mut Ui);
     fn on_add_channel(&mut self, index: usize);
     fn move_channel(&mut self, index: usize, destination: usize);
     fn show_channel_menu(&mut self, index: usize, ui: &mut Ui);
@@ -155,12 +156,20 @@ fn show_channels(
         1.0,
         ui.style().visuals.widgets.active.bg_fill,
     );
-    ui.painter().text(
-        timestrip_rect.center(),
-        Align2::CENTER_CENTER,
-        "Time Strip",
-        FontId::default(),
-        ui.style().visuals.widgets.active.text_color(),
+
+    // Render the time strip with horizontal scroll offset matching the strips
+    let timestrip_content_rect = Rect::from_min_size(
+        pos2(timestrip_rect.min.x - viewport.min.x, timestrip_rect.min.y),
+        vec2(viewport.width(), timestrip_rect.height()),
+    );
+    ui.scope_builder(
+        UiBuilder::new()
+            .max_rect(timestrip_content_rect)
+            .layout(Layout::top_down(Align::Min)),
+        |ui| {
+            ui.shrink_clip_rect(timestrip_rect);
+            data.show_timestrip(ui);
+        },
     );
 
     ui.painter().rect_filled(

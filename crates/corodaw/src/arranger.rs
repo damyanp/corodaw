@@ -169,14 +169,6 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                 Stroke::new(2.0, Color32::DARK_BLUE),
             );
 
-            p.text(
-                pos2(x, strip_rect.top() + 10.0),
-                Align2::CENTER_TOP,
-                format!("{measure}"),
-                FontId::default(),
-                Color32::BLACK,
-            );
-
             for beat in 1..BEATS_PER_MEASURE {
                 let x = x + beat as f32 * BEAT_WIDTH;
 
@@ -187,9 +179,40 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
                 );
             }
         }
+    }
 
-        // ui.painter()
-        //     .rect_filled(r, 5.0, ui.style().visuals.widgets.inactive.bg_fill);
+    fn show_timestrip(&mut self, ui: &mut Ui) {
+        let rect = ui.available_rect_before_wrap();
+
+        const MEASURES: usize = 32;
+        const BEATS_PER_MEASURE: usize = 4;
+        const BEAT_WIDTH: f32 = 20.0;
+
+        let p = ui.painter();
+
+        for measure in 0..MEASURES {
+            let x = rect.min.x + (measure * BEATS_PER_MEASURE) as f32 * BEAT_WIDTH;
+
+            p.vline(x, rect.min.y..=rect.max.y, Stroke::new(1.0, Color32::GRAY));
+
+            p.text(
+                pos2(x + 3.0, rect.min.y + 2.0),
+                Align2::LEFT_TOP,
+                format!("{}", measure + 1),
+                FontId::default(),
+                ui.style().visuals.text_color(),
+            );
+
+            for beat in 1..BEATS_PER_MEASURE {
+                let bx = x + beat as f32 * BEAT_WIDTH;
+                let tick_top = rect.min.y + rect.height() * 0.5;
+                p.vline(
+                    bx,
+                    tick_top..=rect.max.y,
+                    Stroke::new(0.5, Color32::DARK_GRAY),
+                );
+            }
+        }
     }
 
     fn on_add_channel(&mut self, index: usize) {
