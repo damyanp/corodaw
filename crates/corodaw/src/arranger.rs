@@ -139,17 +139,16 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             });
     }
 
-    fn show_strip(&mut self, _: usize, ui: &mut Ui) {
+    fn show_strip(&mut self, _: usize, ui: &mut Ui, pixels_per_beat: f32) {
         let strip_rect = ui.available_rect_before_wrap();
 
         const MEASURES: usize = 32;
         const BEATS_PER_MEASURE: usize = 4;
-        const BEAT_WIDTH: f32 = 20.0;
 
         let r = Rect::from_min_size(
             strip_rect.min,
             vec2(
-                MEASURES as f32 * BEATS_PER_MEASURE as f32 * BEAT_WIDTH,
+                MEASURES as f32 * BEATS_PER_MEASURE as f32 * pixels_per_beat,
                 strip_rect.height(),
             ),
         );
@@ -161,7 +160,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
         p.rect_filled(r, 10.0, Color32::LIGHT_BLUE);
 
         for measure in 0..MEASURES {
-            let x = r.min.x + (measure * BEATS_PER_MEASURE) as f32 * BEAT_WIDTH;
+            let x = r.min.x + (measure * BEATS_PER_MEASURE) as f32 * pixels_per_beat;
 
             p.vline(
                 x,
@@ -170,7 +169,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             );
 
             for beat in 1..BEATS_PER_MEASURE {
-                let x = x + beat as f32 * BEAT_WIDTH;
+                let x = x + beat as f32 * pixels_per_beat;
 
                 p.vline(
                     x,
@@ -181,17 +180,16 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
         }
     }
 
-    fn show_timestrip(&mut self, ui: &mut Ui) {
+    fn show_timestrip(&mut self, ui: &mut Ui, pixels_per_beat: f32) {
         let rect = ui.available_rect_before_wrap();
 
         const MEASURES: usize = 32;
         const BEATS_PER_MEASURE: usize = 4;
-        const BEAT_WIDTH: f32 = 20.0;
 
         let p = ui.painter();
 
         for measure in 0..MEASURES {
-            let x = rect.min.x + (measure * BEATS_PER_MEASURE) as f32 * BEAT_WIDTH;
+            let x = rect.min.x + (measure * BEATS_PER_MEASURE) as f32 * pixels_per_beat;
 
             p.vline(x, rect.min.y..=rect.max.y, Stroke::new(1.0, Color32::GRAY));
 
@@ -204,7 +202,7 @@ impl ArrangerDataProvider for ArrangerData<'_, '_> {
             );
 
             for beat in 1..BEATS_PER_MEASURE {
-                let bx = x + beat as f32 * BEAT_WIDTH;
+                let bx = x + beat as f32 * pixels_per_beat;
                 let tick_top = rect.min.y + rect.height() * 0.5;
                 p.vline(
                     bx,

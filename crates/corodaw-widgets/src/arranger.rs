@@ -17,9 +17,14 @@ enum DragAxis {
 #[derive(Clone, Debug, Copy)]
 struct State {
     width: f32,
+    pixels_per_beat: f32,
 }
 
 impl State {
+    const DEFAULT_PIXELS_PER_BEAT: f32 = 20.0;
+    const MIN_PIXELS_PER_BEAT: f32 = 5.0;
+    const MAX_PIXELS_PER_BEAT: f32 = 200.0;
+
     fn load(ctx: &Context, id: Id) -> Option<Self> {
         ctx.data(|d| d.get_temp(id))
     }
@@ -27,14 +32,30 @@ impl State {
     fn store(self, ctx: &Context, id: Id) {
         ctx.data_mut(|d| d.insert_temp(id, self));
     }
+
+    /// Load–modify–store: updates only the fields touched by `f`.
+    fn update(ctx: &Context, id: Id, f: impl FnOnce(&mut Self)) {
+        let mut state = Self::load(ctx, id).unwrap_or_default();
+        f(&mut state);
+        state.store(ctx, id);
+    }
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            width: 300.0,
+            pixels_per_beat: Self::DEFAULT_PIXELS_PER_BEAT,
+        }
+    }
 }
 
 pub trait ArrangerDataProvider {
     fn num_channels(&self) -> usize;
     fn channel_height(&self, index: usize) -> f32;
     fn show_channel(&mut self, index: usize, ui: &mut Ui);
-    fn show_strip(&mut self, index: usize, ui: &mut Ui);
-    fn show_timestrip(&mut self, ui: &mut Ui);
+    fn show_strip(&mut self, index: usize, ui: &mut Ui, pixels_per_beat: f32);
+    fn show_timestrip(&mut self, ui: &mut Ui, pixels_per_beat: f32);
     fn on_add_channel(&mut self, index: usize);
     fn move_channel(&mut self, index: usize, destination: usize);
     fn show_channel_menu(&mut self, index: usize, ui: &mut Ui);
@@ -66,6 +87,10 @@ impl ArrangerWidget {
 
         let width = show_resize_bar(rect, default_width, gap, id, ui);
 
+        let mut pixels_per_beat = State::load(ui.ctx(), id)
+            .map(|s| s.pixels_per_beat)
+            .unwrap_or(State::DEFAULT_PIXELS_PER_BEAT);
+
         let timestrip_rect = Rect::from_min_max(
             pos2(rect.left() + width + gap, rect.top()),
             pos2(rect.right(), rect.top() + timestrip_height),
@@ -81,24 +106,73 @@ impl ArrangerWidget {
             pos2(rect.max.x, rect.max.y),
         );
 
-        let r = ScrollArea::both()
+        // Handle ctrl+wheel zoom over the strips/timestrip area
+        let zoom_rect = Rect::from_min_max(
+            pos2(strips_rect.min.x, timestrip_rect.min.y),
+            strips_rect.max,
+        );
+        let (ctrl_scrolling, zoom_mouse_x) = ui.ctx().input(|i| {
+            let hovering = i.pointer.hover_pos().filter(|p| zoom_rect.contains(*p));
+            let is_zooming = i.modifiers.ctrl && i.raw_scroll_delta.y != 0.0 && hovering.is_some();
+            (is_zooming, hovering.map(|p| p.x))
+        });
+        let old_pixels_per_beat = pixels_per_beat;
+        if ctrl_scrolling {
+            let scroll_delta = ui.ctx().input(|i| i.raw_scroll_delta.y);
+            let factor = (scroll_delta / 120.0).exp2();
+            pixels_per_beat = (pixels_per_beat * factor)
+                .clamp(State::MIN_PIXELS_PER_BEAT, State::MAX_PIXELS_PER_BEAT);
+        }
+
+        State::update(ui.ctx(), id, |s| s.pixels_per_beat = pixels_per_beat);
+
+        // Disable mouse wheel scrolling when ctrl is held (zoom takes priority)
+        let scroll_source = if ctrl_scrolling {
+            ScrollSource::SCROLL_BAR
+        } else {
+            ScrollSource::SCROLL_BAR | ScrollSource::MOUSE_WHEEL
+        };
+
+        // Compute zoom-adjusted scroll offset using the public API.
+        // We read the current offset from scroll_area::State (requires a known id_salt),
+        // then pass the adjusted offset via .horizontal_scroll_offset() so it applies
+        // before the scroll area renders — no flicker.
+        let scroll_id_salt = id.with("__scroll");
+        let scroll_id = ui.make_persistent_id(Id::new(scroll_id_salt));
+        let zoom_offset = if ctrl_scrolling
+            && let Some(mouse_x) = zoom_mouse_x
+            && let Some(state) = egui::scroll_area::State::load(ui.ctx(), scroll_id)
+        {
+            let cursor_in_strip = mouse_x - strips_rect.min.x;
+            let beat = (state.offset.x + cursor_in_strip) / old_pixels_per_beat;
+            Some((beat * pixels_per_beat - cursor_in_strip).max(0.0))
+        } else {
+            None
+        };
+
+        let mut scroll_area = ScrollArea::both()
+            .id_salt(scroll_id_salt)
             .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible)
             .scroll_bar_rect(strips_rect)
-            .scroll_source(ScrollSource::SCROLL_BAR | ScrollSource::MOUSE_WHEEL)
-            .show_viewport(ui, |ui, viewport| {
-                show_channels(
-                    &mut data,
-                    ui,
-                    id,
-                    drag_id,
-                    drag_info,
-                    gap,
-                    timestrip_rect,
-                    channels_rect,
-                    strips_rect,
-                    viewport,
-                )
-            });
+            .scroll_source(scroll_source);
+        if let Some(offset) = zoom_offset {
+            scroll_area = scroll_area.horizontal_scroll_offset(offset);
+        }
+        let r = scroll_area.show_viewport(ui, |ui, viewport| {
+            show_channels(
+                &mut data,
+                ui,
+                id,
+                drag_id,
+                drag_info,
+                gap,
+                pixels_per_beat,
+                timestrip_rect,
+                channels_rect,
+                strips_rect,
+                viewport,
+            )
+        });
 
         let ((drop_target, dropped), strip_drag_delta) = r.inner;
 
@@ -146,6 +220,7 @@ fn show_channels(
     drag_id: Id,
     drag_info: Option<usize>,
     gap: f32,
+    pixels_per_beat: f32,
     timestrip_rect: Rect,
     channels_rect: Rect,
     strips_rect: Rect,
@@ -168,7 +243,7 @@ fn show_channels(
             .layout(Layout::top_down(Align::Min)),
         |ui| {
             ui.shrink_clip_rect(timestrip_rect);
-            data.show_timestrip(ui);
+            data.show_timestrip(ui, pixels_per_beat);
         },
     );
 
@@ -258,7 +333,7 @@ fn show_channels(
                     .sense(Sense::click_and_drag()),
                 |ui| {
                     ui.shrink_clip_rect(strips_rect);
-                    data.show_strip(i, ui);
+                    data.show_strip(i, ui, pixels_per_beat);
                 },
             )
             .response;
@@ -333,10 +408,9 @@ fn show_channels(
 }
 
 fn show_resize_bar(rect: Rect, default_width: f32, gap: f32, id: Id, ui: &mut Ui) -> f32 {
-    let mut width = default_width;
-    if let Some(state) = State::load(ui.ctx(), id) {
-        width = state.width;
-    }
+    let mut width = State::load(ui.ctx(), id)
+        .map(|s| s.width)
+        .unwrap_or(default_width);
     width = width.at_most(rect.width());
 
     let resize_id = id.with("__resize");
@@ -365,7 +439,7 @@ fn show_resize_bar(rect: Rect, default_width: f32, gap: f32, id: Id, ui: &mut Ui
         ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
     }
 
-    State { width }.store(ui.ctx(), id);
+    State::update(ui.ctx(), id, |s| s.width = width);
 
     // draw the resize bar
     {

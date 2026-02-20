@@ -71,13 +71,12 @@ impl App {
                 );
             }
 
-            fn show_strip(&mut self, _: usize, ui: &mut Ui) {
+            fn show_strip(&mut self, _: usize, ui: &mut Ui, pixels_per_beat: f32) {
                 let strip_rect = ui.available_rect_before_wrap();
 
                 const MEASURES: usize = 32;
                 const BEATS_PER_MEASURE: usize = 4;
-                const BEAT_WIDTH: f32 = 20.0;
-                let total_width = MEASURES as f32 * BEATS_PER_MEASURE as f32 * BEAT_WIDTH;
+                let total_width = MEASURES as f32 * BEATS_PER_MEASURE as f32 * pixels_per_beat;
 
                 let r = Rect::from_min_size(strip_rect.min, vec2(total_width, strip_rect.height()));
                 let _ = ui.allocate_rect(r, Sense::empty());
@@ -86,7 +85,8 @@ impl App {
                 p.rect_filled(r, 2.0, Color32::from_rgb(30, 40, 60));
 
                 for measure in 0..MEASURES {
-                    let measure_x = r.min.x + (measure * BEATS_PER_MEASURE) as f32 * BEAT_WIDTH;
+                    let measure_x =
+                        r.min.x + (measure * BEATS_PER_MEASURE) as f32 * pixels_per_beat;
 
                     p.vline(
                         measure_x,
@@ -95,7 +95,7 @@ impl App {
                     );
 
                     for beat in 1..BEATS_PER_MEASURE {
-                        let x = measure_x + beat as f32 * BEAT_WIDTH;
+                        let x = measure_x + beat as f32 * pixels_per_beat;
                         p.vline(
                             x,
                             r.y_range(),
@@ -105,20 +105,19 @@ impl App {
                 }
             }
 
-            fn show_timestrip(&mut self, ui: &mut Ui) {
+            fn show_timestrip(&mut self, ui: &mut Ui, pixels_per_beat: f32) {
                 let rect = ui.available_rect_before_wrap();
 
                 const MEASURES: usize = 32;
                 const BEATS_PER_MEASURE: usize = 4;
-                const BEAT_WIDTH: f32 = 20.0;
-                let total_width = MEASURES as f32 * BEATS_PER_MEASURE as f32 * BEAT_WIDTH;
+                let total_width = MEASURES as f32 * BEATS_PER_MEASURE as f32 * pixels_per_beat;
 
                 let r = Rect::from_min_size(rect.min, vec2(total_width, rect.height()));
 
                 let p = ui.painter();
 
                 for measure in 0..MEASURES {
-                    let x = r.min.x + (measure * BEATS_PER_MEASURE) as f32 * BEAT_WIDTH;
+                    let x = r.min.x + (measure * BEATS_PER_MEASURE) as f32 * pixels_per_beat;
 
                     // Measure tick
                     p.vline(x, r.min.y..=r.max.y, Stroke::new(1.0, Color32::GRAY));
@@ -134,7 +133,7 @@ impl App {
 
                     // Beat ticks (shorter)
                     for beat in 1..BEATS_PER_MEASURE {
-                        let bx = x + beat as f32 * BEAT_WIDTH;
+                        let bx = x + beat as f32 * pixels_per_beat;
                         let tick_top = r.min.y + r.height() * 0.5;
                         p.vline(bx, tick_top..=r.max.y, Stroke::new(0.5, Color32::DARK_GRAY));
                     }
