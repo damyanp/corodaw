@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use clack_host::{bundle::PluginBundle, plugin::PluginDescriptor as ClackPluginDescriptor};
+use clack_host::{entry::PluginEntry, plugin::PluginDescriptor as ClackPluginDescriptor};
 use serde::{Deserialize, Serialize};
 use walkdir::{DirEntry, WalkDir};
 
@@ -40,9 +40,9 @@ impl PluginDescriptor {
         }
     }
 
-    pub fn load_bundle(&self) -> PluginBundle {
+    pub fn load_bundle(&self) -> PluginEntry {
         println!("Loading bundle from {}", self.path.display());
-        unsafe { PluginBundle::load(&self.path) }
+        unsafe { PluginEntry::load(&self.path) }
             .expect("Currently no error handling around loading bundles!")
     }
 }
@@ -96,7 +96,7 @@ pub fn find_plugins() -> Vec<PluginDescriptor> {
         .collect()
 }
 
-fn find_bundles() -> Vec<(PathBuf, PluginBundle)> {
+fn find_bundles() -> Vec<(PathBuf, PluginEntry)> {
     standard_clap_paths()
         .iter()
         .flat_map(|path| {
@@ -106,7 +106,7 @@ fn find_bundles() -> Vec<(PathBuf, PluginBundle)> {
                 .filter_map(|e| e.ok())
                 .filter(is_clap_bundle)
                 .filter_map(|bundle_dir_entry| {
-                    unsafe { PluginBundle::load(bundle_dir_entry.path()) }
+                    unsafe { PluginEntry::load(bundle_dir_entry.path()) }
                         .ok()
                         .map(|bundle| (bundle_dir_entry.into_path(), bundle))
                 })
@@ -114,7 +114,7 @@ fn find_bundles() -> Vec<(PathBuf, PluginBundle)> {
         .collect()
 }
 
-fn get_plugins_in_bundle(path: &Path, bundle: &PluginBundle) -> Vec<PluginDescriptor> {
+fn get_plugins_in_bundle(path: &Path, bundle: &PluginEntry) -> Vec<PluginDescriptor> {
     bundle
         .get_plugin_factory()
         .map(|factory| {
