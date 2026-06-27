@@ -9,6 +9,6 @@ bevy_app.workspace = true
 bevy_ecs.workspace = true
 bevy_reflect.workspace = true
 fixedbitset = "0.5.7"
-itertools = "0.14.0"
+itertools = "0.15.0"
 thiserror.workspace = true
 wmidi.workspace = true
