@@ -64,13 +64,14 @@ fn swap_buffers_system(mut state_reader: NonSendMut<GraphStateReader>) {
 #[derive(Resource, Default)]
 struct InspectorEnabled(bool);
 
-fn menu_bar_system(
+fn ui_system(
     mut contexts: EguiContexts,
     async_task_runner: NonSend<AsyncTaskRunner>,
     mut commands: Commands,
     command_manager: NonSendMut<EditHistory>,
     mut app_exit: MessageWriter<AppExit>,
     mut inspector_enabled: ResMut<InspectorEnabled>,
+    data: arranger::ArrangerData,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     ctx.request_repaint();
@@ -87,7 +88,16 @@ fn menu_bar_system(
         }
     }
 
-    egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+    // egui 0.34 deprecated Panel::show(ctx); panels now nest inside a root Ui.
+    let mut root = egui::Ui::new(
+        ctx.clone(),
+        "viewport".into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    );
+
+    egui::Panel::top("menu").show_inside(&mut root, |ui| {
         if async_task_runner.is_active() {
             ui.disable();
         }
@@ -98,6 +108,13 @@ fn menu_bar_system(
             &mut app_exit,
             &mut inspector_enabled,
         );
+    });
+
+    egui::CentralPanel::default().show_inside(&mut root, |ui| {
+        if async_task_runner.is_active() {
+            ui.disable();
+        }
+        arranger_ui(data, ui);
     });
 
     Ok(())
@@ -149,23 +166,6 @@ fn menu_bar_ui(
             }
         });
     });
-}
-
-fn arranger_panel_system(
-    mut contexts: EguiContexts,
-    async_task_runner: NonSend<AsyncTaskRunner>,
-    data: arranger::ArrangerData,
-) -> Result {
-    let ctx = contexts.ctx_mut()?;
-
-    egui::CentralPanel::default().show(ctx, |ui| {
-        if async_task_runner.is_active() {
-            ui.disable();
-        }
-        arranger_ui(data, ui);
-    });
-
-    Ok(())
 }
 
 fn world_inspector_system(world: &mut World) {
@@ -308,7 +308,7 @@ fn main() {
     app.add_systems(First, update_executor_system);
     app.add_systems(
         EguiPrimaryContextPass,
-        (menu_bar_system, swap_buffers_system, arranger_panel_system).chain(),
+        (swap_buffers_system, ui_system).chain(),
     );
     app.add_systems(EguiPrimaryContextPass, world_inspector_system);
     app.add_systems(PostUpdate, set_titlebar_system);
