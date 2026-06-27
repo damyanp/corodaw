@@ -41,6 +41,16 @@ pub struct ArrangerData<'w, 's> {
     command_manager: NonSendMut<'w, EditHistory>,
 }
 
+impl ArrangerData<'_, '_> {
+    pub fn can_undo(&self) -> bool {
+        self.command_manager.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.command_manager.can_redo()
+    }
+}
+
 impl ArrangerDataProvider for ArrangerData<'_, '_> {
     fn num_channels(&self) -> usize {
         self.channel_order.as_ref().channel_order.len()

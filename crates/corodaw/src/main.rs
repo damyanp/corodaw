@@ -14,8 +14,8 @@ use engine::{
 };
 use project::{
     AvailablePlugin, ChannelGain, ChannelMixerState, ChannelOrder, ChannelPlugin,
-    ChannelPluginBinding, EditHistory, EditHistoryPlugin, LoadEvent, ProjectInfo, ProjectPlugin,
-    SaveEvent, StableId, UndoRedoEvent, add_available_plugins,
+    ChannelPluginBinding, EditHistoryPlugin, LoadEvent, ProjectInfo, ProjectPlugin, SaveEvent,
+    StableId, UndoRedoEvent, add_available_plugins,
 };
 use smol::{LocalExecutor, Task, future};
 
@@ -68,7 +68,6 @@ fn ui_system(
     mut contexts: EguiContexts,
     async_task_runner: NonSend<AsyncTaskRunner>,
     mut commands: Commands,
-    command_manager: NonSendMut<EditHistory>,
     mut app_exit: MessageWriter<AppExit>,
     mut inspector_enabled: ResMut<InspectorEnabled>,
     data: arranger::ArrangerData,
@@ -76,14 +75,19 @@ fn ui_system(
     let ctx = contexts.ctx_mut()?;
     ctx.request_repaint();
 
+    // EditHistory lives inside ArrangerData, so read undo/redo state from it
+    // rather than borrowing it a second time (which would conflict).
+    let can_undo = data.can_undo();
+    let can_redo = data.can_redo();
+
     let undo_shortcut = KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Z);
     let redo_shortcut = KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Y);
 
     if !async_task_runner.is_active() {
-        if command_manager.can_undo() && ctx.input_mut(|i| i.consume_shortcut(&undo_shortcut)) {
+        if can_undo && ctx.input_mut(|i| i.consume_shortcut(&undo_shortcut)) {
             commands.trigger(UndoRedoEvent::Undo);
         }
-        if command_manager.can_redo() && ctx.input_mut(|i| i.consume_shortcut(&redo_shortcut)) {
+        if can_redo && ctx.input_mut(|i| i.consume_shortcut(&redo_shortcut)) {
             commands.trigger(UndoRedoEvent::Redo);
         }
     }
@@ -104,7 +108,8 @@ fn ui_system(
         menu_bar_ui(
             ui,
             &mut commands,
-            &command_manager,
+            can_undo,
+            can_redo,
             &mut app_exit,
             &mut inspector_enabled,
         );
@@ -123,7 +128,8 @@ fn ui_system(
 fn menu_bar_ui(
     ui: &mut Ui,
     commands: &mut Commands,
-    command_manager: &EditHistory,
+    can_undo: bool,
+    can_redo: bool,
     app_exit: &mut MessageWriter<AppExit>,
     inspector_enabled: &mut InspectorEnabled,
 ) {
@@ -142,19 +148,13 @@ fn menu_bar_ui(
         });
         ui.menu_button("Edit", |ui| {
             if ui
-                .add_enabled(
-                    command_manager.can_undo(),
-                    Button::new("Undo").shortcut_text("Ctrl+Z"),
-                )
+                .add_enabled(can_undo, Button::new("Undo").shortcut_text("Ctrl+Z"))
                 .clicked()
             {
                 commands.trigger(UndoRedoEvent::Undo);
             }
             if ui
-                .add_enabled(
-                    command_manager.can_redo(),
-                    Button::new("Redo").shortcut_text("Ctrl+Y"),
-                )
+                .add_enabled(can_redo, Button::new("Redo").shortcut_text("Ctrl+Y"))
                 .clicked()
             {
                 commands.trigger(UndoRedoEvent::Redo);
