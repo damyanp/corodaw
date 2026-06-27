@@ -3,7 +3,7 @@ use audio_graph::{
 };
 use bevy::prelude::*;
 use bevy_app::AppExit;
-use bevy_ecs::{message::MessageWriter, system::command, world::CommandQueue};
+use bevy_ecs::{message::MessageWriter, world::CommandQueue};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use bevy_inspector_egui::bevy_inspector;
 use egui::{Button, KeyboardShortcut, MenuBar, Modifiers, Ui};
@@ -41,7 +41,7 @@ impl AsyncTaskRunner {
 }
 
 fn update_executor_system(world: &mut World) {
-    let mut async_task_runner = world.non_send_resource_mut::<AsyncTaskRunner>();
+    let mut async_task_runner = world.non_send_mut::<AsyncTaskRunner>();
     while async_task_runner.executor.try_tick() {}
 
     if let Some(task) = &mut async_task_runner.current_task
@@ -218,7 +218,9 @@ fn on_file_action(command: On<FileAction>, mut async_task_runner: NonSendMut<Asy
                     .await;
 
                 if let Some(file) = file {
-                    command_queue.push(command::trigger(LoadEvent::new(file)));
+                    command_queue.push(move |world: &mut World| {
+                        world.trigger(LoadEvent::new(file));
+                    });
                 }
             }
             FileAction::Save => {
@@ -228,7 +230,9 @@ fn on_file_action(command: On<FileAction>, mut async_task_runner: NonSendMut<Asy
                     .await;
 
                 if let Some(file) = file {
-                    command_queue.push(command::trigger(SaveEvent::new(file)));
+                    command_queue.push(move |world: &mut World| {
+                        world.trigger(SaveEvent::new(file));
+                    });
                 }
             }
         }
@@ -258,7 +262,7 @@ fn main() {
 
     app.add_plugins((GraphPlugin, ProjectPlugin::new()));
 
-    let audio_graph_worker = app.world_mut().remove_non_send_resource().unwrap();
+    let audio_graph_worker = app.world_mut().remove_non_send().unwrap();
     let audio = AudioOutput::new(audio_graph_worker).unwrap();
 
     let midi_input = MidiInputOwner::new(app.world_mut());
@@ -267,10 +271,10 @@ fn main() {
         .entity_mut(summer.entity)
         .insert(GraphOutputNode);
 
-    app.insert_non_send_resource(ClapManager::default())
-        .insert_non_send_resource(midi_input)
-        .insert_non_send_resource(summer)
-        .insert_non_send_resource(audio)
+    app.insert_non_send(ClapManager::default())
+        .insert_non_send(midi_input)
+        .insert_non_send(summer)
+        .insert_non_send(audio)
         .add_plugins((ChannelPlugin::new(), EditHistoryPlugin));
 
     // Register types for bevy-inspector-egui
@@ -308,7 +312,7 @@ fn main() {
     );
     app.add_systems(EguiPrimaryContextPass, world_inspector_system);
     app.add_systems(PostUpdate, set_titlebar_system);
-    app.insert_non_send_resource(AsyncTaskRunner::default());
+    app.insert_non_send(AsyncTaskRunner::default());
     app.add_observer(on_file_action);
 
     app.run();

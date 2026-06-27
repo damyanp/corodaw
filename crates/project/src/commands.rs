@@ -63,12 +63,12 @@ impl Plugin for EditHistoryPlugin {
 fn on_undo_redo_event(command: On<UndoRedoEvent>, mut commands: Commands) {
     let command = *command;
     commands.queue(move |world: &mut World| {
-        let mut edit_history: EditHistory = world.remove_non_send_resource().unwrap();
+        let mut edit_history: EditHistory = world.remove_non_send().unwrap();
         match command {
             UndoRedoEvent::Undo => edit_history.undo(world),
             UndoRedoEvent::Redo => edit_history.redo(world),
         }
-        world.insert_non_send_resource(edit_history);
+        world.insert_non_send(edit_history);
     });
 }
 

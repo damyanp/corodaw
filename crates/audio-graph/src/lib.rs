@@ -22,9 +22,9 @@ impl Plugin for GraphPlugin {
         let (state_reader, state_writer) = graph_state_tracker();
 
         let (audio_graph, audio_graph_worker) = GraphController::new(state_writer);
-        app.insert_non_send_resource(audio_graph)
-            .insert_non_send_resource(audio_graph_worker)
-            .insert_non_send_resource(state_reader)
+        app.insert_non_send(audio_graph)
+            .insert_non_send(audio_graph_worker)
+            .insert_non_send(state_reader)
             .add_systems(
                 Update,
                 (audio_graph::pre_update_system, audio_graph::update_system),

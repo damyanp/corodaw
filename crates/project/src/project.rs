@@ -67,7 +67,7 @@ impl<T: PluginManager + 'static> Plugin for ProjectPlugin<T> {
         app.world_mut()
             .spawn((ProjectInfo::default(), ChannelOrder::default()));
 
-        app.insert_non_send_resource(EditHistory::default());
+        app.insert_non_send(EditHistory::default());
 
         app.world_mut()
             .run_system_once(
@@ -168,7 +168,7 @@ fn on_load_event(
     ));
 
     commands.queue(|world: &mut World| {
-        world.non_send_resource_mut::<EditHistory>().clear();
+        world.non_send_mut::<EditHistory>().clear();
     });
 }
 

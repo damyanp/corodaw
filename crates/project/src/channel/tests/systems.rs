@@ -99,9 +99,9 @@ fn setup_test_app() -> App {
 
     let summer = SummerOwner::new(app.world_mut(), 2);
     let midi_input = MidiInputOwner::new(app.world_mut());
-    app.insert_non_send_resource(summer);
-    app.insert_non_send_resource(midi_input);
-    app.insert_non_send_resource(MockPluginManager::new());
+    app.insert_non_send(summer);
+    app.insert_non_send(midi_input);
+    app.insert_non_send(MockPluginManager::new());
 
     app.add_systems(
         Update,
@@ -233,7 +233,7 @@ fn replace_plugin_despawns_old_node() {
 
     // New plugin node should be connected to gain, gain to SummerOwner
     let gain_entity = app.world().get::<ChannelGain>(entity).unwrap().0.entity;
-    let summer_entity = app.world().non_send_resource::<SummerOwner>().entity;
+    let summer_entity = app.world().non_send::<SummerOwner>().entity;
 
     let gain_node = app.world().get::<GraphNodeDesc>(gain_entity).unwrap();
     assert!(
@@ -348,7 +348,7 @@ fn undo_redo_plugin_set_reconnects_fresh() {
 
     // The new node should be properly wired
     let gain_entity = app.world().get::<ChannelGain>(entity).unwrap().0.entity;
-    let summer_entity = app.world().non_send_resource::<SummerOwner>().entity;
+    let summer_entity = app.world().non_send::<SummerOwner>().entity;
 
     let gain_node = app.world().get::<GraphNodeDesc>(gain_entity).unwrap();
     assert!(
@@ -385,7 +385,7 @@ fn set_plugin_wires_audio_graph() {
 
     let input_node_entity = world.get::<ChannelSourceNode>(entity).unwrap().0;
     let gain_entity = world.get::<ChannelGain>(entity).unwrap().0.entity;
-    let summer_entity = world.non_send_resource::<SummerOwner>().entity;
+    let summer_entity = world.non_send::<SummerOwner>().entity;
 
     // Gain control should be connected to plugin node (2 stereo ports)
     let gain_node = world.get::<GraphNodeDesc>(gain_entity).unwrap();

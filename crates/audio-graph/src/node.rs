@@ -129,9 +129,7 @@ pub fn graph_set_processor(
     // It's hard to put dyn GraphProcessor's into components (they don't naturally
     // want to be sync), so this is working around that.
 
-    let audio_graph = world_mut
-        .get_non_send_resource_mut::<GraphController>()
-        .unwrap();
+    let audio_graph = world_mut.get_non_send_mut::<GraphController>().unwrap();
     audio_graph.set_processor(entity, processor);
 }
 

@@ -111,16 +111,16 @@ impl ArrangerWidget {
             pos2(strips_rect.min.x, timestrip_rect.min.y),
             strips_rect.max,
         );
-        let (ctrl_scrolling, zoom_mouse_x) = ui.ctx().input(|i| {
+        let (ctrl_scrolling, zoom_factor, zoom_mouse_x) = ui.ctx().input(|i| {
             let hovering = i.pointer.hover_pos().filter(|p| zoom_rect.contains(*p));
-            let is_zooming = i.modifiers.ctrl && i.raw_scroll_delta.y != 0.0 && hovering.is_some();
-            (is_zooming, hovering.map(|p| p.x))
+            // egui folds ctrl+wheel into zoom_delta (1.0 == no change).
+            let zoom = i.zoom_delta();
+            let is_zooming = zoom != 1.0 && hovering.is_some();
+            (is_zooming, zoom, hovering.map(|p| p.x))
         });
         let old_pixels_per_beat = pixels_per_beat;
         if ctrl_scrolling {
-            let scroll_delta = ui.ctx().input(|i| i.raw_scroll_delta.y);
-            let factor = (scroll_delta / 120.0).exp2();
-            pixels_per_beat = (pixels_per_beat * factor)
+            pixels_per_beat = (pixels_per_beat * zoom_factor)
                 .clamp(State::MIN_PIXELS_PER_BEAT, State::MAX_PIXELS_PER_BEAT);
         }
 

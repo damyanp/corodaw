@@ -91,7 +91,7 @@ pub(crate) fn update_system(
     for (entity, node, name) in &mut changed_nodes {
         if node.is_changed() {
             println!("{:?} ({:?}) is changed", entity, name);
-            changed.push((entity, node.clone()));
+            changed.push((entity, (*node).clone()));
         }
     }
 

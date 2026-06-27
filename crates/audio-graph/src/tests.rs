@@ -104,7 +104,7 @@ fn single_node_process() {
 
     let mut data = [0.0, 0.0];
 
-    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send_resource().unwrap();
+    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send().unwrap();
     audio_graph_worker.configure(2, 1);
     audio_graph_worker.tick(&mut data, Duration::default());
 
@@ -137,7 +137,7 @@ fn reachable_nodes() {
 
     app.update();
 
-    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send_resource().unwrap();
+    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send().unwrap();
     audio_graph_worker.configure(2, 1);
     let mut data = [0.0, 0.0];
     audio_graph_worker.tick(&mut data, Duration::default());
@@ -199,7 +199,7 @@ fn multiple_node_process_order() {
     let _ = node::graph_connect_audio(w, a, GraphConnection::new(1, c, 0));
 
     app.update();
-    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send_resource().unwrap();
+    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send().unwrap();
     audio_graph_worker.configure(2, 1);
     let mut data = [0.0, 0.0];
     audio_graph_worker.tick(&mut data, Duration::default());
@@ -244,7 +244,7 @@ fn always_run_nodes() {
     let _ = graph_connect_audio(w, b, GraphConnection::new(0, c, 0));
 
     app.update();
-    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send_resource().unwrap();
+    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send().unwrap();
     audio_graph_worker.configure(2, 1);
     let mut data = [0.0, 0.0];
     audio_graph_worker.tick(&mut data, Duration::default());
@@ -297,7 +297,7 @@ fn node_processing() {
 
     app.update();
 
-    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send_resource().unwrap();
+    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send().unwrap();
     audio_graph_worker.configure(2, 1);
     let mut data = [0.0, 0.0];
     audio_graph_worker.tick(&mut data, Duration::default());
@@ -320,7 +320,7 @@ fn mono_node_stereo_output() {
 
     app.update();
 
-    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send_resource().unwrap();
+    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send().unwrap();
     audio_graph_worker.configure(2, 1);
     let mut data = [0.0, 0.0];
     audio_graph_worker.tick(&mut data, Duration::default());
@@ -410,7 +410,7 @@ fn events_output_to_single_input() {
 
     app.update();
 
-    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send_resource().unwrap();
+    let mut audio_graph_worker: GraphWorker = app.world_mut().remove_non_send().unwrap();
     audio_graph_worker.configure(2, 1);
     let mut data = [0.0, 0.0];
     audio_graph_worker.tick(&mut data, Duration::default());
