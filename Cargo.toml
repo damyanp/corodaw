@@ -54,7 +54,7 @@ cpal = { version = "0.17.0", features = ["asio"] }
 derivative = "2.2.0"
 eframe = { version = "0.34" }
 egui = { version = "0.34", features = ["callstack"] }
-egui_extras = "0.34"
+egui_extras = "0.35"
 futures = "0.3.31"
 futures-channel = "0.3.31"
 raw-window-handle = "0.6.2"
